@@ -893,7 +893,14 @@ impl State {
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
             E::ForumUnreads(unreads) => self.forum_unreads(&unreads),
             E::Resumed => self.forget_unanswered_forum_unreads(),
-            E::Other(_) => {}
+            E::MessageReactionAdd(_)
+            | E::MessageReactionRemove(_)
+            | E::MessageReactionRemoveAll(_)
+            | E::MessageReactionRemoveEmoji(_)
+            | E::MessageReactionAddMany(_)
+            | E::ChannelPinsUpdate(_)
+            | E::ChannelPinsAck(_)
+            | E::Other(_) => {}
         }
     }
 

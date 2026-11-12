@@ -16,6 +16,7 @@ read elsewhere and acknowledges what the user reads in it
 | READY `read_state` | `Versioned<ReadStateEntry>` | Per channel the last acknowledged message, the mention count and the flags; whole, since Identify names no version ([ready.md](ready.md#fields-akari-reads)) |
 | READY `relationships` | `Vec<Relationship>` | Blocked users (type 2) and ignored ones (`user_ignored`), whose messages never count |
 | MESSAGE_ACK | `MessageAck` | The user read a channel, in this session or another |
+| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | A channel's newest pin's time, and the pin time the user acknowledged ([dispatches.md](dispatches.md#pins)) |
 | CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Newer messages in guilds the session isn't subscribed to ([dispatches.md](dispatches.md#large-guilds)) |
 | RELATIONSHIP_ADD, _UPDATE, _REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Changes to who is blocked or ignored |
 
