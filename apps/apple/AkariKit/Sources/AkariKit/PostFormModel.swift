@@ -36,6 +36,10 @@ public final class PostFormModel {
                 title = cleaned
             }
             drafts.posts[forumId, default: .init()].title = title
+            // As the official client: emptied with no message begun, it's a search's field again.
+            if typedTitle.isEmpty, !hasMessage || typedMessage == template {
+                begun = false
+            }
             // AutoMod's stays until the next try, as in the official client.
             if titleError == Self.titleRequired {
                 titleError = nil
@@ -76,6 +80,11 @@ public final class PostFormModel {
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let drafts: Drafts
     @ObservationIgnored private var guildId: GuildId?
+    // Discord's hasClickedForm: the form was opened since the title was last empty. Until then
+    // the title is only what the search field holds.
+    private var begun: Bool {
+        didSet { drafts.posts[forumId, default: .init()].begun = begun }
+    }
     @ObservationIgnored private var template = ""
     @ObservationIgnored private var cooldownEnd: Task<Void, Never>?
 
@@ -91,6 +100,7 @@ public final class PostFormModel {
         let draft = drafts.posts[forumId]
         title = draft?.title ?? ""
         tags = draft?.tags ?? []
+        begun = draft?.begun ?? false
         message = draft?.message ?? template
         length = Self.length(of: draft?.message ?? template)
         lengthLimit = Int(store.messageLengthLimit())
@@ -99,6 +109,9 @@ public final class PostFormModel {
         awaitCooldownEnd()
         // As the official client: a message begun earlier opens the form with the page.
         isOpen = canCreate && hasMessage && typedMessage != template
+        if isOpen {
+            begun = true
+        }
     }
 
     /// Whether "New Post" does anything: the user may post and Akari can make the post.
@@ -107,9 +120,9 @@ public final class PostFormModel {
     }
 
     /// Something typed or chosen that a closed form still holds: the row then shows the pencil
-    /// and a click reopens the form.
+    /// and a click reopens the form. What a search typed is none.
     public var hasDraft: Bool {
-        !typedTitle.isEmpty || !tags.isEmpty || (hasMessage && typedMessage != template)
+        begun && (!typedTitle.isEmpty || !tags.isEmpty || (hasMessage && typedMessage != template))
     }
 
     /// REQUIRE_TAG with nothing chosen, once there is a title and a message to post.
@@ -148,15 +161,12 @@ public final class PostFormModel {
         drafts.posts[forumId, default: .init()].tags = tags
     }
 
-    /// "New Post" and its kin. `title` is what the search field held, taken when the form has
-    /// no title of its own.
-    func open(title typed: String = "") {
+    /// "New Post" and its kin: the title is what the field holds.
+    func open() {
         guard canCreate else {
             return
         }
-        if typedTitle.isEmpty, !typed.isEmpty {
-            title = typed
-        }
+        begun = true
         isOpen = true
     }
 
@@ -257,6 +267,7 @@ public final class PostFormModel {
 
     private func reset() {
         isOpen = false
+        begun = false
         title = ""
         tags = []
         message = template
@@ -358,4 +369,5 @@ struct PostFormDraft: Equatable {
     var title = ""
     var tags: [TagId] = []
     var message: String?
+    var begun = false
 }

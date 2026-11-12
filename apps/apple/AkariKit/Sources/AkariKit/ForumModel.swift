@@ -288,10 +288,33 @@ public final class ForumModel {
         }
     }
 
+    /// What's typed into the header's field, which shows `form.title`: the new post's title, open
+    /// or closed as in the official client, and the search too while the form is closed.
+    public func type(_ text: String) {
+        form.title = text
+        if !form.isOpen {
+            setQuery(form.title)
+        }
+    }
+
+    /// The status row's "Clear": the search ends and the field is empty.
+    public func clearField() {
+        form.title = ""
+        setQuery("")
+    }
+
+    /// Escape in the closed row: the search ends, and its text goes unless it's a draft's title.
+    public func leaveSearch() {
+        if !form.hasDraft {
+            form.title = ""
+        }
+        setQuery("")
+    }
+
     /// "New Post", Shift+Enter in the field and "Create a post": the row becomes the form, with
-    /// what the field held as its title, and the search ends.
+    /// what the field holds as its title, and the search ends.
     public func openForm() {
-        form.open(title: query)
+        form.open()
         if form.isOpen {
             clearSearch()
         }

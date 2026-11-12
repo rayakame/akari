@@ -57,7 +57,6 @@ struct ForumHeaderRow: View {
         .onChange(of: query) { _, text in
             typed(text)
         }
-        .onChange(of: forum.query) { _, _ in follow() }
         .onChange(of: form.title) { _, _ in follow() }
         .onChange(of: form.isOpen) { _, open in
             follow()
@@ -88,20 +87,14 @@ struct ForumHeaderRow: View {
         }
     }
 
-    // The field is the search's while the form is closed and the title's while it's open.
     private func typed(_ text: String) {
-        if form.isOpen {
-            form.title = text
-        } else {
-            forum.setQuery(text)
-        }
+        forum.type(text)
         follow()
     }
 
     private func follow() {
-        let shown = form.isOpen ? form.title : forum.query
-        if shown != query {
-            query = shown
+        if form.title != query {
+            query = form.title
         }
     }
 
@@ -242,8 +235,7 @@ struct ForumHeaderRow: View {
             Spacer(minLength: 0)
             if forum.search == .found {
                 Button("Clear") {
-                    query = ""
-                    forum.clearSearch()
+                    forum.clearField()
                 }
                 .buttonStyle(.plain)
                 .font(TypeScale.forumStatusAction.font)
@@ -262,7 +254,7 @@ struct ForumHeaderRow: View {
         } else if form.isOpen {
             form.close()
         } else {
-            query = ""
+            forum.leaveSearch()
         }
     }
 }

@@ -78,7 +78,9 @@ final class PostFormTests {
     func newPostOpensTheFormWithWhatTheFieldHeld() throws {
         let session = inForum()
         let page = try #require(session.forum)
-        page.setQuery("dark mode")
+        page.type("dark mode")
+        #expect(page.query == "dark mode")
+        #expect(!page.form.hasDraft, "a search is no draft")
 
         page.openForm()
 
@@ -134,6 +136,135 @@ final class PostFormTests {
         #expect(form.message == "Some text")
         #expect(form.tags == [bug])
         session.close()
+    }
+
+    // As the official client: the field is the title's, open or closed, so what's typed into
+    // the closed row of a draft is the draft's title.
+    @Test
+    func textTypedOverAClosedDraftIsItsTitle() async throws {
+        account.createReply.withLock { $0 = .success(newPost()) }
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.openForm()
+        page.type("Old title")
+        page.form.message = "Some text"
+        page.form.close()
+        #expect(page.form.title == "Old title", "the closed row shows it")
+        #expect(page.query.isEmpty)
+
+        page.type("New title")
+
+        #expect(page.form.title == "New title")
+        #expect(page.query == "New title", "and searches, the form being closed")
+        #expect(page.form.hasDraft)
+
+        page.openForm()
+
+        #expect(page.form.isOpen)
+        #expect(page.form.title == "New title")
+        #expect(page.form.message == "Some text")
+        #expect(page.query.isEmpty)
+
+        await session.submitPost()
+
+        #expect(creates == [.createPost(forumId, "New title", [], "Some text")])
+        session.close()
+    }
+
+    @Test
+    func typingInTheOpenFormSearchesNothing() throws {
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.openForm()
+
+        page.type("A title")
+
+        #expect(page.form.title == "A title")
+        #expect(page.query.isEmpty)
+        session.close()
+    }
+
+    // Discord's hasClickedForm: a title alone is a draft only after the form was opened, until
+    // the title is emptied with no message begun.
+    @Test
+    func anEmptiedTitleEndsATitleOnlyDraft() throws {
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.openForm()
+        page.type("A title")
+        page.form.close()
+        #expect(page.form.hasDraft)
+
+        page.type("")
+        page.type("dark mode")
+
+        #expect(!page.form.hasDraft, "a search again")
+        session.close()
+    }
+
+    @Test
+    func clearingTheSearchKeepsNoTitle() throws {
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.type("dark mode")
+
+        page.clearField()
+
+        #expect(page.form.title.isEmpty)
+        #expect(page.query.isEmpty)
+        #expect(page.search == .none)
+        session.close()
+    }
+
+    // Escape in the closed row ends the search; a draft's title stays.
+    @Test
+    func leavingTheSearchKeepsADraftsTitle() throws {
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.openForm()
+        page.type("A title")
+        page.form.close()
+        page.type("A title 2")
+
+        page.leaveSearch()
+
+        #expect(page.form.title == "A title 2")
+        #expect(page.query.isEmpty)
+
+        page.form.discard()
+        page.type("dark mode")
+        page.leaveSearch()
+
+        #expect(page.form.title.isEmpty, "a search's text goes with it")
+        #expect(page.query.isEmpty)
+        session.close()
+    }
+
+    @Test
+    func aClosedDraftOutlastsAReconnect() throws {
+        let drafts = Drafts()
+        func connected() -> SessionModel {
+            let session = SessionModel(
+                userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults()),
+                drafts: drafts
+            ) { _ in }
+            session.start()
+            session.open(.guild(id(1)))
+            session.open(channel: forumId)
+            return session
+        }
+        let first = connected()
+        first.forum?.openForm()
+        first.forum?.type("A title")
+        first.forum?.form.close()
+        first.close()
+
+        let second = connected()
+
+        #expect(try form(second).title == "A title")
+        #expect(try form(second).hasDraft)
+        #expect(try !form(second).isOpen)
+        second.close()
     }
 
     @Test

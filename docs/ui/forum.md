@@ -233,10 +233,11 @@ with its own beginning and a bar under its first message *(code read)*:
   reply, which starts a group. Without replies, for everyone who may send in the post, unless
   it's locked for them or they started it: a box (`background-mod-normal`, radius 12, 16 around,
   at most 448 wide, 12 inside) with "Start the conversation!" (16 semibold) and "Be the first
-  to share what you think!" (14).
+  to share what you think!" (14). The box is a speech bubble: under its bottom edge a tail
+  points down, 20 wide and 10 high, starting 100 from the box's left, in the box's color.
 - *Akari: the bar scrolls with the list; Discord's sticks to the list's top and then shows
   "Jump to Top" (backlog). No reactions in the bar yet ("React to Post", the default reaction).
-  A symbol stands where Discord's box has its animation, and the box has no tail.*
+  A symbol stands where Discord's box has its animation.*
 - Reading: the post beside the forum is read as a split thread is, the forum at "now" as before.
   *Akari never moves the forum's ack back to its newest post after a post was read, which
   Discord's code does about 3 s later (not observed on the wire).*
@@ -247,8 +248,15 @@ Read from the client's code *(code read; the request wasn't observed)*.
 
 - **Who**: Send Messages on the forum (Create Public Threads plays no part), and no timeout.
 - **Opening the form**: "New Post"; Shift+Enter in the field; the empty state's "Create a
-  post"; a click on the row while a closed form holds a draft. What the search field held
-  becomes the title when the form has none, and the search ends.
+  post"; a click on the row while a closed form holds a draft. The search ends.
+- **One field**: the header's field is the title's, with the form open or closed
+  (`value: name`; every change is saved as the draft's name). While the form is closed, what's
+  typed is searched for as well. So "New Post" opens the form with what the field holds, and a
+  closed draft's title stands in the row: text typed there changes that title, it neither
+  starts a second draft nor gives way to an older one. A title alone counts as a draft (the
+  pencil, the click that reopens) only once the form was opened, until the title is emptied
+  with no message begun (`hasClickedForm`); before that it's a search's text. The status row's
+  "Clear" ends the search and empties the field.
 - **The form**, in the header row's card:
   - a × ("Clear") in the magnifying glass's place: drops the title, tags and message and closes;
   - the title ("Title"; 100 characters, line breaks become spaces); Enter in a title goes on to
@@ -265,7 +273,7 @@ Read from the client's code *(code read; the request wasn't observed)*.
     cooldown, and with a tag where the forum requires one; else "A tag is required to create a
     post in this channel" stands under the controls.
 - **Escape** in the title or the message closes the form and keeps what was typed: the row
-  shows a pencil, and a click on it opens the form again. The form stays the forum's for the
+  shows the title and a pencil, and a click on it opens the form again. The form stays the forum's for the
   session, open or closed as it was left, with everything typed; a post being made stays "Post"
   with its spinner when the user leaves the forum and comes back, and opens beside the forum
   if the forum is open when Discord answers.
@@ -282,7 +290,9 @@ Read from the client's code *(code read; the request wasn't observed)*.
 - *Akari: the tags wrap onto more rows where Discord has "See more tags" and its tag search; no
   Preview mode, no emoji and sticker buttons and no "Add Media" (uploads come with message
   features); drafts don't outlive the session (Discord's do); the guidelines don't open by
-  themselves with the form. An unconfirmed create says "Post may exist" (Akari's words).*
+  themselves with the form. An unconfirmed create says "Post may exist" (Akari's words).
+  Escape in the closed row empties a search's field (Discord keeps the text and only ends the
+  search); a draft's title stays, as there. Chosen tags alone count as a draft too.*
 
 ## Media channels
 
