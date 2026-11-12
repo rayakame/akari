@@ -820,8 +820,8 @@ fn a_shown_starters_target_is_never_trimmed() {
             &mut Vec::new(),
         );
     };
-    let cases: [(&str, &dyn Fn(&mut State)); 2] =
-        [("sent along", &sent_along), ("fetched", &fetched)];
+    type Bring<'a> = &'a dyn Fn(&mut State);
+    let cases: [(&str, Bring); 2] = [("sent along", &sent_along), ("fetched", &fetched)];
 
     for (name, bring) in cases {
         let mut state = viewing(THREAD);
