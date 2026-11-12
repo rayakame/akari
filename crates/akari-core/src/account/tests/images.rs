@@ -615,6 +615,42 @@ async fn an_animation_is_asked_in_the_hosts_form() {
     );
 }
 
+// A media post's thumbnail isn't among the attachments a message shows, but its key is an
+// attachment's like any other.
+#[tokio::test]
+async fn a_thumbnail_attachment_is_found_by_its_key() {
+    let online = connected().await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        let mut tile = attachment_json(&online, fresh);
+        tile["flags"] = (1 << 1).into();
+        message["attachments"] = json!([tile]);
+    })
+    .await;
+    serve(&online.server, &attachment_path(), png(1024, 576)).await;
+    let store = online.account.store();
+    let message = store
+        .message(general(), Snowflake::new(MESSAGE))
+        .expect("the message");
+    assert!(store.shown_attachments(&message).is_empty());
+    let tile = store.shown_thumbnail(&message).expect("a thumbnail");
+    assert_eq!(message.attachments[tile.index].id.get(), ATTACHMENT);
+
+    let file = online
+        .account
+        .image(ImageRequest {
+            key: attachment_key(),
+            width: 800,
+            height: 450,
+            animated: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!((file.width, file.height), (1024, 576));
+    assert_eq!(online.requests_to(&attachment_path()).await.len(), 1);
+}
+
 #[tokio::test]
 async fn an_attachment_comes_from_the_proxy_at_the_boxs_size() {
     let online = connected().await;

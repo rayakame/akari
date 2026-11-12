@@ -49,7 +49,10 @@ impl Store {
             message,
             formatted,
             self.core.mentions_me(message),
-            self.core.shown_attachments(message),
+            (
+                self.core.shown_attachments(message),
+                self.core.shown_thumbnail(message),
+            ),
             self.core.spoilers_shown(message.channel_id),
             embeds::embeds(
                 message,

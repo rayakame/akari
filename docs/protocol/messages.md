@@ -319,6 +319,12 @@ What akari-core keeps of an attachment, and the requests behind its covers
   `placeholder` (a thumbhash, kept only with `placeholder_version` 1), `flags` (2 a media post's
   thumbnail, 8 a spoiler, 16 explicit, 32 animated, 64 gore, 128 self-harm) and
   `content_scan_version` (missing until Discord scanned it, 0 when it can't).
+- An attachment with the thumbnail flag is a media post's chosen tile (from the client's code,
+  module 256265; not observed): the official client shows it alone on the post's card in a
+  media channel and leaves it out of the message's own attachments. `Store::shown_attachments`
+  leaves it out too, and `Store::shown_thumbnail(message)` gives the first such attachment
+  that is an image or video with a size, with its cover by the rule for other media. Its image
+  is asked by its attachment key like any other.
 - READY's `explicit_content_scan_version` is the newest scan. Media counts as unscanned without
   a version, or, where gore is covered, with one below the smaller of READY's and 4 (the
   official client's `validContentScanVersion`).

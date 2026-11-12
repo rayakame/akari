@@ -1211,6 +1211,14 @@ impl Store {
         self.read(|inner| inner.state.shown_attachments(message, now))
     }
 
+    /// A media post's tile: the first message's attachment Discord marks as the thumbnail, when
+    /// it is an image or video with a size, covered as other media is. It is never among
+    /// [`Store::shown_attachments`]. Read again when those are.
+    pub fn shown_thumbnail(&self, message: &Message) -> Option<ShownAttachment> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.shown_thumbnail(message, now))
+    }
+
     /// How a message's embeds show, after Discord's merge, promotion and filters, each with its
     /// cover; `spoilered_link` says the content has a link inside a spoiler (the host's markdown
     /// knows), which covers them all. Read again with the message.

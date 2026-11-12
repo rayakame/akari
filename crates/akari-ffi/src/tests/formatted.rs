@@ -918,3 +918,43 @@ async fn titles_are_one_line_and_lists_follow_the_date() {
     );
     loaded.account.close();
 }
+
+// A media post's tile (H-11): the IS_THUMBNAIL attachment crosses on its own, never in the list.
+#[tokio::test]
+async fn a_thumbnail_crosses_apart_from_the_attachments() {
+    let mut post = page_message(400_000_000_000_000_014, "", json!([]));
+    post["attachments"] = json!([
+        attachment(610, "tile.png", Some((1280, 720)), (1 << 1) | (1 << 3)),
+        attachment(611, "one.png", Some((640, 480)), 0),
+        attachment(612, "two.png", Some((640, 480)), 0),
+    ]);
+    let mut plain = page_message(400_000_000_000_000_015, "", json!([]));
+    plain["attachments"] = json!([attachment(613, "one.png", Some((640, 480)), 0)]);
+    let loaded = loaded(vec![post, plain], |_| {}).await;
+    let message = |id: u64| {
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == MessageId::new(id))
+            .unwrap()
+    };
+
+    let post = message(400_000_000_000_000_014);
+    let listed: Vec<u64> = post.attachments.iter().map(|file| file.id.get()).collect();
+    assert_eq!(listed, [611, 612]);
+    let tile = post.thumbnail.as_ref().expect("a thumbnail");
+    assert_eq!(tile.id.get(), 610);
+    assert_eq!((tile.width, tile.height), (1280, 720));
+    assert_eq!(tile.display, AttachmentDisplay::Media);
+    assert_eq!(tile.cover, Some(MediaCover::Spoiler));
+    assert_eq!(
+        tile.key,
+        ImageKey::Attachment {
+            channel_id: GENERAL,
+            message_id: MessageId::new(400_000_000_000_000_014),
+            attachment_id: akari_core::model::AttachmentId::new(610),
+        }
+    );
+    assert_eq!(message(400_000_000_000_000_015).thumbnail, None);
+    loaded.account.close();
+}

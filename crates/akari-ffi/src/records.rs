@@ -617,6 +617,10 @@ pub struct Message {
     pub mention_everyone: bool,
     /// In the order they show: the mosaic's images and videos, then the files.
     pub attachments: Vec<Attachment>,
+    /// A media post's tile, on its first message: the attachment Discord marks as the
+    /// thumbnail, never among `attachments`.
+    #[uniffi(default = None)]
+    pub thumbnail: Option<Attachment>,
     /// The channel's spoilers show without a click (`render_spoilers`).
     #[uniffi(default = false)]
     pub spoilers_shown: bool,
@@ -732,7 +736,7 @@ impl Message {
         message: &state::Message,
         formatted: FormattedText,
         mentions_me: bool,
-        shown: Vec<state::ShownAttachment>,
+        (shown, thumbnail): (Vec<state::ShownAttachment>, Option<state::ShownAttachment>),
         spoilers_shown: bool,
         embeds: Vec<Embed>,
         hides_content: bool,
@@ -753,6 +757,7 @@ impl Message {
                 .into_iter()
                 .filter_map(|shown| Attachment::new(message, shown))
                 .collect(),
+            thumbnail: thumbnail.and_then(|shown| Attachment::new(message, shown)),
             spoilers_shown,
             embeds,
             hides_content,
