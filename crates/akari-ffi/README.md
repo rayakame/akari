@@ -215,7 +215,8 @@ reads a page's worth at once and returns only the messages that have some. They 
 `Message` record: `MessageReactionsChanged { channel_id, message_id }` says to read them again
 and nothing else of the message, so a click rebuilds a row's pills, not its text; a message
 that arrives whole again (`MessageUpdated`, a load) may bring other reactions, so read them
-with it. A viewed thread's starter row asks with the thread's ID and the row's
+with it. A viewed thread's starter row asks with the thread's ID and the row's and reads the
+reactions of the message it shows
 ([dispatches.md](../../docs/protocol/dispatches.md#reactions)).
 
 A reply's `Message.replied_to` (`RepliedTo`; also a context-menu command's result, `None` for
@@ -245,6 +246,16 @@ and `view_thread`, all false for a message the store doesn't have. The rules are
 ([message-actions.md](../../docs/ui/message-actions.md)); a host asks when its bar or menu
 opens and decides nothing itself. No event reports a change: the answer moves with the
 message, its channel, the user's roles and the end of a timeout.
+
+A thread's starter row is asked about with the thread's ID and the row's, for `reactions` and
+for `message_actions` alike, and both answer for the message the row shows once
+`starter_message(thread_id)` is `Loaded`: that message's type, flags and author, and the
+permissions of the parent channel it is in, whatever the thread's archived or locked state
+(`view_thread` is false there, the row being in that thread). Until then both answer for the
+row itself. Requests (a reaction, a reply, a pin, a delete) never take the row's IDs: they go
+to the shown message, the `channel_id` and `id` of `starter_message`'s message. akari-core
+resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross
+yet.
 
 ## Events
 

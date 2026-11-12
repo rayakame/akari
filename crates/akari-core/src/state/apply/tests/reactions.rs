@@ -658,7 +658,12 @@ fn a_reaction_is_replayed_only_over_the_loads_that_ran_when_it_came() {
         let general = Snowflake::new(GENERAL);
         let mut events = Vec::new();
         let around = state
-            .begin_load(general, LoadKind::Around(Snowflake::new(20)), 1, &mut events)
+            .begin_load(
+                general,
+                LoadKind::Around(Snowflake::new(20)),
+                1,
+                &mut events,
+            )
             .unwrap();
         let middle = page(&[message(10, GENERAL), message(20, GENERAL)]);
         state.finish_load(around, middle, false, &mut events);

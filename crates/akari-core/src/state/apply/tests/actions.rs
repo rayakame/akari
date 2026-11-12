@@ -986,3 +986,72 @@ fn a_shown_starter_message_is_found() {
     let actions = of(&state, GENERAL);
     assert!(actions.copy_link && actions.view_thread);
 }
+
+const ROW: u64 = 400_000_000_000_000_021;
+
+// THREAD's first row, pointing back at the message of GENERAL it started from.
+fn starter(origin: Option<Value>) -> Value {
+    let mut row = message(ROW, THREAD);
+    row["type"] = 21.into();
+    row["message_reference"] = json!({
+        "message_id": THREAD.to_string(), "channel_id": GENERAL.to_string(),
+    });
+    if let Some(origin) = origin {
+        row["referenced_message"] = origin;
+    }
+    row
+}
+
+fn of_row(state: &State) -> MessageActions {
+    state.message_actions(
+        Snowflake::new(THREAD),
+        Snowflake::new(ROW),
+        state.now_millis(),
+    )
+}
+
+// The official client renders the row as the original message; it lives in the parent, so the
+// thread's own state doesn't count.
+#[test]
+fn a_starter_row_answers_for_the_message_it_shows() {
+    let state = load(
+        owner(archived(true)),
+        THREAD,
+        &[starter(Some(message(THREAD, GENERAL)))],
+    );
+    let Some(crate::state::StarterMessage::Loaded(original)) =
+        state.starter_message(Snowflake::new(THREAD))
+    else {
+        panic!("expected the starter");
+    };
+    let in_parent = state.message_actions_of(&original, state.now_millis());
+    assert!(in_parent.reply && in_parent.react && in_parent.delete && in_parent.view_thread);
+
+    let actions = of_row(&state);
+
+    assert_eq!(
+        actions,
+        MessageActions {
+            view_thread: false,
+            ..in_parent
+        },
+        "the thread it would view is the one the row is in"
+    );
+    assert_eq!(
+        state.shown_message(Snowflake::new(THREAD), Snowflake::new(ROW)),
+        Some((Snowflake::new(GENERAL), Snowflake::new(THREAD)))
+    );
+}
+
+#[test]
+fn a_starter_row_without_its_message_answers_for_itself() {
+    let state = load(owner(plain), THREAD, &[starter(None)]);
+
+    let actions = of_row(&state);
+
+    assert!(!actions.reply && !actions.delete && !actions.edit);
+    assert!(actions.react && actions.copy_link);
+    let row = (Snowflake::new(THREAD), Snowflake::new(ROW));
+    assert_eq!(state.shown_message(row.0, row.1), Some(row));
+    assert_eq!(state.shown_message(row.0, Snowflake::new(M)), None);
+}

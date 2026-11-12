@@ -1330,10 +1330,23 @@ impl Store {
     /// type, flags and delivery, the user's permissions in its channel (a DM or group DM asks
     /// none, its system DM allows next to nothing), their timeout, and a thread's archived and
     /// locked state. Nothing for a message the store doesn't have. Read again when the message,
-    /// its channel or the user's permissions change.
+    /// its channel or the user's permissions change. A viewed thread's starter row (the
+    /// thread's ID and the row's) answers for the message it shows, in that message's channel:
+    /// requests take the IDs of [`Store::shown_message`].
     pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
         let now = self.now_millis();
         self.read(|inner| inner.state.message_actions(channel, message, now))
+    }
+
+    /// The channel and ID of the message the row `row` of `channel` shows, which requests for
+    /// it take: the row's own, but for a viewed thread's starter row whose message is loaded,
+    /// which shows that message of the parent channel. `None` for a row the store doesn't have.
+    pub fn shown_message(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+    ) -> Option<(ChannelId, MessageId)> {
+        self.read(|inner| inner.state.shown_message(channel, row))
     }
 
     /// [`Store::message_actions`] for a message the caller holds, which the store may have let

@@ -498,6 +498,18 @@ impl Windows {
         })
     }
 
+    // The message `thread`'s starter row `id` shows in its own place, once it is loaded.
+    pub(crate) fn shown_by_row(&self, thread: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        let row = self.message(thread, id)?;
+        if row.kind != MessageType::ThreadStarterMessage {
+            return None;
+        }
+        match self.starter_message(thread) {
+            Some(StarterMessage::Loaded(starter)) => Some(starter),
+            _ => None,
+        }
+    }
+
     // `id` of `channel` as its window or a viewed thread's starter shows it.
     pub(crate) fn shown(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.message(channel, id).or_else(|| {
@@ -1255,8 +1267,7 @@ impl Windows {
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
                 let first = page.first().map(|message| message.id);
-                let deleted =
-                    window.reconcile(channel_id, page, reached_end, window_limit, events);
+                let deleted = window.reconcile(channel_id, page, reached_end, window_limit, events);
                 for id in deleted {
                     self.targets.delete(channel_id, id, events);
                 }
