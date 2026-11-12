@@ -395,9 +395,13 @@ included, in the order asked, and keeps the unanswered frames: an answer is for 
 oldest frame that names its posts (the forum's frames before that one count as never answered),
 and a post's count is taken only if that frame is the post's newest ask and names the ack the
 post still has. So a post asked again with a newer ack takes only the answer to its newest ask,
-an answer that refuses or leaves a post out holds up no later one, and an answer without a
-frame is dropped. Frames still unanswered at RESUMED went into the dead connection (a resume
-replays the missed answers first): their posts are asked again. Afterwards a
+an answer that refuses or leaves a post out holds up no later one, and an answer no waiting
+frame names the posts of is dropped: one that comes twice never resets a count that messages
+raised since. A frame unanswered after 30 s is given up (a debug line) and its posts are asked
+again with the next ask; its answer, should it come, is dropped like any without a frame.
+Nothing in the answer says which frame it is for (no ack, no nonce), only the order does, and
+a resume's replay breaks the order: from the connection's loss to RESUMED no answer is taken,
+and the frames unanswered at RESUMED are asked again. Afterwards a
 MESSAGE_CREATE in a post with a count adds 1 (one replayed by a resume adds nothing), and a
 post created while its forum is open (THREAD_CREATE with `newly_created`) starts at 0. Where the
 official client's count only follows another session's MESSAGE_ACK (so it drifts upward after

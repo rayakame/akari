@@ -444,6 +444,9 @@ impl Store {
         self.write("connection", |inner, events| {
             let closed = matches!(inner.connection, ConnectionState::Closed { .. });
             if !closed && !same(&inner.connection, &connection) && allowed() {
+                if matches!(inner.connection, ConnectionState::Online) {
+                    inner.state.connection_lost();
+                }
                 inner.connection = connection.clone();
                 events.push(StoreEvent::Connection(connection));
             }

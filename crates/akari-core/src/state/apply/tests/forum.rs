@@ -2367,6 +2367,112 @@ fn an_answer_skips_a_frame_that_names_none_of_its_posts() {
     assert_eq!(new_counts(&state), [(OLD, Some(2)), (MIDDLE, Some(1))]);
 }
 
+// A frame Discord never answers is given up after 30 s: its posts are asked again with the
+// next ask.
+#[tokio::test(start_paused = true)]
+async fn a_frame_without_an_answer_is_given_up_after_30_s() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+
+    tokio::time::advance(std::time::Duration::from_secs(29)).await;
+    assert_eq!(asked(&mut state), [], "still waited for");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Without the timeout the post's later answer would go to the frame that never got one.
+#[tokio::test(start_paused = true)]
+async fn a_frame_given_up_takes_no_later_answer() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+// An answer later than that is nobody's: nothing says it isn't an older frame's. The post is
+// asked again.
+#[tokio::test(start_paused = true)]
+async fn an_answer_after_its_frame_was_given_up_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+}
+
+// An answer says 3, two messages make it 5, a resume replays the answer and both messages.
+#[test]
+fn a_replayed_answer_never_resets_a_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let answer = unreads(&[(OLD, Some(3))]);
+    apply(&mut state, "FORUM_UNREADS", answer.clone());
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, Some(5))]);
+
+    apply(&mut state, "FORUM_UNREADS", answer);
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(5))]);
+    assert_eq!(asked(&mut state), []);
+}
+
+// The same with a newer ask of the post in flight when the connection drops: nothing in the
+// answer says which frame it is for, so what a resume replays is never taken, and the frame is
+// asked again at RESUMED.
+#[test]
+fn a_replayed_answer_never_takes_a_newer_frame() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let answer = unreads(&[(OLD, Some(3))]);
+    apply(&mut state, "FORUM_UNREADS", answer.clone());
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 100));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 100)], "in flight");
+
+    state.connection_lost();
+    apply(&mut state, "FORUM_UNREADS", answer);
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, None)], "not the old answer's 3");
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 100)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(1))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(1))]);
+}
+
+// An answer that names a post no waiting frame asked about is nobody's: the frame of another
+// post still gets its own.
+#[test]
+fn an_answer_takes_no_frame_that_does_not_name_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(7))]));
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3)), (MIDDLE, Some(1))]);
+}
+
 // Only a count that changed, or a post that may now show one, is worth a read.
 #[test]
 fn a_message_in_a_post_that_shows_no_count_says_nothing() {

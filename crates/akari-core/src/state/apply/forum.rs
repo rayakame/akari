@@ -1,6 +1,9 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 use super::State;
 use super::boxes::known_user;
@@ -93,10 +96,21 @@ pub(super) struct PostCounts {
     // The ack each post was asked with in this connection, until its ack moves on.
     asked: HashMap<ChannelId, MessageId>,
     // The frames Discord hasn't answered, oldest first: it answers each once, in the order asked.
-    unanswered: VecDeque<ForumUnreadsAsk>,
+    unanswered: VecDeque<Frame>,
+    // Between the connection's loss and RESUMED, when a resume replays dispatches.
+    resuming: bool,
     // Forums whose posts' counts the current write changed.
     changed: BTreeSet<ChannelId>,
 }
+
+#[derive(Debug, PartialEq)]
+struct Frame {
+    ask: ForumUnreadsAsk,
+    sent: Instant,
+}
+
+// How long a frame's answer is waited for.
+const FORUM_UNREADS_WAIT: Duration = Duration::from_secs(30);
 
 /// An op 28 to send: posts of the open forum with the acks to count from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -846,6 +860,7 @@ impl State {
     /// The open forum's posts to ask Discord's counts for, each once a connection, marked as
     /// asked; `None` when there are none.
     pub(crate) fn next_forum_unreads(&mut self) -> Option<ForumUnreadsAsk> {
+        self.give_up_forum_unreads();
         let forum = self.forum_list.as_ref()?.forum;
         let guild = self.entities.channels.get(&forum)?.guild_id?;
         let counts = &self.post_counts;
@@ -871,14 +886,20 @@ impl State {
             forum,
             threads,
         };
-        self.post_counts.unanswered.push_back(ask.clone());
+        self.post_counts.unanswered.push_back(Frame {
+            ask: ask.clone(),
+            sent: Instant::now(),
+        });
         Some(ask)
     }
 
     /// The frame never left: its posts may be asked again.
     pub(crate) fn forget_forum_unreads(&mut self, threads: &[(ChannelId, MessageId)]) {
         let frames = &mut self.post_counts.unanswered;
-        if let Some(at) = frames.iter().rposition(|ask| ask.threads == threads) {
+        if let Some(at) = frames
+            .iter()
+            .rposition(|frame| frame.ask.threads == threads)
+        {
             frames.remove(at);
         }
         self.forget_asked(threads);
@@ -887,8 +908,32 @@ impl State {
     // A resume replays the answers missed before RESUMED: the frames still unanswered went into
     // the dead connection.
     pub(super) fn forget_unanswered_forum_unreads(&mut self) {
-        for ask in std::mem::take(&mut self.post_counts.unanswered) {
-            self.forget_asked(&ask.threads);
+        self.post_counts.resuming = false;
+        for frame in std::mem::take(&mut self.post_counts.unanswered) {
+            self.forget_asked(&frame.ask.threads);
+        }
+    }
+
+    pub(crate) fn connection_lost(&mut self) {
+        self.post_counts.resuming = true;
+    }
+
+    // Discord may never answer a frame: its posts are then asked again with the next ask.
+    fn give_up_forum_unreads(&mut self) {
+        let now = Instant::now();
+        while let Some(frame) = self.post_counts.unanswered.front() {
+            if now.duration_since(frame.sent) < FORUM_UNREADS_WAIT {
+                break;
+            }
+            let Some(frame) = self.post_counts.unanswered.pop_front() else {
+                break;
+            };
+            tracing::debug!(
+                forum = frame.ask.forum.get(),
+                posts = frame.ask.threads.len(),
+                "op 28 unanswered after 30 s, given up"
+            );
+            self.forget_asked(&frame.ask.threads);
         }
     }
 
@@ -903,31 +948,38 @@ impl State {
     // The answer's frame: the oldest of the forum's that names the answer's posts. The forum's
     // frames before it were never answered.
     fn answered_frame(&mut self, unreads: &ForumUnreads) -> Option<ForumUnreadsAsk> {
+        self.give_up_forum_unreads();
         let frames = &mut self.post_counts.unanswered;
-        let names = |ask: &ForumUnreadsAsk| {
+        let of_forum = |frame: &Frame| frame.ask.forum == unreads.channel_id;
+        let names = |frame: &Frame| {
             unreads.threads.iter().all(|thread| {
-                ask.threads
+                frame
+                    .ask
+                    .threads
                     .iter()
                     .any(|(post, _)| *post == thread.thread_id)
             })
         };
-        let of_forum = |ask: &ForumUnreadsAsk| ask.forum == unreads.channel_id;
         let at = frames
             .iter()
-            .position(|ask| of_forum(ask) && names(ask))
-            .or_else(|| frames.iter().position(of_forum))?;
+            .position(|frame| of_forum(frame) && names(frame))?;
         let frame = frames.remove(at)?;
         let mut before = 0;
-        frames.retain(|ask| {
+        frames.retain(|frame| {
             before += 1;
-            before > at || !of_forum(ask)
+            before > at || !of_forum(frame)
         });
-        Some(frame)
+        Some(frame.ask)
     }
 
     // Module 474399 keeps every count; here only the answer to the post's newest ask, and only
     // while the post still has the ack that ask named.
     pub(super) fn forum_unreads(&mut self, unreads: &ForumUnreads) {
+        // Nothing ties an answer to its frame but the order, which a replay breaks: the frames
+        // are asked again at RESUMED instead.
+        if self.post_counts.resuming {
+            return;
+        }
         // A refusal answers its frame too.
         let Some(frame) = self.answered_frame(unreads) else {
             return;

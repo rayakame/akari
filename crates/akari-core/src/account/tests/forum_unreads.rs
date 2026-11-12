@@ -191,6 +191,37 @@ async fn a_forum_opened_while_reconnecting_is_asked_once_resumed() {
     assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
 }
 
+// Nothing but the order ties an answer to its frame, and a resume's replay breaks the order:
+// what arrives before RESUMED is taken for no frame, and the frame in flight is asked again.
+#[tokio::test]
+async fn an_answer_replayed_by_a_resume_takes_no_frame_in_flight() {
+    let mut online = online_with(&[FIRST], &[FIRST]).await;
+    online.account.open_forum(Some(forum()));
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+    online.connection.close(4000).await;
+    events_until(&online.subscription, "Connecting").await;
+    let answer = |seq: u64, count: u32| {
+        json!({"op": 0, "s": seq, "t": "FORUM_UNREADS", "d": {
+            "channel_id": FORUM.to_string(),
+            "threads": [{"thread_id": FIRST.to_string(), "missing": false, "count": count}],
+        }})
+    };
+
+    online.connection = online.fake.accept().await;
+    assert_eq!(online.connection.handshake(60_000).await["op"], 6);
+    online.connection.send(answer(2, 7)).await;
+    online.connection.dispatch(3, "RESUMED").await;
+
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+    let store = online.account.store();
+    let counts = store.post_new_counts(&[Snowflake::new(FIRST)]);
+    assert_eq!(counts[0].count, None, "not the replayed 7");
+    online.connection.send(answer(4, 2)).await;
+    online.counts_changed().await;
+    let counts = store.post_new_counts(&[Snowflake::new(FIRST)]);
+    assert_eq!(counts[0].count, Some(2));
+}
+
 // Not online, nothing is marked as asked, whatever a send would answer: the posts are still
 // to ask the moment the forum was opened.
 #[tokio::test]
