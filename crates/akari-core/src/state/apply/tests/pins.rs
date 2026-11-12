@@ -290,6 +290,50 @@ fn leaving_a_server_takes_its_channels_pin_acks() {
     assert_eq!(acked(&state, GENERAL), None);
 }
 
+// The channels are gone from the store while the server is down; what was read in them isn't,
+// for when it comes back.
+#[test]
+fn leaving_a_server_while_it_is_down_takes_its_channels_pin_acks_and_read_states() {
+    let down = |state: &mut State| {
+        apply(
+            state,
+            "GUILD_DELETE",
+            json!({"id": G1.to_string(), "unavailable": true}),
+        );
+    };
+    let down_at_ready = |state: &mut State| {
+        let mut ready = pinned_ready(PINNED.into());
+        let guild = ready["guilds"].as_array_mut().unwrap().remove(0);
+        assert_eq!(guild["id"], G1.to_string());
+        ready["guilds"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": G1.to_string(), "unavailable": true}));
+        apply(state, "READY", ready);
+    };
+    let cases: [(&str, &dyn Fn(&mut State)); 2] = [("outage", &down), ("READY", &down_at_ready)];
+
+    for (name, goes_down) in cases {
+        let mut state = state_from(&pinned_ready(PINNED.into()));
+        let read = |state: &State| {
+            state
+                .entities
+                .read_states
+                .get(Snowflake::new(GENERAL))
+                .is_some()
+        };
+        goes_down(&mut state);
+        assert!(state.channel(Snowflake::new(GENERAL)).is_none(), "{name}");
+        assert!(acked(&state, GENERAL).is_some(), "{name}: kept while down");
+        assert!(read(&state), "{name}: kept while down");
+
+        apply(&mut state, "GUILD_DELETE", json!({"id": G1.to_string()}));
+
+        assert_eq!(acked(&state, GENERAL), None, "{name}");
+        assert!(!read(&state), "{name}");
+    }
+}
+
 // The official client's canBeUnread: a muted channel and a thread the user hasn't joined
 // show no dot.
 #[test]
