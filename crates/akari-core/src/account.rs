@@ -101,6 +101,16 @@ impl ThreadLocation {
     }
 }
 
+// The official client turns a name's line breaks into spaces as it is typed.
+fn one_line(name: &str) -> String {
+    name.split(['\r', '\n'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_owned()
+}
+
 // A failure after the request left: Discord may have created the thread behind it.
 fn maybe_created(err: &RequestError) -> bool {
     match err {
@@ -670,8 +680,8 @@ impl Shared {
         location: CreateThreadLocation,
     ) -> Result<ChannelId, CreateThreadError> {
         self.rest.usable()?;
-        let name = name.trim();
-        let length = message_length(name);
+        let name = one_line(name);
+        let length = message_length(&name);
         let channel = self
             .store
             .channel(parent)
@@ -699,7 +709,7 @@ impl Shared {
             return Err(CreateThreadError::Slowmode);
         }
         let body = CreateThread {
-            name: name.to_owned(),
+            name,
             kind: kind.into(),
             auto_archive_duration: channel
                 .default_auto_archive_duration
@@ -772,14 +782,22 @@ impl Shared {
         content: &str,
     ) -> Result<ChannelId, CreateThreadError> {
         self.rest.usable()?;
-        let name = name.trim();
+        let name = one_line(name);
         let content = content.trim();
+        // The official client's tags are a set, sent in the order first chosen.
+        let mut chosen: Vec<TagId> = Vec::with_capacity(tags.len());
+        for tag in tags {
+            if !chosen.contains(tag) {
+                chosen.push(*tag);
+            }
+        }
+        let tags = &chosen[..];
         let channel = self
             .store
             .channel(forum)
             .ok_or(RequestError::InvalidRequest)?;
         let allowed = self.store.post_creation(forum);
-        let name_length = message_length(name);
+        let name_length = message_length(&name);
         let content_length = message_length(content);
         if !allowed.allowed
             || name_length == 0
@@ -802,7 +820,7 @@ impl Shared {
             return Err(CreateThreadError::Slowmode);
         }
         let body = CreatePost {
-            name: name.to_owned(),
+            name,
             auto_archive_duration: channel
                 .default_auto_archive_duration
                 .unwrap_or(DEFAULT_ARCHIVE_MINUTES),
@@ -1741,8 +1759,8 @@ impl Account {
     /// parent's slowmode for new threads starts. Refused with `InvalidRequest` before asking: a
     /// name that is empty or longer than 100 code points once trimmed, a loaded message that
     /// can't start a thread ([`Store::can_start_thread`]), a kind the user may not create
-    /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The first message
-    /// is an ordinary send in the thread afterwards.
+    /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The name's line
+    /// breaks go as spaces. The first message is an ordinary send in the thread afterwards.
     pub async fn create_thread(
         &self,
         parent: ChannelId,
@@ -1760,12 +1778,12 @@ impl Account {
     /// official client does in one request, and returns it: Discord's answer puts it in the
     /// store as the user's own new post (listed at once, opened, the forum acked up to it) with
     /// its first message, and the forum's slowmode for new posts starts
-    /// ([`Store::thread_slowmode`]). `tags` go in the order given. Refused with `InvalidRequest`
-    /// before asking: a forum the user may not post in ([`Store::post_creation`]), a name empty
-    /// or longer than 100 code points once trimmed, a message empty once trimmed or over the
-    /// account's length limit, more than 5 tags or one the user may not apply; with
-    /// `TagRequired` when the forum wants a tag and none is given; with `Slowmode` while that
-    /// slowmode runs.
+    /// ([`Store::thread_slowmode`]). The name's line breaks go as spaces, and `tags` in the
+    /// order given, each once. Refused with `InvalidRequest` before asking: a forum the user may
+    /// not post in ([`Store::post_creation`]), a name empty or longer than 100 code points once
+    /// trimmed, a message empty once trimmed or over the account's length limit, more than 5
+    /// different tags or one the user may not apply; with `TagRequired` when the forum wants a
+    /// tag and none is given; with `Slowmode` while that slowmode runs.
     pub async fn create_post(
         &self,
         forum: ChannelId,

@@ -190,3 +190,46 @@ async fn a_forum_opened_while_reconnecting_is_asked_once_resumed() {
 
     assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
 }
+
+// Not online, nothing is marked as asked, whatever a send would answer: the posts are still
+// to ask the moment the forum was opened.
+#[tokio::test]
+async fn a_forum_opened_while_not_online_marks_nothing_asked() {
+    let mut online = online_with(&[FIRST], &[FIRST]).await;
+    online.connection.close(4000).await;
+    events_until(&online.subscription, "Connecting").await;
+    let post = (Snowflake::new(FIRST), Snowflake::new(FIRST + 2));
+
+    online.account.open_forum(Some(forum()));
+    let store = online.account.store();
+    let waiting = store.next_forum_unreads().map(|ask| ask.threads);
+    assert_eq!(waiting, Some(vec![post]), "still to ask");
+    store.forget_forum_unreads(&[post]);
+
+    online.connection = online.fake.accept().await;
+    assert_eq!(online.connection.handshake(60_000).await["op"], 6);
+    online.connection.dispatch(2, "RESUMED").await;
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+}
+
+// The store still says online when the gateway refuses the frame: the posts aren't left as
+// asked, and the resumed session asks them.
+#[tokio::test]
+async fn a_frame_the_gateway_refuses_is_asked_again() {
+    let mut online = online_with(&[FIRST], &[FIRST]).await;
+    let gateway = &online.account.shared.gateway;
+
+    gateway.disconnect();
+    assert!(matches!(
+        online.account.store().connection(),
+        ConnectionState::Online
+    ));
+    online.account.open_forum(Some(forum()));
+    online.connection.client_close_code().await;
+    gateway.connect().unwrap();
+
+    online.connection = online.fake.accept().await;
+    assert_eq!(online.connection.handshake(60_000).await["op"], 6);
+    online.connection.dispatch(2, "RESUMED").await;
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+}

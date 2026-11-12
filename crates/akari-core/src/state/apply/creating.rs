@@ -11,7 +11,8 @@ use crate::state::types::{Delivery, PostCreation, ThreadCreation, ThreadMembersh
 // few more that render as one (module 406704).
 const STARTS_THREADS: [u16; 9] = [0, 19, 20, 23, 26, 41, 45, 47, 68];
 const EPHEMERAL: u64 = 1 << 6;
-// Discord's client waits the interval and 100 ms more before it lets the user create again.
+// Discord's client waits the interval, or the wait a 20016 names, and 100 ms more before it
+// lets the user create again.
 const COOLDOWN_MARGIN: Duration = Duration::from_millis(100);
 
 impl State {
@@ -135,7 +136,8 @@ impl State {
         now_millis: i64,
     ) {
         if let Some((_, false)) = self.slowmode_parts(parent, now_millis) {
-            self.thread_cooldowns.hold(parent, Instant::now(), wait);
+            self.thread_cooldowns
+                .hold(parent, Instant::now(), wait + COOLDOWN_MARGIN);
         }
     }
 

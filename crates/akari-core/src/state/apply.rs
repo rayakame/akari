@@ -1232,6 +1232,7 @@ impl State {
             self.latest.remove(&thread);
             self.unconfirmed.remove(&thread);
             self.forget_first_message(thread);
+            self.forget_post_count(thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1294,6 +1295,7 @@ impl State {
                     self.windows.drop_channel(*id);
                     self.latest.remove(id);
                     self.unconfirmed.remove(id);
+                    self.forget_post_count(*id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -1412,6 +1414,7 @@ impl State {
             }
             keep
         });
+        self.prune_post_counts();
     }
 
     fn put_role(&mut self, event: GuildRoleEvent, events: &mut Vec<StoreEvent>) {

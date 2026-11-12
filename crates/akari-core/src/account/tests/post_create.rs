@@ -54,6 +54,10 @@ async fn online_with(edit: impl FnOnce(&mut Value, &mut Value)) -> Online {
                     {"id": BUG.to_string(), "name": "Bug", "moderated": false},
                     {"id": IDEA.to_string(), "name": "Idea", "moderated": false},
                     {"id": STAFF.to_string(), "name": "Staff", "moderated": true},
+                    {"id": "500000000000000004", "name": "D", "moderated": false},
+                    {"id": "500000000000000005", "name": "E", "moderated": false},
+                    {"id": "500000000000000006", "name": "F", "moderated": false},
+                    {"id": "500000000000000007", "name": "G", "moderated": false},
                 ],
             });
             edit(ready, &mut forum);
@@ -211,7 +215,15 @@ async fn what_discord_would_refuse_is_refused_before_asking() {
     online.creates().await;
     let long_name = "n".repeat(101);
     let long_message = "m".repeat(online.account.store().message_length_limit() + 1);
-    let six = tags(&[BUG, IDEA, BUG, IDEA, BUG, IDEA]);
+    let six = tags(&[
+        BUG,
+        IDEA,
+        500_000_000_000_000_004,
+        500_000_000_000_000_005,
+        500_000_000_000_000_006,
+        500_000_000_000_000_007,
+    ]);
+    let five_twice: Vec<TagId> = six[1..].iter().chain(&six[1..]).copied().collect();
 
     let refused = [
         online.post("  ", &[], "m").await,
@@ -240,7 +252,7 @@ async fn what_discord_would_refuse_is_refused_before_asking() {
     assert!(online.requests().await.is_empty());
 
     online
-        .post(&"n".repeat(100), &tags(&[BUG, IDEA]), "m")
+        .post(&"n".repeat(100), &five_twice, "m")
         .await
         .unwrap();
 }
@@ -436,4 +448,221 @@ async fn an_answer_without_its_message_is_still_the_post() {
     let post = online.post("t", &[], "m").await.unwrap();
 
     assert_eq!(online.account.store().post_preview(post), None);
+}
+
+// Module 55294: the client's tags are a set, so a tag chosen twice goes once, and the five are
+// counted after that.
+#[tokio::test]
+async fn a_tag_given_twice_goes_once() {
+    let online = owner().await;
+    online.creates().await;
+    let repeated = tags(&[STAFF, BUG, STAFF, BUG, IDEA, STAFF, IDEA]);
+
+    online.post("t", &repeated, "m").await.unwrap();
+
+    assert_eq!(
+        online.bodies().await[0]["applied_tags"],
+        json!([STAFF.to_string(), BUG.to_string(), IDEA.to_string()])
+    );
+}
+
+// The official client turns line breaks into spaces as the title is typed; the core doesn't
+// rely on its host for it.
+#[tokio::test]
+async fn a_titles_line_breaks_go_as_spaces() {
+    let online = owner().await;
+    online.creates().await;
+
+    online
+        .post("\n one\r\n\ntwo\rthree \n", &[], "m")
+        .await
+        .unwrap();
+    let only_breaks = online.post("\r\n\n", &[], "m").await;
+
+    assert_eq!(online.bodies().await[0]["name"], "one two three");
+    assert!(matches!(
+        only_breaks,
+        Err(CreateThreadError::Request(RequestError::InvalidRequest))
+    ));
+    assert_eq!(online.requests().await.len(), 1);
+}
+
+// The answer isn't observed: wherever the post and its message are in it, a create that
+// succeeded returns the post.
+#[tokio::test]
+async fn the_post_is_read_from_every_shape_of_answer() {
+    let nested = created(NEW);
+    let mut bare = nested.clone();
+    let first = bare.as_object_mut().unwrap().remove("message").unwrap();
+    let shapes = [
+        (json!({"thread": bare, "message": first}), true),
+        (json!({"channel": bare, "message": first}), true),
+        (json!({"thread": nested}), true),
+        (bare.clone(), false),
+        (json!({"thread": bare}), false),
+    ];
+    for (index, (answer, with_message)) in shapes.into_iter().enumerate() {
+        let online = member(VIEW | SEND, 30).await;
+        online
+            .answer(ResponseTemplate::new(201).set_body_json(answer))
+            .await;
+        online.account.open_forum(Some(forum()));
+
+        let post = online.post("t", &[], "m").await;
+
+        assert!(
+            matches!(post, Ok(post) if post == Snowflake::new(NEW)),
+            "{index}: {post:?}"
+        );
+        let store = online.account.store();
+        assert!(store.channel(Snowflake::new(NEW)).is_some(), "{index}");
+        assert_eq!(
+            store.post_preview(Snowflake::new(NEW)).is_some(),
+            with_message,
+            "{index}"
+        );
+    }
+}
+
+// A failure after the request left may have created the post: the cooldown starts as if it
+// had, and nothing is asked twice.
+#[tokio::test]
+async fn a_server_error_may_have_created_the_post() {
+    for status in [500, 502, 504] {
+        let online = member(VIEW | SEND, 30).await;
+        online.answer(ResponseTemplate::new(status)).await;
+
+        let created = online.post("t", &[], "m").await;
+
+        assert!(
+            matches!(created, Err(CreateThreadError::MaybeCreated)),
+            "{status}: {created:?}"
+        );
+        assert_eq!(online.requests().await.len(), 1, "{status}");
+        assert!(online.cooldown().is_some(), "{status}");
+    }
+}
+
+// Online with the forum, REST on `api`.
+async fn online_on(
+    api: String,
+    slowmode: u32,
+) -> (Account, Subscription, FakeConnection, FakeGateway) {
+    let mut fake = FakeGateway::start().await;
+    let account = Account::start(
+        crate::gateway::fake::client_with(fake.url(), api),
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        DEFAULT_LIMITS,
+    )
+    .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+    connection
+        .send(ready_payload(1, &fake, |ready| {
+            ready["guilds"][0]["channels"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({
+                    "id": FORUM.to_string(), "type": 15, "name": "help", "position": 3, "flags": 0,
+                    "parent_id": "300000000000000001", "permission_overwrites": [],
+                    "rate_limit_per_user": slowmode,
+                }));
+            let guild = &mut ready["guilds"][0];
+            guild["properties"]["owner_id"] = "100000000000000099".into();
+            guild["roles"][0]["permissions"] = (VIEW | SEND).to_string().into();
+            ready["merged_members"][0][0]["roles"] = json!([]);
+        }))
+        .await;
+    events_until(&subscription, "Online").await;
+    (account, subscription, connection, fake)
+}
+
+// The request left and the connection broke before an answer: Discord may have the post.
+#[tokio::test]
+async fn an_answer_lost_on_the_way_may_have_created_the_post() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api = format!("http://{}/api/v9/", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = [0; 1024];
+            let _ = socket.read(&mut request).await;
+        }
+    });
+    let (account, _subscription, _connection, _fake) = online_on(api, 30).await;
+
+    let created = account.create_post(forum(), "t", &[], "m").await;
+
+    assert!(
+        matches!(created, Err(CreateThreadError::MaybeCreated)),
+        "{created:?}"
+    );
+    assert!(
+        account
+            .store()
+            .thread_slowmode(forum())
+            .is_some_and(|slowmode| slowmode.until.is_some())
+    );
+}
+
+// Nothing left: no post, no cooldown.
+#[tokio::test]
+async fn a_request_that_never_connected_created_nothing() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api = format!("http://{}/api/v9/", listener.local_addr().unwrap());
+    drop(listener);
+    let (account, _subscription, _connection, _fake) = online_on(api, 30).await;
+
+    let created = account.create_post(forum(), "t", &[], "m").await;
+
+    assert!(
+        matches!(
+            &created,
+            Err(CreateThreadError::Request(RequestError::Network(err)))
+                if err.kind() == crate::TransportErrorKind::Connect
+        ),
+        "{created:?}"
+    );
+    assert_eq!(
+        account
+            .store()
+            .thread_slowmode(forum())
+            .and_then(|slowmode| slowmode.until),
+        None
+    );
+}
+
+// A 401 means the token is gone, as on every other request.
+#[tokio::test]
+async fn a_401_on_a_create_closes_the_account() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(POSTS))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let (account, subscription, mut connection, _fake) =
+        online_on(format!("{}/api/v9/", server.uri()), 30).await;
+
+    let created = account.create_post(forum(), "t", &[], "m").await;
+
+    assert!(
+        matches!(
+            created,
+            Err(CreateThreadError::Request(RequestError::Unauthorized))
+        ),
+        "{created:?}"
+    );
+    assert_eq!(connection.client_close_code().await, Some(1000));
+    events_until(&subscription, "Closed(AuthenticationFailed)").await;
+    assert_eq!(
+        account
+            .store()
+            .thread_slowmode(forum())
+            .and_then(|slowmode| slowmode.until),
+        None
+    );
 }

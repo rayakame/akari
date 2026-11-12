@@ -90,10 +90,19 @@ pub(super) struct ForumList {
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct PostCounts {
     counts: HashMap<ChannelId, u32>,
-    // Asked in this connection, with the ack the answer counts from.
-    asked: HashMap<ChannelId, MessageId>,
+    // Asked in this connection.
+    asked: HashMap<ChannelId, Asked>,
     // Forums whose posts' counts the current write changed.
     changed: BTreeSet<ChannelId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Asked {
+    // The ack the newest ask named; `None` once the post's ack moved on from it.
+    ack: Option<MessageId>,
+    // Asks Discord hasn't answered: answers come in the order asked, so only the last one's
+    // count is for `ack`.
+    unanswered: u32,
 }
 
 /// An op 28 to send: posts of the open forum with the acks to count from.
@@ -481,8 +490,7 @@ impl State {
     }
 
     pub(super) fn forum_post_deleted(&mut self, post: &Channel, events: &mut Vec<StoreEvent>) {
-        self.post_counts.counts.remove(&post.id);
-        self.post_counts.asked.remove(&post.id);
+        self.forget_post_count(post.id);
         if let Some(list) = self.forum_list.as_mut()
             && (list.posts.remove(&post.id).is_some() || post.parent_id == Some(list.forum))
         {
@@ -851,7 +859,11 @@ impl State {
         let mut posts: Vec<(u64, ChannelId, MessageId)> = self
             .listable_posts(forum)
             .filter(|post| {
-                !counts.counts.contains_key(&post.id) && !counts.asked.contains_key(&post.id)
+                !counts.counts.contains_key(&post.id)
+                    && counts
+                        .asked
+                        .get(&post.id)
+                        .is_none_or(|asked| asked.ack.is_none())
             })
             .filter_map(|post| Some((newest(post), post.id, self.counted_from(post)?)))
             .collect();
@@ -864,7 +876,14 @@ impl State {
             .into_iter()
             .map(|(_, post, ack)| (post, ack))
             .collect();
-        self.post_counts.asked.extend(threads.iter().copied());
+        for (post, ack) in &threads {
+            let asked = self.post_counts.asked.entry(*post).or_insert(Asked {
+                ack: None,
+                unanswered: 0,
+            });
+            asked.ack = Some(*ack);
+            asked.unanswered += 1;
+        }
         Some(ForumUnreadsAsk {
             guild,
             forum,
@@ -875,28 +894,44 @@ impl State {
     /// The frame never left: its posts may be asked again.
     pub(crate) fn forget_forum_unreads(&mut self, threads: &[(ChannelId, MessageId)]) {
         for (post, ack) in threads {
-            if self.post_counts.asked.get(post) == Some(ack) {
+            let Some(asked) = self.post_counts.asked.get_mut(post) else {
+                continue;
+            };
+            asked.unanswered = asked.unanswered.saturating_sub(1);
+            if asked.ack == Some(*ack) {
+                asked.ack = None;
+            }
+            if asked.ack.is_none() && asked.unanswered == 0 {
                 self.post_counts.asked.remove(post);
             }
         }
     }
 
-    // Module 474399 keeps every count; here only one for the ack the post still has.
+    // Module 474399 keeps every count; here only the answer to the newest ask, and only while
+    // the post still has the ack that ask named.
     pub(super) fn forum_unreads(&mut self, unreads: &ForumUnreads) {
         if unreads.permission_denied {
             return;
         }
         for thread in &unreads.threads {
-            let Some(count) = thread.count else {
+            let post = thread.thread_id;
+            let Some(asked) = self.post_counts.asked.get_mut(&post) else {
                 continue;
             };
-            let post = thread.thread_id;
+            asked.unanswered = asked.unanswered.saturating_sub(1);
+            let Asked { ack, unanswered } = *asked;
+            if ack.is_none() && unanswered == 0 {
+                self.post_counts.asked.remove(&post);
+            }
             let current = self
                 .entities
                 .read_states
                 .get(post)
                 .and_then(|state| state.acked);
-            if current.is_none() || self.post_counts.asked.get(&post).copied() != current {
+            let (Some(count), true) = (thread.count, unanswered == 0 && ack.is_some()) else {
+                continue;
+            };
+            if ack != current {
                 continue;
             }
             self.post_counts.counts.insert(post, count);
@@ -910,19 +945,26 @@ impl State {
         let Some(forum) = self.forum_of(post) else {
             return;
         };
-        let replayed = self
-            .entities
-            .channels
-            .get(&post)
-            .and_then(|post| post.last_message_id)
+        let Some(stored) = self.entities.channels.get(&post) else {
+            return;
+        };
+        let replayed = stored
+            .last_message_id
             .is_some_and(|last| last.get() >= message.id.get());
         if replayed {
             return;
         }
+        // A read post the user opened before shows "1+" from this message on.
+        let qualifies_now = !self.entities.unread(stored)
+            && self
+                .entities
+                .read_states
+                .get(post)
+                .is_some_and(|state| !state.estimated && state.acked.is_some());
         if let Some(count) = self.post_counts.counts.get_mut(&post) {
             *count = count.saturating_add(1);
             self.post_counts.changed.insert(forum);
-        } else if self.is_open_forum(forum) {
+        } else if qualifies_now && self.is_open_forum(forum) {
             self.post_counts.changed.insert(forum);
         }
     }
@@ -943,13 +985,40 @@ impl State {
             .channels
             .get(&post)
             .is_some_and(|post| self.entities.unread(post));
-        self.post_counts.asked.remove(&post);
+        self.leave_asked_ack(post);
         if unread {
             self.post_counts.counts.remove(&post);
         } else {
             self.post_counts.counts.insert(post, 0);
         }
         self.post_counts.changed.insert(forum);
+    }
+
+    // The answers still on their way are for an ack the post no longer has.
+    fn leave_asked_ack(&mut self, post: ChannelId) {
+        if let Some(asked) = self.post_counts.asked.get_mut(&post) {
+            asked.ack = None;
+            if asked.unanswered == 0 {
+                self.post_counts.asked.remove(&post);
+            }
+        }
+    }
+
+    // A post that left the store.
+    pub(super) fn forget_post_count(&mut self, post: ChannelId) {
+        self.post_counts.counts.remove(&post);
+        self.post_counts.asked.remove(&post);
+    }
+
+    // After channels left the store other than one by one.
+    pub(super) fn prune_post_counts(&mut self) {
+        let channels = &self.entities.channels;
+        self.post_counts
+            .counts
+            .retain(|post, _| channels.contains_key(post));
+        self.post_counts
+            .asked
+            .retain(|post, _| channels.contains_key(post));
     }
 
     pub(super) fn forget_post_counts(&mut self) {

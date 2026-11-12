@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::Method as HttpMethod;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 use super::clock::ServerClock;
 use super::error::{ApiError, RestError};
@@ -10,8 +11,8 @@ use super::ratelimit::{Method, Permit, RateLimiter, ResponseLimits, RouteKey};
 use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
-use crate::lenient::{default_on_error, parse_list};
-use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
+use crate::lenient::parse_list;
+use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, MessageId};
 use crate::state::{AckBody, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
@@ -222,11 +223,42 @@ pub(crate) struct PostMessage {
     pub(crate) content: String,
 }
 
-// With `use_nested_fields` the created post carries its first message.
+// The answer to a created post isn't observed: the post itself, or wrapped as `thread` or
+// `channel`, with its first message as `message` beside or inside it.
 #[derive(Deserialize)]
-struct NestedMessage {
-    #[serde(default, deserialize_with = "default_on_error")]
-    message: Option<model::Message>,
+struct Wrapped<'a> {
+    #[serde(borrow, default)]
+    thread: Option<&'a RawValue>,
+    #[serde(borrow, default)]
+    channel: Option<&'a RawValue>,
+    #[serde(borrow, default)]
+    message: Option<&'a RawValue>,
+}
+
+fn created_post(body: &[u8]) -> Option<(model::Channel, Option<model::Message>)> {
+    let body = std::str::from_utf8(body).ok()?;
+    let outer: Wrapped<'_> = serde_json::from_str(body).ok()?;
+    let inner = [outer.thread, outer.channel]
+        .into_iter()
+        .flatten()
+        .map(RawValue::get);
+    let (post, source) = std::iter::once(body)
+        .chain(inner)
+        .filter_map(|json| Some((serde_json::from_str::<model::Channel>(json).ok()?, json)))
+        .find(|(channel, _)| {
+            matches!(
+                channel.kind,
+                ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
+            )
+        })?;
+    let nested = serde_json::from_str::<Wrapped<'_>>(source)
+        .ok()
+        .and_then(|post| post.message);
+    let first = outer
+        .message
+        .or(nested)
+        .and_then(|message| serde_json::from_str(message.get()).ok());
+    Some((post, first))
 }
 
 #[derive(Serialize)]
@@ -455,14 +487,8 @@ impl AccountRest {
                 Ok(self.request(HttpMethod::POST, &path)?.json(body))
             })
             .await?;
-        // `None`: Discord said yes in a body that doesn't read as a channel.
-        let Ok(post) = serde_json::from_slice::<model::Channel>(&body) else {
-            return Ok(None);
-        };
-        let first = serde_json::from_slice::<NestedMessage>(&body)
-            .ok()
-            .and_then(|nested| nested.message);
-        Ok(Some((post, first)))
+        // `None`: Discord said yes in a body no post can be read from.
+        Ok(created_post(&body))
     }
 
     // A GET whose answer decodes as `T`, on a route with no major parameter.

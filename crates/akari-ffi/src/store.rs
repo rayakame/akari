@@ -45,14 +45,18 @@ impl Store {
         let hides_content = self
             .core
             .embeds_hide_link(&shown, document.is_single_link(&message.content));
+        // Only a media post's first message has one: the rest take no lock for it.
+        let thumbnail = message
+            .attachments
+            .iter()
+            .any(state::Attachment::is_thumbnail)
+            .then(|| self.core.shown_thumbnail(message))
+            .flatten();
         Message::new(
             message,
             formatted,
             self.core.mentions_me(message),
-            (
-                self.core.shown_attachments(message),
-                self.core.shown_thumbnail(message),
-            ),
+            (self.core.shown_attachments(message), thumbnail),
             self.core.spoilers_shown(message.channel_id),
             embeds::embeds(
                 message,
