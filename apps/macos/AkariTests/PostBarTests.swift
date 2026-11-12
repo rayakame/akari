@@ -59,6 +59,39 @@ struct PostBarTests {
         #expect(try barCell().under == .nothing)
     }
 
+    // Discord's box is a speech bubble: a tail 20 wide and 10 high under it, 100 from its left,
+    // in the box's own color.
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theInvitationHasItsTail(appearance: NSAppearance.Name) throws {
+        let cell = PostBarCell()
+        cell.appearance = NSAppearance(named: appearance)
+        cell.frame = NSRect(
+            x: 0, y: 0, width: 600, height: PostBarCell.height(bar(), hasReplies: false))
+        cell.show(bar(), hasReplies: false)
+        cell.layoutSubtreeIfNeeded()
+        let rep = try #require(cell.bitmapImageRepForCachingDisplay(in: cell.bounds))
+        cell.cacheDisplay(in: cell.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / cell.bounds.width
+        func color(_ x: CGFloat, _ y: CGFloat) -> NSColor? {
+            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
+        }
+        let box = cell.inviteBox
+        let middle = box.minX + 110
+        let inBox = try #require(color(middle, box.maxY - 3))
+        let outside = try #require(color(box.minX + 300, box.maxY + 5))
+        #expect(!same(inBox, outside))
+
+        #expect(same(color(middle, box.maxY + 0.5), inBox), "no seam and no second coat")
+        #expect(same(color(middle, box.maxY + 8), inBox))
+        #expect(same(color(middle - 8, box.maxY + 1), inBox))
+        #expect(same(color(middle + 8, box.maxY + 1), inBox))
+        #expect(same(color(middle, box.maxY + 11), outside), "10 high")
+        #expect(same(color(middle - 11, box.maxY + 1), outside), "20 wide")
+        #expect(same(color(middle + 11, box.maxY + 1), outside))
+        #expect(same(color(middle - 6, box.maxY + 8), outside), "a triangle")
+        #expect(same(color(middle + 6, box.maxY + 8), outside))
+    }
+
     @Test
     func followSaysWhatAClickDoes() throws {
         let actions = MessageTableTests.RecordingActions()

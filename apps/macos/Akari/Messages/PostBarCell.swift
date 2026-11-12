@@ -19,6 +19,8 @@ final class PostBarCell: NSTableCellView {
     private static let inviteWidth: CGFloat = 448
     private static let invitePadding: CGFloat = 12
     private static let inviteIcon: CGFloat = 40
+    private static let tailStart: CGFloat = 100
+    private static let tailHeight: CGFloat = 10
     private static let copiedFor: Duration = .seconds(2)
 
     enum Under: Equatable {
@@ -147,7 +149,7 @@ final class PostBarCell: NSTableCellView {
         inviteText.frame = NSRect(x: textX, y: textY + title, width: textWidth, height: text)
     }
 
-    private var inviteBox: NSRect {
+    var inviteBox: NSRect {
         let x = Self.side + Self.inviteMargin
         return NSRect(
             x: x, y: Self.barHeight + Self.inviteMargin,
@@ -164,7 +166,15 @@ final class PostBarCell: NSTableCellView {
                 .fill(using: .sourceOver)
         case .invite:
             Palette.backgroundModNormal.setFill()
-            NSBezierPath(roundedRect: inviteBox, xRadius: 12, yRadius: 12).fill()
+            let box = inviteBox
+            // One path: the color is translucent, a tail drawn apart would show its seam.
+            let bubble = NSBezierPath(roundedRect: box, xRadius: 12, yRadius: 12)
+            let tail = box.minX + Self.tailStart
+            bubble.move(to: NSPoint(x: tail, y: box.maxY))
+            bubble.line(to: NSPoint(x: tail + Self.tailHeight, y: box.maxY + Self.tailHeight))
+            bubble.line(to: NSPoint(x: tail + 2 * Self.tailHeight, y: box.maxY))
+            bubble.close()
+            bubble.fill()
         case .nothing:
             break
         }
