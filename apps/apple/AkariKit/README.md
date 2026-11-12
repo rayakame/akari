@@ -149,6 +149,18 @@ changes, `placeholder(for:)` what an empty newest message shows. `membershipItem
 thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
 waits in `membershipError`, in Discord's words, until `dismissMembershipError()`.
+`messageActions(for:copy:)` gives a list its `MessageActionsModel`: what a message's hover bar
+(`bar(for:shift:)`, the longer row with Shift held) and menu (`menu(for:)`, in groups) list, as
+`MessageActionItem`s (the action, the official client's words, an SF Symbol, enabled, destructive)
+in the official client's order, and `perform(_:on:shift:)` for a click. The orders are three
+tables in the model (`barOrder`, `shiftBarOrder`, `menuOrder`) that name every action, also
+those whose feature isn't built; one switch (`Offer.has`) says which show, from `Store.messageActions`, asked
+every time since nothing announces a change. Today: Copy Text, Copy Message Link, Mark Unread,
+Create Thread, View Thread, and Retry and Delete for a failed send. `markUnread(from:)` (the
+item, the button, an Option-click) puts the list's new messages line over the message at once,
+asks `Account.markUnread`, and on a refusal puts the line back and leaves one
+`messageActionFailure` on the session, in Akari's words, until `dismissMessageActionFailure()`.
+A thread's starter row acts on the parent's message, but marks the thread unread.
 `threadsButtonParent` is the channel the header's Threads button browses (a text or
 announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
 its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or

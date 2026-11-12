@@ -15,17 +15,20 @@ observed by Chris on the second account (TF-O1–O5, 2026-10-23). The requests a
   timeout takes it away, as every permission but viewing and reading history. *Akari also needs
   Send Messages in Threads for every entry: the first message is required, so without it no
   thread could start with one (the official client would create the thread and fail its
-  message).* *Akari has only
-  Copy Text from that menu besides it, with the separator between them.*
+  message).* The menu's other items are in
+  [message-actions.md](message-actions.md#the-message-menu).
+- **A message's hover bar:** "Create Thread", by the same rule; for a message that can be
+  forwarded the official client shows it only with Shift held. A message that has a thread
+  shows "View Thread" there instead, which opens the thread beside the channel. *Akari has no
+  forwards, so the button is always in the plain bar; "View Thread" is in the menu too.*
 - **The Threads browser** ([thread-browser.md](thread-browser.md)): the header's "Create" and,
   with no threads, the empty state's "Create Thread", where the user may create public or
   private threads. Both close the browser first.
 - **⌘⇧⌥N** ("Create a thread"): the open channel's form, or the open thread's parent's; nothing in
   DMs or where the user may create no thread. It never toggles: it replaces what the slot shows.
   *Akari: File > Create Thread, with the same keys, disabled where it would do nothing.*
-- *Later in Akari* (the message-features milestone): the hover bar's "Create Thread" (Shift shows
-  it for a message that can be forwarded) and "View Thread", T and Shift+T on a focused message,
-  the composer's "+" menu, `/thread`, the nudge under a chain of replies, and attachments and
+- *Later in Akari:* T and Shift+T on a focused message (with keyboard focus on messages), the
+  composer's "+" menu, `/thread`, the nudge under a chain of replies, and attachments and
   stickers in the first message.
 
 Opening goes to the channel first, closes popouts, and moves the channel composer's text into

@@ -279,7 +279,8 @@ position too.
 
 `Account::mark_unread(channel, message)` sends the official client's request (above): the same
 message ID, count and body. It is refused without a request where the message's actions don't
-offer it (`MessageActions::mark_unread`).
+offer it (`MessageActions::mark_unread`). The macOS app asks it from a message's menu, the
+Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-actions.md#mark-unread)).
 
 - **Threads.** An archived thread is opened first with `PATCH /channels/{id}` and
   `{"archived":false}` (the documented Modify Channel; the client's own body wasn't read, not
