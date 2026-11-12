@@ -1194,6 +1194,16 @@ fn a_message_link_names_the_guild_or_the_dms() {
     );
 }
 
+#[test]
+fn a_message_in_a_thread_links_the_thread() {
+    let state = load(owner(plain), THREAD, &[sent(THREAD, MIRA, 0)]);
+
+    assert_eq!(
+        link(&state, THREAD, M),
+        format!("https://discord.com/channels/{G1}/{THREAD}/{M}")
+    );
+}
+
 // As the official client's, which copies the link of the message the row renders.
 #[test]
 fn a_starter_rows_link_is_the_originals() {
