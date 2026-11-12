@@ -770,6 +770,9 @@ impl State {
                 let (owner, newly_created) = (thread.owner_id, thread.newly_created);
                 self.put_channel(*thread, events);
                 self.note_post(parent, id);
+                if newly_created {
+                    self.read_own_post(parent, id, owner);
+                }
                 self.forum_post_created(id, parent, owner, newly_created, events);
             }
             E::ChannelUpdate(update) | E::ThreadUpdate(update) => {

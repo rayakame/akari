@@ -5,7 +5,7 @@ use super::{Derived, Entities, Journal, ReadyDiff, State};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
-    Snowflake, Timestamp,
+    Snowflake, Timestamp, UserId,
 };
 use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
@@ -693,6 +693,35 @@ impl State {
         };
         if stored.is_forum() && Arc::make_mut(stored).note_message(thread.cast()) {
             self.dirty.channel(stored.id);
+        }
+    }
+
+    // Module 218461: the user's own post is opened and acks its forum up to it, without a
+    // request. A forum being read is acked at "now" by its reading instead.
+    pub(super) fn read_own_post(
+        &mut self,
+        parent: Option<ChannelId>,
+        post: ChannelId,
+        owner: Option<UserId>,
+    ) {
+        let Some(forum) = parent.filter(|parent| self.is_forum(*parent)) else {
+            return;
+        };
+        if owner.is_none() || owner != self.entities.me() {
+            return;
+        }
+        if self.entities.read_states.get(post).is_none() {
+            self.read_up_to(post, Some(post.cast()));
+        }
+        let read = self.ready && self.reading.iter().any(|reading| reading.channel == forum);
+        let behind = self
+            .entities
+            .read_states
+            .get(forum)
+            .and_then(|state| state.acked)
+            .is_none_or(|acked| acked.get() < post.get());
+        if !read && behind {
+            self.read_up_to(forum, Some(post.cast()));
         }
     }
 }

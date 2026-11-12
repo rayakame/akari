@@ -1750,3 +1750,112 @@ fn a_deleted_answer_and_an_unasked_edit_change_nothing() {
     );
     assert_eq!(preview(&state, MIDDLE).as_deref(), Some("as asked"));
 }
+
+// H-4: a post read beside its forum never moves the forum's ack back to its newest post; every
+// ack of the forum is at "now".
+#[test]
+fn a_post_read_beside_its_forum_leaves_the_forums_ack_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    load_page(&mut state, OLD, LoadKind::Latest, &[OLD + 1], true);
+    let before = snowflake_at(wall_millis());
+    let both = [Snowflake::new(FORUM), Snowflake::new(OLD)];
+
+    let acks = state.set_reading(&both, &mut Vec::new());
+
+    let forum: Vec<_> = acks.iter().filter(|ack| ack.channel == both[0]).collect();
+    assert_eq!(forum.len(), 1, "{acks:?}");
+    assert!(forum[0].now);
+    assert!(acks.iter().any(|ack| ack.channel == both[1]), "{acks:?}");
+    assert!(!state.unread(both[1]));
+    let read = forum_ack(&state);
+    assert!(read >= Some(before), "{read:?}");
+
+    let later = snowflake_at(wall_millis() + 60_000);
+    apply(&mut state, "MESSAGE_CREATE", message(later, OLD));
+
+    let acks = state.take_reading_acks();
+    assert!(
+        acks.iter().all(|ack| ack.channel != both[0] || ack.now),
+        "{acks:?}"
+    );
+    assert!(forum_ack(&state) >= read, "never back");
+    state.set_reading(&[], &mut Vec::new());
+    assert!(
+        state.set_reading(&both, &mut Vec::new()).is_empty(),
+        "both are read"
+    );
+}
+
+fn own_post(id: u64) -> Value {
+    let mut post = listed_post(id, id, &[]);
+    post["owner_id"] = ME.to_string().into();
+    post["newly_created"] = true.into();
+    post
+}
+
+// H-4: the user's own post acks its forum up to it without a request (module 218461), counts as
+// opened and is never new.
+#[test]
+fn the_users_own_post_acks_its_forum_locally() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    assert_eq!(posts_count(&state), PostCount::New(1));
+
+    let events = apply(&mut state, "THREAD_CREATE", own_post(LATER));
+
+    assert_eq!(forum_ack(&state), Some(LATER));
+    assert!(state.take_reading_acks().is_empty(), "no request");
+    assert_eq!(posts_count(&state), PostCount::None);
+    assert!(
+        events.contains(&format!("BadgeChanged({FORUM})")),
+        "{events:?}"
+    );
+    let post = Snowflake::new(LATER);
+    assert!(state.new_posts(&[post]).is_empty());
+    assert!(
+        state.read_state(post).is_some_and(|read| !read.estimated),
+        "opened"
+    );
+    assert!(!state.unread(post));
+    assert!(active(&state, &ForumView::default()).contains(&LATER));
+}
+
+#[test]
+fn an_own_post_never_moves_the_forums_ack_back() {
+    let mut state = forum_with_new_posts();
+    apply(&mut state, "MESSAGE_ACK", read_ack(FORUM, LATER + 5));
+
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+
+    assert_eq!(forum_ack(&state), Some(LATER + 5));
+}
+
+// A post of the user's that only comes into view (no `newly_created`) says nothing was read.
+#[test]
+fn an_own_post_that_isnt_new_leaves_the_forums_ack() {
+    let mut state = forum_with_new_posts();
+    let mut post = own_post(LATER);
+    post["newly_created"] = false.into();
+
+    apply(&mut state, "THREAD_CREATE", post);
+
+    assert_eq!(forum_ack(&state), Some(FORUM_ACK));
+}
+
+// While the forum's page is read its ack goes to Discord as every other, at "now".
+#[test]
+fn an_own_post_in_a_forum_being_read_is_acked_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    apply(&mut state, "THREAD_CREATE", own_post(later));
+
+    let acks = state.take_reading_acks();
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert!(forum_ack(&state) >= Some(later));
+    assert!(state.new_posts(&[Snowflake::new(later)]).is_empty());
+}
