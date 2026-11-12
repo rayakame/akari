@@ -258,6 +258,9 @@ and `view_thread`, all false for a message the store doesn't have. The rules are
 ([message-actions.md](../../docs/ui/message-actions.md)); a host asks when its bar or menu
 opens and decides nothing itself. No event reports a change: the answer moves with the
 message, its channel, the user's roles and the end of a timeout.
+`Store.message_link(channel_id, message_id)` is the link Copy Message Link copies
+(`https://discord.com/channels/{guild}/{channel}/{message}`, `@me` outside a guild), asked with
+the row's own IDs like the actions.
 
 A thread's starter row is asked about with the thread's ID and the row's, for `reactions` and
 for `message_actions` alike, and both answer for the message the row shows once

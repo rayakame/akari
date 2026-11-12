@@ -348,6 +348,13 @@ impl Store {
         self.core.message_actions(channel_id, message_id).into()
     }
 
+    /// What Copy Message Link copies for a row: `https://discord.com/channels/{guild}/{channel}/
+    /// {message}`, `@me` outside a guild. A viewed thread's starter row gives the link of the
+    /// message it shows, in the parent channel.
+    pub fn message_link(&self, channel_id: ChannelId, message_id: MessageId) -> String {
+        self.core.message_link(channel_id, message_id)
+    }
+
     /// The parent's slowmode for creating threads, apart from sending: each created thread
     /// starts it. `None` without slowmode.
     pub fn thread_slowmode(&self, parent_id: ChannelId) -> Option<Slowmode> {

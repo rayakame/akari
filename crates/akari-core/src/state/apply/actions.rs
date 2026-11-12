@@ -51,6 +51,21 @@ impl State {
             .map(|message| (message.channel_id, message.id))
     }
 
+    pub(crate) fn message_link(&self, channel: ChannelId, row: MessageId) -> String {
+        let (channel, message) = self.shown_message(channel, row).unwrap_or((channel, row));
+        let guild = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|channel| channel.guild_id)
+            .map_or_else(|| "@me".to_owned(), |guild| guild.get().to_string());
+        format!(
+            "https://discord.com/channels/{guild}/{}/{}",
+            channel.get(),
+            message.get()
+        )
+    }
+
     pub(crate) fn message_actions_of(&self, message: &Message, now_millis: i64) -> MessageActions {
         let none = MessageActions::default();
         let Some(channel) = self.entities.channels.get(&message.channel_id) else {
