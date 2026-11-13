@@ -186,7 +186,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         groupTime: String, shortTime: String, fullDate: String,
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
         media: MediaState = MediaState(), embeds: [EmbedView.Shown] = [],
-        reply: (line: ReplyLine, text: NSAttributedString)? = nil, replyJumps: Bool = true
+        reply: (line: ReplyLine, text: NSAttributedString)? = nil, replyJumps: Bool = true,
+        replyRefused: Bool = false
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
@@ -199,7 +200,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         } else {
             replyLine.clear()
         }
-        failed?.show(replyDeleted: reply?.line.target == .deleted)
+        failed?.show(replyDeleted: replyRefused)
         if let threadBox {
             boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
         }

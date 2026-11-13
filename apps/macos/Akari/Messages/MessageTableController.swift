@@ -1188,7 +1188,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
-                embeds: embeds(row), reply: replyParts(row))
+                embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused)
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell

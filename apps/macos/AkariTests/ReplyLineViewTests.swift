@@ -23,7 +23,8 @@ func target(
 func replyRow(
     _ raw: UInt64, by user: User = author(1), at time: Date, content: String? = nil,
     to answered: UInt64 = 1, _ target: ReplyTarget, mentions: Bool = false,
-    kind: MessageType = .reply, delivery: Delivery = .sent, mentionsMe: Bool = false
+    kind: MessageType = .reply, delivery: Delivery = .sent, mentionsMe: Bool = false,
+    refused: Bool = false
 ) -> MessageListModel.Row {
     let base = row(raw, by: user, at: time, kind: kind, content: content, delivery: delivery)
     var message = base.message
@@ -39,7 +40,8 @@ func replyRow(
         id: base.id, message: message, authorName: base.authorName,
         reply: ReplyLine(
             channelId: message.channelId, messageId: MessageId(rawValue: answered), target: target,
-            mentionsAuthor: mentions, authorName: name))
+            mentionsAuthor: mentions, authorName: name),
+        replyRefused: refused)
 }
 
 // The line over a reply: the official client's measures (its stylesheet, canary 671549), from
@@ -349,17 +351,20 @@ struct ReplyLineViewTests {
         #expect(abs(stroke.blueComponent * 255 - (light ? 0xca : 0x50)) < 0.5)
     }
 
+    // Only the refusal says so: a reply that failed otherwise may answer a message deleted since.
     @Test
-    func aFailedReplyWhoseTargetIsGoneSaysSo() throws {
+    func aFailedReplyDiscordRefusedForItsDeletedMessageSaysSo() throws {
         let list = list {
             [
-                replyRow(5, at: $0.noon, .deleted, delivery: .failed),
+                replyRow(5, at: $0.noon, .deleted, delivery: .failed, refused: true),
                 replyRow(6, at: $0.noon + 600, target(), delivery: .failed),
+                replyRow(7, at: $0.noon + 1200, .deleted, delivery: .failed),
             ]
         }
 
         #expect(try cell(5, in: list).failed?.text == "Not sent: the message it replies to was deleted.")
         #expect(try cell(6, in: list).failed?.text == "Not sent.")
+        #expect(try cell(7, in: list).failed?.text == "Not sent.")
     }
 
     // A reply always starts a group; a row under a header never shows a line.
