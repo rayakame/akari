@@ -126,6 +126,37 @@ fn line_breaks_are_one_space() {
 }
 
 #[test]
+fn a_line_break_beside_spaces_is_still_one_space() {
+    for (source, expected) in [
+        ("a \n b", "a b"),
+        ("a\n b", "a b"),
+        ("a\n   b", "a   b"),
+        ("a \r\n b", "a b"),
+        ("**a**\n *b*", "a b"),
+        ("# a\n b", "a b"),
+        ("a\n\n b", "a b"),
+    ] {
+        assert_eq!(line(source), expected, "{source:?}");
+    }
+}
+
+#[test]
+fn a_code_block_of_nothing_but_whitespace_shows_nothing() {
+    for (source, expected) in [
+        ("```\n\n\n```", ""),
+        ("```\n \n```", ""),
+        ("```   ```", ""),
+        ("a\n```\n\n\n```\nb", "a b"),
+        ("a ```\n\n``` b", "a b"),
+        ("```\n\n\n```\nb", "b"),
+        ("` `", "` `"),
+    ] {
+        assert_eq!(line(source), expected, "{source:?}");
+    }
+    assert!(parse_inline_reply("```\n\n\n```").blocks().is_empty());
+}
+
+#[test]
 fn a_quote_is_no_rule() {
     assert_eq!(line("> quoted"), "> quoted");
     assert_eq!(line(">>> two\nlines"), ">>> two lines");
