@@ -14,6 +14,24 @@ pub struct ReactionEmoji {
 }
 
 impl ReactionEmoji {
+    /// A Unicode emoji, as the string itself.
+    pub fn unicode(emoji: &str) -> Self {
+        Self {
+            id: None,
+            name: Some(emoji.into()),
+            animated: false,
+        }
+    }
+
+    /// A custom emoji; a deleted one may have lost its name.
+    pub fn custom(id: EmojiId, name: Option<&str>, animated: bool) -> Self {
+        Self {
+            id: Some(id),
+            name: name.map(Into::into),
+            animated,
+        }
+    }
+
     /// Whether both stand for the same reaction, as Discord tells them apart: custom emoji by
     /// ID alone, Unicode emoji by the exact string.
     pub fn same(&self, other: &Self) -> bool {

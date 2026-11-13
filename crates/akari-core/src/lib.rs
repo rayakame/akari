@@ -34,7 +34,8 @@ pub(crate) fn ms(duration: std::time::Duration) -> f64 {
 }
 
 pub use account::{
-    Account, CreateThreadError, CreateThreadLocation, MarkOutcome, MessageLoad, ThreadLocation,
+    Account, CreateThreadError, CreateThreadLocation, MarkOutcome, MessageLoad, ReactionError,
+    ReactionLocation, ThreadLocation,
 };
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};

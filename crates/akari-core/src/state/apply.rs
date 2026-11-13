@@ -409,6 +409,8 @@ pub(crate) struct State {
     fetched_threads: HashSet<ChannelId>,
     // Each thread's newest message, for its box; never cached.
     latest: HashMap<ChannelId, Arc<Message>>,
+    // The user's own reactions whose requests are on their way.
+    reacting: Vec<reactions::OwnReaction>,
     // Threads messages brought before their guild was known.
     unplaced_threads: HashMap<ChannelId, model::Channel>,
     // Unjoined threads kept across the last READY that neither the gateway nor a request has
@@ -465,6 +467,7 @@ impl State {
             unavailable_threads: HashSet::new(),
             fetched_threads: HashSet::new(),
             latest: HashMap::new(),
+            reacting: Vec::new(),
             unplaced_threads: HashMap::new(),
             unconfirmed: HashSet::new(),
             older: HashMap::new(),
@@ -2300,6 +2303,7 @@ mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
+pub(crate) use reactions::Wanted;
 pub(crate) use reading::{Unread, UnreadNeeds};
 
 #[cfg(test)]
