@@ -67,6 +67,38 @@ final class TimeRefreshTests {
     func show(_ rows: [MessageListModel.Row]) {
         controller.show(MessageTableState(rows: rows, reachedOldest: true))
         window.layoutIfNeeded()
+        expectTheFixturesColumn()
+    }
+
+    var fixtureColumn: CGFloat?
+
+    // The column as rows that fill the list leave it: a legacy scroller shows only then, and
+    // takes its width from the column.
+    func columnUnderRows() -> CGFloat {
+        let scrollView = controller.scrollView
+        scrollView.autohidesScrollers = false
+        scrollView.tile()
+        window.layoutIfNeeded()
+        let width = table.tableColumns[0].width
+        scrollView.autohidesScrollers = true
+        scrollView.tile()
+        window.layoutIfNeeded()
+        fixtureColumn = width
+        return width
+    }
+
+    func expectTheFixturesColumn() {
+        guard let fixtureColumn else {
+            return
+        }
+        let column = table.tableColumns[0].width
+        #expect(
+            column == fixtureColumn,
+            "the fixture wrapped its text for a column of \(fixtureColumn), the rows show in \(column)")
+    }
+
+    func rowHeight(of raw: UInt64) -> CGFloat {
+        table.rect(ofRow: index(of: raw)).height
     }
 
     func body(ofRow row: Int) -> String {
@@ -136,11 +168,15 @@ final class TimeRefreshTests {
         #expect(timers.active.count == 1)
     }
 
-    // Text that wraps once its relative time turns from minutes to seconds, at `fire`.
-    func wrapping(due: Int64, at fire: Date, prefix: String = "x") throws -> String {
+    // Text that wraps once its relative time turns from minutes to seconds, at `fire`, and is
+    // as high at `still` as at `fire`.
+    func wrapping(
+        due: Int64, at fire: Date, still: Date? = nil, prefix: String = "x"
+    ) throws -> String {
         let times = TimestampText(
             locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
-        let width = table.tableColumns[0].width - 88
+        let column = columnUnderRows()
+        let width = column - 88
         return try #require(
             (1...160).lazy.map { prefix + String(repeating: "a", count: $0) + " <t:\(due):R>" }
                 .first { content in
@@ -150,8 +186,10 @@ final class TimeRefreshTests {
                             MessageText.build(message, revealed: [], now: now, times: times)
                                 .text, width: width)
                     }
-                    return height(self.clock.now) != height(fire)
-                })
+                    return height(self.clock.now) < height(fire)
+                        && height(still ?? fire) == height(fire)
+                },
+            "no text grows at \(fire) and stays so at \(still ?? fire) in a column of \(column)")
     }
 
     func scroll(toRowOf raw: UInt64) {
@@ -287,23 +325,25 @@ final class TimeRefreshTests {
 
     // Two rows grow during one gesture at the bottom: the list is measured from where its rows
     // ended when the first one grew, and follows the new end once the user lets go.
-    @Test
-    func rowsThatGrowDuringAGestureAtTheBottomArePinnedWhenItEnds() throws {
+    @Test(arguments: [NSScroller.Style.overlay, .legacy])
+    func rowsThatGrowDuringAGestureAtTheBottomArePinnedWhenItEnds(
+        scrollers: NSScroller.Style
+    ) throws {
+        controller.scrollView.scrollerStyle = scrollers
         let start = clock.now
-        let (first, second) = (start + 2, start + 62)
+        let (first, second) = (start + 2, start + 4)
         var rows = plainRows(60)
         rows[58] = row(
             59, by: author(2), at: start + 1770,
-            content: try wrapping(due: seconds(start) + 61, at: first))
-        clock.now = first
+            content: try wrapping(due: seconds(start) + 61, at: first, still: second))
         rows[59] = row(
             60, by: author(1), at: start + 1800,
-            content: try wrapping(due: seconds(start) + 121, at: second, prefix: "y"))
-        clock.now = start
+            content: try wrapping(due: seconds(start) + 63, at: second, prefix: "y"))
         show(rows)
         let clip = controller.scrollView.contentView
         let bottom = clip.bounds.origin
         let ended = table.contentHeight
+        let (upper, lower) = (rowHeight(of: 59), rowHeight(of: 60))
         let live = { (name: Notification.Name) in
             NotificationCenter.default.post(name: name, object: self.controller.scrollView)
         }
@@ -313,11 +353,21 @@ final class TimeRefreshTests {
         clock.now = first
         timers.fire()
         let grown = table.contentHeight
-        #expect(grown > ended + 10)
+        let taller = rowHeight(of: 59)
+        #expect(
+            taller > upper && rowHeight(of: 60) == lower,
+            "59 from \(upper) to \(taller), 60 from \(lower) to \(rowHeight(of: 60))")
+        #expect(grown == ended + taller - upper, "rows of \(ended), then \(grown)")
         #expect(clip.bounds.origin == bottom)
         clock.now = second
         timers.fire()
-        #expect(table.contentHeight > grown + 10)
+        let tallest = rowHeight(of: 60)
+        #expect(
+            tallest > lower && rowHeight(of: 59) == taller,
+            "60 from \(lower) to \(tallest), 59 from \(taller) to \(rowHeight(of: 59))")
+        #expect(
+            table.contentHeight == grown + tallest - lower,
+            "rows of \(grown), then \(table.contentHeight)")
         #expect(clip.bounds.origin == bottom)
 
         // A finger that slips a few points is still at the end the gesture began at.
@@ -343,6 +393,7 @@ final class TimeRefreshTests {
             content: try wrapping(due: seconds(clock.now) + 61, at: fire, prefix: "||x|| "))
         controller.show(MessageTableState(rows: rows, atPresent: false, reachedOldest: true))
         window.layoutIfNeeded()
+        expectTheFixturesColumn()
         scroll(toRowOf: 21)
         controller.jumpToPresent(load: true)
         let height = table.rect(ofRow: index(of: 20)).height
@@ -395,7 +446,7 @@ final class TimeRefreshTests {
         let due = seconds(clock.now) + 61
         let times = TimestampText(
             locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
-        let width = table.tableColumns[0].width
+        let width = columnUnderRows()
         let height = { (message: Message, now: Date) in
             MessageCell.height(
                 message,
@@ -408,7 +459,8 @@ final class TimeRefreshTests {
                 .first { content in
                     let message = row(1, at: self.clock.now, content: content).message
                     return height(message, self.clock.now) != height(message, later)
-                })
+                },
+            "no text is higher or lower at \(later) in a column of \(width)")
         var rows = (1...80).map { raw in
             row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
         }
@@ -417,6 +469,7 @@ final class TimeRefreshTests {
         table.scrollRowToVisible(table.numberOfRows - 1)
         window.layoutIfNeeded()
         #expect(timers.active.isEmpty)
+        let before = rowHeight(of: 2)
 
         clock.now = later
         table.scrollRowToVisible(0)
@@ -424,7 +477,8 @@ final class TimeRefreshTests {
         timers.fire()
         window.layoutIfNeeded()
 
-        let shown = table.rect(ofRow: index(of: 2)).height
+        let shown = rowHeight(of: 2)
+        #expect(shown != before, "\(before) before, \(shown) after")
         guard case .message(let edited, let startsGroup) = controller.timeline.items[index(of: 2)]
         else {
             Issue.record("not a message")
@@ -585,58 +639,79 @@ final class TimeRefreshTests {
 
     // A notice first in a list of 60 whose text wraps once its time reads "Yesterday at …", with
     // the reader at message 40; the notice's height then.
-    func rewrappingNotice() throws -> CGFloat {
+    func rewrappingNotice(scrollers: NSScroller.Style) throws -> CGFloat {
+        controller.scrollView.scrollerStyle = scrollers
         let start = berlinTime(2026, 10, 10, 23, 58)
         let notice = row(1, by: author(1, "Mira Kowalczyk-Lindqvist"), at: start, kind: .userJoin)
         let rows = [notice] + (2...60).map { row(UInt64($0), at: start + Double($0)) }
         let message = notice.message
         let text = try #require(notice.noticeParts)
+        let time = { (now: Date) in
+            MessageFormat.groupTime(
+                start, now: now, calendar: self.clock.calendar, locale: self.clock.locale)
+        }
+        let (today, yesterday) = (time(clock.now), time(midnightPassed))
         let height = { (time: String, width: CGFloat) in
             // The list's first message, right below its day's divider.
             NoticeCell.height(message, notice: text, time: time, followsDay: true, width: width)
         }
+        // As `columnUnderRows`, at every width.
+        controller.scrollView.autohidesScrollers = false
         var width: CGFloat = 0
         for windowWidth in stride(from: 300, through: 1000, by: 2) {
             window.setContentSize(NSSize(width: CGFloat(windowWidth), height: 400))
             window.layoutIfNeeded()
             let column = table.tableColumns[0].width
-            if height("11:58\u{202F}PM", column)
-                != height("Yesterday at 11:58\u{202F}PM", column)
-            {
+            if height(today, column) < height(yesterday, column) {
                 width = column
                 break
             }
         }
-        try #require(width > 0)
+        controller.scrollView.autohidesScrollers = true
+        try #require(
+            width > 0,
+            "no window from 300 to 1000 wide wraps the notice at \"\(yesterday)\" and not at \"\(today)\"")
+        fixtureColumn = width
         show(rows)
         scroll(toRowOf: 40)
-        return height("Yesterday at 11:58\u{202F}PM", width)
+        let column = table.tableColumns[0].width
+        let shown = rowHeight(of: 1)
+        try #require(
+            column == width && shown == height(today, width),
+            """
+            the notice is \(shown) high in a column of \(column); measured for \(width): \
+            \(height(today, width)) at "\(today)", \(height(yesterday, width)) at "\(yesterday)"
+            """)
+        return height(yesterday, width)
     }
 
-    @Test
-    func aNoticeRowTakesItsNewHeightWhenItsTimeChanges() async throws {
-        let height = try rewrappingNotice()
+    var midnightPassed: Date { berlinTime(2026, 10, 11, 0, 1) }
+
+    @Test(arguments: [NSScroller.Style.overlay, .legacy])
+    func aNoticeRowTakesItsNewHeightWhenItsTimeChanges(scrollers: NSScroller.Style) async throws {
+        let height = try rewrappingNotice(scrollers: scrollers)
         let clip = controller.scrollView.contentView
         let place = table.rect(ofRow: index(of: 40)).minY - clip.bounds.minY
+        let before = rowHeight(of: 1)
 
-        clock.now = berlinTime(2026, 10, 11, 0, 1)
+        clock.now = midnightPassed
         await post(.NSCalendarDayChanged)
 
-        #expect(table.rect(ofRow: index(of: 1)).height == height)
+        #expect(rowHeight(of: 1) == height, "\(before) before, to be \(height)")
         #expect(abs(table.rect(ofRow: index(of: 40)).minY - clip.bounds.minY - place) <= 0.5)
     }
 
-    @Test
-    func aNoticeThatRewrapsAboveTheReaderMovesNoViews() throws {
-        let height = try rewrappingNotice()
+    @Test(arguments: [NSScroller.Style.overlay, .legacy])
+    func aNoticeThatRewrapsAboveTheReaderMovesNoViews(scrollers: NSScroller.Style) throws {
+        let height = try rewrappingNotice(scrollers: scrollers)
         let before = MessageTableTests.visibleViews(in: controller)
         #expect(!before.isEmpty)
-        #expect(table.rect(ofRow: index(of: 1)).height != height)
+        let short = rowHeight(of: 1)
 
-        clock.now = berlinTime(2026, 10, 11, 0, 1)
+        clock.now = midnightPassed
         controller.refreshTimes()
 
-        #expect(table.rect(ofRow: index(of: 1)).height == height)
+        #expect(rowHeight(of: 1) == height, "\(short) before, to be \(height)")
         MessageTableTests.expectTheSameViewsInPlace(before, in: controller, reloaded: true)
         MessageTableTests.expectRowViewsAtTheirRows(in: controller)
     }
