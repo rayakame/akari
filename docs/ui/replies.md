@@ -17,7 +17,9 @@ reply sends is in [messages.md](../protocol/messages.md); who may reply is in
   own or Shift was held at the click: **Shift+click on Reply** starts it without the ping. The
   bar's switch changes it afterwards, where it shows.
 - **One pending reply per channel.** A second Reply in the same channel replaces the first; a
-  thread or a post has its own. It stays while the user looks at other channels.
+  thread or a post has its own. It stays while the user looks at other channels, and while the
+  list scrolls, jumps or reloads: the reply is sent whether or not the answered message is
+  still among the loaded ones.
 - It ends when the send starts (not when Discord answers: a failed send doesn't bring the bar
   back), with the bar's ✕, with Escape, and when the answered message is deleted; what was
   typed stays.
@@ -30,9 +32,15 @@ reply sends is in [messages.md](../protocol/messages.md); who may reply is in
   store has no handler for it.*
 - *A reply Discord refuses because its message is gone (a delete that raced the send) fails like
   any message, and its row says why: "Not sent: the message it replies to was deleted." The
-  official client shows its general "could not be delivered" notice. If the core refuses the
-  reply before it is queued (the message left the loaded ones), the bar goes, the text stays and
-  the strip under the composer says so.*
+  official client shows its general "could not be delivered" notice. Only that refusal has the
+  words: a reply that failed for another reason reads "Not sent.", also when its message is
+  deleted afterwards.*
+- *The core keeps the answered message for the pending reply from Reply until the send is
+  queued or the reply ends (akari-core's `Account::hold_reply`), so a long scroll, a jump or a
+  reload doesn't cost the reply. The official client sends from the reference it stored alone.
+  If the user may no longer send in the channel when the reply is queued, the bar goes, the text
+  stays and the strip under the composer says so.*
+- *A reply to the user's own message never pings, whatever a host asks the core for.*
 - *The official client's R and Shift+R on a message with keyboard focus are left out: Akari's
   rows take no keyboard focus yet.*
 
@@ -55,6 +63,8 @@ corners; the band takes the top two and nothing is squared off.
   - ✕ in a circle, 16, with 12 beside and 8 above and below, `interactiveText`, brighter
     (`interactiveTextActive`) under the pointer; "Cancel reply".
   Neither has a hover background.
+- **The name** follows the author's: a rename shows in the bar as it does in the list, also
+  once the message left the loaded ones.
 - **The switch shows** unless the channel is a DM or a group DM or the message is the user's
   own. A DM's reply pings (unless started with Shift) and can't be changed in the bar; a reply
   to oneself never pings. Webhooks and bots are no exception.
@@ -133,7 +143,7 @@ The text is the message's markdown by the official client's one-line rules
 (`akari_markdown::parse_inline_reply`): styles, inline code, spoilers, links, mentions,
 timestamps and emoji stay; a quote's marker is text; a code block shows as inline code; line
 breaks are spaces; headings, subtext and list items give their text without markers; emoji are
-never jumbo.
+never jumbo. A relative time ("in 5 minutes") changes with the clock, as in a message's text.
 
 ### Under the pointer
 
@@ -162,6 +172,10 @@ line opens the message's menu.
   message", with its author's avatar and name; the official client shows its system wording
   with a glyph of its own and no name. A poll without text reads "Click to see attachment"; the
   official client shows the poll's question.*
+- *A line break beside spaces shows as one space, and a code block that holds nothing but
+  whitespace shows nothing; the official client's line shows each as it is.*
+- *A failed reply whose channel is gone (deleted, or its server left) keeps its line, without
+  the hand and without a jump.*
 - *Compact mode has no line of its own yet.*
 - *The line isn't a VoiceOver element of its own beyond its text button, labelled "Replying to
   Name: text"; "Jump To Reply" is its help.*
@@ -178,10 +192,11 @@ A click on the line's text or its spine, or on the reply bar, goes to the answer
   Are Viewing a Reply." with the button "Jump To Original Message" instead of "You're reading
   older messages" and "Jump to present". The button jumps back to the reply and flashes it. Any
   other jump, the jump to the present and Escape end it; a jump that stayed among the loaded
-  messages at the present shows no bar.
+  messages at the present shows no bar. A way back whose load fails stays, to be tried again.
 - **A thread's first row** shows the message the thread started from with that message's line;
   its click goes to the answered message in the parent channel: in the open list that shows the
-  parent, else the parent opens and jumps.
+  parent, else the parent opens and jumps. If that jump's load fails, the parent shows its
+  newest messages instead of an empty list.
 
 *Akari:*
 

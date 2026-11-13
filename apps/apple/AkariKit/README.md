@@ -103,7 +103,15 @@ screen, so views render from them without calling into Rust.
   `toggleReplyMention()` is the bar's switch, `cancelReply()` its ✕. It ends when the send is
   queued, when its message is deleted (a bulk delete too, or `ReplyTargetChanged` to deleted),
   and when the core refuses the reply before queueing it (`Problem.replyTargetGone`; the draft
-  stays).
+  stays). `reply`'s one setter is where the core is told: a new message is held
+  (`Account.holdReply`), so the reply can be sent after the message left the loaded ones, and
+  an end other than the send lets go (`releaseReply`; the core does that itself when it queues
+  the reply). A reply read back from the session's drafts on returning to a channel holds
+  nothing again: the core's hold lasts for the session. The bar's name is the list's: the
+  message list renames it when names change, from the row or, once the message left the
+  list, from the held preview. `replyWasRefused(_:)` says whether a failed message is a reply
+  Discord refused for its deleted message (`RequestError.ReplyTargetDeleted` on its send or
+  retry, until the next retry or its discard); the row has it as `replyRefused`.
 - `ViewerModel` is the media viewer's (`docs/ui/viewer.md`): `attachments(of:from:shows:)` and
   `embed(_:from:)` pick the items a click opens (a message's shown images and videos, an embed's
   gallery, its image or GIFV alone), and `messages.viewer(_:at:of:)` makes the model with the
@@ -179,12 +187,15 @@ A row's `reply` (`ReplyLine`, `nil` unless its shown message answers one) is wha
 a reply shows: the answered message's state (`ReplyTarget`), `author` for the small avatar,
 `name` with its "@" when the reply mentions them, `content` (the one-line `RichText` with
 `edited`, or the official client's words as a placeholder), `leadingSymbol` and
-`trailingSymbol` (SF Symbols), `jumps` (not once deleted) and a label for VoiceOver.
+`trailingSymbol` (SF Symbols), `jumps` (not once deleted, nor when the store no longer has the
+answered message's channel: a failed reply outlives it) and a label for VoiceOver.
 `MessageListModel.jumpToTarget(of:)` is the line's click: `jump(to:)` in the list, loading
 around a message that isn't loaded, or `SessionModel.jump(to:in:)` for a message of another
 channel (a starter row's original: the open list of that channel, else the channel opens and
-jumps in `open()`). When the jump left the present, `replyReturn` names the reply and
-`returnToReply()` goes back; any other jump ends it. `shownJump` is the last jump a view
+jumps in `open()`; if that jump doesn't land and the list has no rows, `open()` loads the
+newest messages). When the jump left the present, `replyReturn` names the reply and
+`returnToReply()` goes back and ends it once it landed (a failed load leaves it); any other
+jump ends it. `shownJump` is the last jump a view
 scrolled to, so a view made later doesn't repeat it. `replyingTo` is the message the pending
 reply answers. `SessionModel.escape(from:)` takes the pane the key was pressed in: an open
 New Thread form closes first, then a pending reply is cancelled (that pane's before the other's)

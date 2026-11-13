@@ -149,7 +149,8 @@ messages apart from the replies, as the official client's ReferencedMessageStore
 - The official client keeps 100 targets a channel, least recently used first out. Akari keeps
   100 a channel by when a reply or the message last fed them, *and besides them every target a
   reply the store holds names* (a window's row, a held message, the outbox, a thread's
-  starter), so a line never falls back to "not loaded" under its reader. A channel's targets go
+  starter) *and the one held for the channel's pending reply* (below), so a line never falls
+  back to "not loaded" under its reader. A channel's targets go
   with the channel, and with its window unless another window's reply names them. A new
   session keeps them (the official client drops them all); the refresh brings them again.
 - The preview's "@": `Store::reply_mentions_author(&reply)`, which is
@@ -199,18 +200,38 @@ reference (`kind` default, the target's ID, the channel, the guild in a guild ch
 the ping on, the target's author as its only entry in `mentions`, so
 `Store::reply_mentions_author` is true and the preview has its "@" before Discord answers.
 With the ping off `mentions` is empty. The row has no copy of the target: queueing it makes the
-target `Loaded` in the target store from the window's message (`ReplyTargetChanged` when that
-changes the answer, then `MessageInserted`), and the outbox keeps the target past the bound for
-as long as the row is pending or failed.
+target `Loaded` in the target store from the window's message, or leaves it as the hold kept
+it (`ReplyTargetChanged` when that changes the answer, then `MessageInserted`), and the outbox
+keeps the target past the bound for as long as the row is pending or failed.
+
+*Akari:* a reply to the user's own message never pings: the core turns `mention` off, so the
+body has `replied_user: false` and the row no mention of the user. The official client's bar
+offers no ping there; the core doesn't rely on the host for it.
+
+**The held target.** The official client sends a reply from the reference its pending-reply
+store kept and needs no message for it. Akari's core checks a reply against the message, so
+the host says when a reply starts: `Account::hold_reply(channel, message)` makes the target
+`Loaded` from the window's message and keeps it for the channel, outside the window and past
+the bound, patched by MESSAGE_UPDATE and made `Deleted` by MESSAGE_DELETE and
+MESSAGE_DELETE_BULK like any target. One message is held per channel; another call replaces
+it, and a call for a message that takes no reply answers false and leaves nothing held. The
+hold ends when a reply is queued in the channel (from then on the row names the target), with
+`Account::release_reply(channel)`, when the channel leaves the store (CHANNEL_DELETE,
+THREAD_DELETE, GUILD_DELETE, a READY without it) and with `Account::close`. An evicted window
+doesn't end it. It lasts for the session and isn't written to the cache.
 
 **Retry.** `retry_message` sends the same body again: the reference, the ping as it was queued
 (kept beside the outbox, since a non-pinging row's `mentions` can't say it) and the nonce. The
 official client does the same from its store of each optimistic message's send options.
 
 **What may be answered.** `queue_message` refuses with `InvalidRequest`, before anything is
-queued or sent, a target that isn't a loaded message of the channel the reply goes to or whose
-`Store::message_actions` has no `reply` (the type, Send Messages and Read Message History, a
-timeout, a pending, failed or ephemeral row). *Akari:* a thread's starter row isn't answered
+queued or sent, a target that is neither a loaded message of the channel the reply goes to nor
+the one held for it, or whose `Store::message_actions` has no `reply` (the type, Send Messages
+and Read Message History, a timeout, a pending, failed or ephemeral row). For a held target
+that left the window the type and the flags are the preview's and the permissions the
+channel's at that moment; a held target that was deleted is refused. An archived thread takes
+a reply where a send would reopen it (not locked, or the user has Manage Threads), as the
+official client offers Reply only where the user could unarchive. *Akari:* a thread's starter row isn't answered
 from inside its thread. The row shows a message of the parent channel, the official client's
 composer only builds references to the channel it sends in, and whether its server takes a
 reference into the parent isn't known; `message_actions(thread, row).reply` is false.

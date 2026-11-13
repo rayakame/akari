@@ -82,7 +82,8 @@ never reaches back past a send or into another channel's draft.
   delete them.
 - A failed reply keeps its line and, on Retry, its message and its ping choice. When Discord
   refused it because the answered message is gone, the line says "Not sent: the message it
-  replies to was deleted." *Akari's wording; the official client tells no reason apart.*
+  replies to was deleted."; a reply that failed for another reason says "Not sent." even if the
+  message was deleted since. *Akari's wording; the official client tells no reason apart.*
 - The reason shows on the left of the strip under the card, in `danger` at 12, on one line.
   Akari words its reasons itself: being too fast (with how long to wait), missing
   permission, a person who doesn't accept the user's messages, a message that is too long, no

@@ -98,7 +98,10 @@ Reactions, replies, voice, notifications and settings come later.
   the badge, the name, the text on one line as a `PreviewLineView`, symbols), `ReplySpineView`
   the elbow beside it; both are buttons the list's pointer authority lights together, and a
   click jumps to the answered message, which flashes. The line's height never depends on its
-  text, so a message that is edited, deleted or loaded later only redraws its replies' rows.
+  text, so a message that is edited, deleted or loaded later only redraws its replies' rows; a
+  relative time in the line is one more date for the list's timer, which rebuilds that line
+  alone. A failed reply's "Not sent" line names the deleted message only for a row with
+  `replyRefused`.
 - **History:** older pages load before the top is reached and newer ones near the bottom while
   older messages are shown; the text being read never moves when a page lands, an edit
   changes a message's height or a message is deleted. A bar above the composer jumps to the
