@@ -699,4 +699,35 @@ struct ReplyLineTimeTests {
 
         #expect(line().contains("14:05"), "\(line())")
     }
+
+    @Test
+    func aRelativeTimeInTheLineTicks() {
+        let due = refresh.seconds(refresh.clock.now) + 61
+        refresh.show([
+            replyRow(5, at: refresh.clock.now, content: "an answer", target("due <t:\(due):R>"))
+        ])
+        let index = refresh.index(of: 5)
+        let line = { () -> String in
+            let cell = refresh.table.view(atColumn: 0, row: index, makeIfNecessary: true) as? MessageCell
+            return cell?.replyLine.content.shownText.string ?? ""
+        }
+        let times = TimestampText(
+            locale: refresh.clock.locale, timeZone: refresh.clock.calendar.timeZone,
+            calendar: refresh.clock.calendar)
+        let before = line()
+        let height = refresh.table.rect(ofRow: index).height
+        #expect(before == "due " + times.text(due, style: .relative, now: refresh.clock.now), "\(before)")
+        #expect(refresh.timers.active.count == 1)
+        #expect(
+            refresh.timers.active.first?.date
+                == times.nextChange(due, style: .relative, now: refresh.clock.now))
+
+        refresh.clock.now += 2
+        refresh.timers.fire()
+
+        #expect(line() == "due " + times.text(due, style: .relative, now: refresh.clock.now), "\(line())")
+        #expect(line() != before)
+        #expect(refresh.table.rect(ofRow: index).height == height)
+        #expect(refresh.timers.active.count == 1, "the next change is asked for")
+    }
 }

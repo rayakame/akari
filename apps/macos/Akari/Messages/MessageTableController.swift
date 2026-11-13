@@ -122,8 +122,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // A thread box's newest message as the box shows it, and when the box's time changes.
     private var boxContents: [MessageId: (message: Message, text: NSAttributedString)] = [:]
     private var boxTimes: [MessageId: Date] = [:]
-    // A reply line's text, built once per change of the line.
+    // A reply line's text, built once per change of the line, and when a time in it changes.
     private var replyTexts: [MessageId: (line: ReplyLine, text: NSAttributedString)] = [:]
+    private var replyTimes: [MessageId: Date] = [:]
     nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
@@ -718,6 +719,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 boxContents[row.id] = nil
                 boxTimes[row.id] = nil
                 replyTexts[row.id] = nil
+                replyTimes[row.id] = nil
             }
         }
         for index in changes.reloaded {
@@ -1460,13 +1462,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func replyParts(_ row: MessageListModel.Row) -> (line: ReplyLine, text: NSAttributedString)? {
         guard let line = row.reply else {
             replyTexts[row.id] = nil
+            replyTimes[row.id] = nil
             return nil
         }
         if let cached = replyTexts[row.id], cached.line == line {
             return cached
         }
-        let parts = (line, ReplyLineView.text(of: line, now: now(), times: times))
+        let built = ReplyLineView.build(line, now: now(), times: times)
+        let parts = (line, built.text)
         replyTexts[row.id] = parts
+        replyTimes[row.id] = built.nextChange
         return parts
     }
 
@@ -1484,7 +1489,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func nextChange(of row: MessageListModel.Row) -> Date? {
-        [relativeTimes[row.id], boxTimes[row.id]].compactMap { $0 }.min()
+        [relativeTimes[row.id], boxTimes[row.id], replyTimes[row.id]].compactMap { $0 }.min()
     }
 
     static func isOnScreen(_ window: NSWindow) -> Bool {
@@ -1560,13 +1565,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             let body = relativeTimes[row.id].map { $0 <= now } ?? false
             let box = boxTimes[row.id].map { $0 <= now } ?? false
+            // A line is one line high whatever its time says.
+            let reply = replyTimes[row.id].map { $0 <= now } ?? false
+            if reply {
+                replyTexts[row.id] = nil
+                replyTimes[row.id] = nil
+            }
             if body {
                 remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
                 embedTexts[row.id] = nil
             }
-            if body || box {
+            if body || box || reply {
                 due.insert(index)
                 boxTimes[row.id] = nil
             }
