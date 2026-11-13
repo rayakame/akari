@@ -435,6 +435,20 @@ impl Account {
         self.core.reserve_placing()
     }
 
+    /// The user started a reply to the message in the channel: a reply to it can be sent also
+    /// once it leaves the loaded messages, and its `reply_target` stays loaded. One message per
+    /// channel; another call replaces it. Held until a reply is queued in the channel,
+    /// `release_reply`, the channel's removal or `close`. False, with nothing held for the
+    /// channel, where `message_actions` has no `reply` for the message.
+    pub fn hold_reply(&self, channel_id: ChannelId, message_id: MessageId) -> bool {
+        self.core.hold_reply(channel_id, message_id)
+    }
+
+    /// The user cancelled the reply `hold_reply` was called for.
+    pub fn release_reply(&self, channel_id: ChannelId) {
+        self.core.release_reply(channel_id);
+    }
+
     /// Shows the message as pending at once and resolves with Discord's ID. On an error the
     /// message stays as failed until retried or discarded. With `reply` it answers that
     /// message, as `queue_message` says.
@@ -459,8 +473,9 @@ impl Account {
     ///
     /// With `reply` the message answers that message of the channel: the pending row is a
     /// reply with its `replied_to`, its target reads as `Loaded` at once, and a retry keeps the
-    /// target and the ping. A message whose `message_actions` has no `reply`, or one of another
-    /// channel, is refused with `InvalidRequest`.
+    /// target and the ping. A message whose `message_actions` has no `reply`, one of another
+    /// channel, or one that is neither loaded nor held by `hold_reply` is refused with
+    /// `InvalidRequest`. A reply to the user's own message never pings.
     #[uniffi::method(default(reply = None))]
     pub fn queue_message(
         &self,

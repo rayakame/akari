@@ -387,3 +387,108 @@ async fn a_preview_is_parsed_once_and_again_after_an_edit() {
     assert_eq!(line(store.reply_target(GENERAL, TARGET)), None);
     viewing.account.close();
 }
+
+#[tokio::test]
+async fn a_held_message_is_answered_after_a_jump_left_it_behind() {
+    let server = MockServer::start().await;
+    let bodies = created(&server).await;
+    let mut far = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    far["id"] = "400000000000000900".into();
+    far.as_object_mut().unwrap().remove("nonce");
+    Mock::given(method("GET"))
+        .and(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([far])))
+        .mount(&server)
+        .await;
+    let viewing = viewing(server).await;
+    let store = viewing.account.store();
+    let away = MessageId::new(400_000_000_000_000_900);
+
+    assert!(viewing.account.hold_reply(GENERAL, MESSAGE));
+    viewing
+        .account
+        .load_messages(
+            GENERAL,
+            crate::account::MessageLoad::Around {
+                message_id: away,
+                limit: 3,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(store.messages(GENERAL, vec![MESSAGE]).is_empty());
+    assert!(matches!(
+        store.reply_target(GENERAL, MESSAGE),
+        ReplyTarget::Loaded { .. }
+    ));
+
+    let reply = ReplyTo {
+        message_id: MESSAGE,
+        mention: true,
+    };
+    let sent = viewing
+        .account
+        .send_message(GENERAL, "hello".to_owned(), Some(reply))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        bodies.lock().unwrap()[0]["message_reference"]["message_id"],
+        MESSAGE.get().to_string()
+    );
+    let confirmed = &store.messages(GENERAL, vec![sent])[0];
+    assert_eq!(
+        confirmed.replied_to.map(|replied| replied.message_id),
+        Some(MESSAGE)
+    );
+    viewing.account.close();
+}
+
+#[tokio::test]
+async fn a_released_message_is_refused_after_a_jump_left_it_behind() {
+    let server = MockServer::start().await;
+    let bodies = created(&server).await;
+    let mut far = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    far["id"] = "400000000000000900".into();
+    far.as_object_mut().unwrap().remove("nonce");
+    Mock::given(method("GET"))
+        .and(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([far])))
+        .mount(&server)
+        .await;
+    let viewing = viewing(server).await;
+
+    assert!(viewing.account.hold_reply(GENERAL, MESSAGE));
+    assert!(!viewing.account.hold_reply(GENERAL, MessageId::new(42)));
+    assert!(viewing.account.hold_reply(GENERAL, MESSAGE));
+    viewing.account.release_reply(GENERAL);
+    viewing
+        .account
+        .load_messages(
+            GENERAL,
+            crate::account::MessageLoad::Around {
+                message_id: MessageId::new(400_000_000_000_000_900),
+                limit: 3,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    let reply = ReplyTo {
+        message_id: MESSAGE,
+        mention: true,
+    };
+    let refused = viewing
+        .account
+        .queue_message(GENERAL, "hello".to_owned(), Some(reply));
+
+    assert!(matches!(refused, Err(RequestError::InvalidRequest)));
+    assert!(bodies.lock().unwrap().is_empty());
+    viewing.account.close();
+}
