@@ -22,6 +22,8 @@ struct MessageTableState: Equatable {
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
+    /// The message the pending reply answers: its row is tinted.
+    var replyingTo: MessageId?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
     /// Where the rows' images come from; `nil` shows placeholders only.
@@ -293,6 +295,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         // A new table for a model that jumped before doesn't jump again.
         if wasFilled, state.unreadJumps != previous.unreadJumps {
             scroll(toRow: lineRow, below: state.startRoom)
+        }
+        if previous.replyingTo != state.replyingTo {
+            markReplyTarget()
         }
         if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
             // Unless the line has been seen, the unread bar shows once it's out of sight.
@@ -1158,6 +1163,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
+            cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
@@ -1433,6 +1439,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         boxTimes[row.id] = time?.nextChange
         return (box, content, time?.text)
+    }
+
+    // The row the pending reply answers has the official client's tint while the bar is up.
+    private func markReplyTarget() {
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell,
+                timeline.items.indices.contains(index),
+                case .message(let row, _) = timeline.items[index]
+            else {
+                return
+            }
+            cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
+        }
     }
 
     private func nextChange(of row: MessageListModel.Row) -> Date? {

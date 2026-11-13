@@ -137,7 +137,7 @@ struct SessionScreen: View {
                 markServerRead: { [session] in session.markServerRead() },
                 tables: tables,
                 escape: { [session, tables] in
-                    if session.escape() {
+                    if session.escape(from: messages.channelId) {
                         tables.jumpToPresent()
                     }
                 },

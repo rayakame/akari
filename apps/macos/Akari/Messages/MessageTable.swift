@@ -142,7 +142,8 @@ struct MessageArea: View {
                     onShiftEscape: { bridge.markServerRead() },
                     onShiftPageUp: { bridge.jumpToUnread() },
                     onAttach: { link.composer = $0 },
-                    autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused
+                    autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused,
+                    onReplyJump: { bridge.jump(to: $0) }
                 )
                 .id(messages.channelId)
             }
@@ -163,6 +164,7 @@ struct MessageArea: View {
             hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
+            replyingTo: messages.replyingTo,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
             images: ImageCacheRef(images, placeholders: placeholders), motion: motion,
             focused: focused)
@@ -283,8 +285,12 @@ final class MessageListBridge: MessageListActions {
         if let escapeAll {
             escapeAll()
         } else {
+            // A pending reply takes the key: nothing is marked and nothing scrolls.
+            let replying = messages.composer.reply != nil
             Task { await messages.escape() }
-            link.controller?.jumpToPresent(load: false)
+            if !replying {
+                link.controller?.jumpToPresent(load: false)
+            }
         }
         link.composer?.takeFocus()
     }
