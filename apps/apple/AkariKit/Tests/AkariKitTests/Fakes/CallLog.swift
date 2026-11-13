@@ -23,6 +23,12 @@ final class CallLog: Sendable {
         case joinThread(ChannelId, ThreadLocation)
         case leaveThread(ChannelId, ThreadLocation)
         case markUnread(ChannelId, MessageId)
+        // The emoji as the path names it: itself, or `name:id`.
+        case react(ChannelId, MessageId, String, ReactionLocation)
+        case unreact(ChannelId, MessageId, String, ReactionLocation)
+        case removeReaction(ChannelId, MessageId, String, ReactionKind, UserId)
+        case removeReactions(ChannelId, MessageId, String?)
+        case reactors(ChannelId, MessageId, String, ReactionKind, after: UserId?, limit: UInt8)
         case loadOlderThreads(ChannelId)
         case searchThreads(ChannelId, String)
         case setBrowsing(ChannelId?)
