@@ -128,12 +128,13 @@ struct JumpFlashTests {
         cell.flash(elapsed: nil, reducesMotion: false)
         #expect(cell.flashAnimation == nil)
         clock.now += 1
+        let before = cell.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
         list.show(MessageTableState(rows: list.page + [row(201, at: list.noon)], messageJump: jump(to: 120, 1)))
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
         let shown = try #require(try list.cell(of: 120) as? MessageCell)
         let begin = try #require(shown.flashAnimation).beginTime
-        let layerNow = shown.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
-        #expect(abs(layerNow - begin - 1) < 0.1, "it carries on 1 s in")
+        let after = shown.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
+        #expect((before - 1...after - 1).contains(begin), "it carries on 1 s in")
 
         clock.now += 1.3
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])

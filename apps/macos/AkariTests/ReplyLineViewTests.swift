@@ -556,6 +556,70 @@ struct ReplyLineBehaviorTests {
     }
 
     @Test
+    func aDeletedTargetsSpineStaysDim() throws {
+        shown(.deleted)
+        let cell = try cell(5)
+
+        cell.spine.hovered = true
+
+        var wanted: CGColor?
+        cell.effectiveAppearance.performAsCurrentDrawingAppearance {
+            wanted = Palette.spine.cgColor
+        }
+        #expect(cell.spine.shape.strokeColor == wanted)
+    }
+
+    @Test
+    func hoverLeavesAMentionsColor() throws {
+        let line = try #require(replyRow(5, at: list.noon, target()).reply)
+        let text = NSMutableAttributedString(
+            string: "ask ", attributes: [.foregroundColor: Palette.textDefault])
+        text.append(NSAttributedString(string: "@Ray", attributes: [.foregroundColor: Palette.mentionText]))
+        let button = ReplyContentButton()
+        button.configure(line, text: text, jumps: true)
+
+        button.hovered = true
+
+        let color = { (at: Int) in
+            button.shownText.attribute(.foregroundColor, at: at, effectiveRange: nil) as? NSColor
+        }
+        #expect(color(0) === Palette.textStrong)
+        #expect(color(4) === Palette.mentionText)
+    }
+
+    @Test
+    func aForwardsArrowStandsBeforeItsText() throws {
+        let forwarded = ReplyTarget.loaded(
+            preview: ReplyPreview(
+                kind: .default, author: author(2, "Ray"), fromWebhook: false, content: "", edited: false,
+                voiceMessage: false, hasAttachments: false, hasEmbeds: false, hasSticker: false,
+                forwarded: true, formatted: nil))
+        shown(forwarded)
+        let content = try cell(5).replyLine.content
+        content.layoutSubtreeIfNeeded()
+
+        #expect(content.symbols.leading)
+        #expect(content.textFrame.minX == 20)
+
+        shown()
+        let plain = try cell(5).replyLine.content
+        plain.layoutSubtreeIfNeeded()
+        #expect(!plain.symbols.leading)
+        #expect(plain.textFrame.minX == 0)
+    }
+
+    @Test
+    func aPlaceholderHasRoomForItsItalicsLean() throws {
+        shown(.deleted)
+        let words = try cell(5).replyLine.content
+        #expect(words.fittingWidth == words.line.textWidth + 2)
+
+        shown()
+        let text = try cell(5).replyLine.content
+        #expect(text.fittingWidth == text.line.textWidth)
+    }
+
+    @Test
     func aClickOnTheTextOrTheSpineJumps() throws {
         shown()
         let cell = try cell(5)

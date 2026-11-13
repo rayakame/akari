@@ -49,7 +49,8 @@ struct FlashOverlayTests {
 
         #expect(blink.keyPath == "opacity")
         #expect(blink.duration == base.duration && blink.duration == 2.6)
-        #expect(abs(blink.beginTime - base.beginTime) < 0.05)
+        let now = cell.flashOverlay.convertTime(CACurrentMediaTime(), from: nil)
+        #expect(base.beginTime <= blink.beginTime && blink.beginTime <= now, "one start, already past")
         let values = try #require(blink.values as? [Double])
         let times = try #require(blink.keyTimes?.map { $0.doubleValue * blink.duration })
         #expect(values.count == times.count)
@@ -120,14 +121,15 @@ struct FlashOverlayTests {
     func aCellShownAgainCarriesBothLayersOn() throws {
         let cell = try jumped(to: 120)
         clock.now += 1
+        let before = cell.flashOverlay.convertTime(CACurrentMediaTime(), from: nil)
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
         let shown = try #require(try list.cell(of: 120) as? MessageCell)
 
         let base = try #require(shown.flashAnimation)
         let overlay = try #require(shown.flashOverlayAnimation)
-        let now = shown.flashOverlay.convertTime(CACurrentMediaTime(), from: nil)
-        #expect(abs(now - overlay.beginTime - 1) < 0.1)
-        #expect(abs(overlay.beginTime - base.beginTime) < 0.05)
+        let after = shown.flashOverlay.convertTime(CACurrentMediaTime(), from: nil)
+        #expect((before - 1...after - 1).contains(base.beginTime))
+        #expect((base.beginTime...after - 1).contains(overlay.beginTime))
 
         cell.flash(elapsed: nil, reducesMotion: false)
         shown.flash(elapsed: nil, reducesMotion: false)
