@@ -91,16 +91,26 @@ struct NewMessagesLineTests {
         let model = makeModel()
         #expect(model.newMessagesLine == id(3))
 
-        let undo = model.markUnread(from: id(1))
+        let answer = model.markUnread(from: id(1))
         #expect(model.newMessagesLine == id(1))
-        undo()
+        answer(false)
         #expect(model.newMessagesLine == id(3))
 
         // A second mark since isn't undone by the first one's refusal.
         let first = model.markUnread(from: id(1))
         _ = model.markUnread(from: id(4))
-        first()
+        first(false)
         #expect(model.newMessagesLine == id(4))
+    }
+
+    @Test
+    func aMarkDiscordTookKeepsItsLine() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        model.markUnread(from: id(1))(true)
+
+        #expect(model.newMessagesLine == id(1))
     }
 
     @Test
@@ -108,9 +118,23 @@ struct NewMessagesLineTests {
         shown([1, 2, 3, 4], readUpTo: 2)
         let model = makeModel()
 
-        let undo = model.markUnread(from: id(1))
+        let answer = model.markUnread(from: id(1))
         model.endNewMessagesLine()
-        undo()
+        answer(false)
+
+        #expect(model.newMessagesLine == nil)
+    }
+
+    @Test
+    func anAnswerAfterMarkingReadChangesNothing() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        let first = model.markUnread(from: id(1))
+        let second = model.markUnread(from: id(2))
+        second(false)
+        model.endNewMessagesLine()
+        first(true)
 
         #expect(model.newMessagesLine == nil)
     }
@@ -121,10 +145,77 @@ struct NewMessagesLineTests {
         store.update { [me] in $0.show(message(3, by: me)) }
         shown([1, 2, 3, 4], readUpTo: 4)
         let model = makeModel()
-        _ = model.markUnread(from: id(3))
+        model.markUnread(from: id(3))(true)
 
-        let undo = model.markUnread(from: id(2))
-        undo()
+        model.markUnread(from: id(2))(false)
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    // Discord never had the first mark: the line it has is the one from before both.
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aRefusedSecondMarkGoesBackToBeforeAFirstDiscordDidntTake(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(2))]
+        #expect(model.newMessagesLine == id(2))
+
+        for mark in order {
+            answers[mark]?(false)
+        }
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aRefusedSecondMarkGoesBackToAFirstDiscordTook(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(2))]
+
+        for mark in order {
+            answers[mark]?(mark == 1)
+        }
+
+        #expect(model.newMessagesLine == id(1))
+    }
+
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aSecondMarkDiscordTookKeepsItsLineWhateverTheFirstsAnswer(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(4))]
+
+        for mark in order {
+            answers[mark]?(true)
+        }
+
+        #expect(model.newMessagesLine == id(4))
+    }
+
+    // Three marks: the third's refusal goes back to the second, the newest Discord took.
+    @Test
+    func aRefusalGoesBackToTheNewestMarkDiscordTook() {
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        let first = model.markUnread(from: id(1))
+        let second = model.markUnread(from: id(2))
+        let third = model.markUnread(from: id(3))
+
+        second(true)
+        first(true)
+        third(false)
+
+        #expect(model.newMessagesLine == id(2))
+    }
+
+    @Test
+    func aMarkAfterARefusedOneIsTakenBackToBeforeBoth() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        model.markUnread(from: id(1))(false)
+
+        model.markUnread(from: id(2))(false)
 
         #expect(model.newMessagesLine == id(3))
     }

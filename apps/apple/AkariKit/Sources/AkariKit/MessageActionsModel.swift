@@ -102,18 +102,18 @@ public final class MessageActionsModel {
     private let discard: (MessageId) -> Void
     private let createThread: (ChannelId, MessageId) -> Void
     private let viewThread: (ChannelId, ChannelId) -> Void
-    private let marking: (ChannelId, MessageId) -> (() -> Void)?
+    private let marking: (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)?
     private let failed: (Failure) -> Void
 
     /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
     /// the message, `viewThread` the thread and its parent; `marking` shows a mark as unread at
-    /// once and returns what takes it back.
+    /// once and returns what takes Discord's answer: whether it took the mark.
     public init(
         store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
         createThread: @escaping (ChannelId, MessageId) -> Void,
         viewThread: @escaping (ChannelId, ChannelId) -> Void,
-        marking: @escaping (ChannelId, MessageId) -> (() -> Void)? = { _, _ in nil },
+        marking: @escaping (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)? = { _, _ in nil },
         failed: @escaping (Failure) -> Void
     ) {
         self.store = store
@@ -191,15 +191,13 @@ public final class MessageActionsModel {
         else {
             return
         }
-        let undo = marking(message.channelId, message.id)
+        let answered = marking(message.channelId, message.id)
         do {
             let outcome = try await account.markUnread(
                 channelId: message.channelId, messageId: message.id)
-            if outcome == .replaced {
-                undo?()
-            }
+            answered?(outcome == .marked)
         } catch {
-            undo?()
+            answered?(false)
             failed(
                 Failure(
                     title: "Couldn't Mark as Unread",
