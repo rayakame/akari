@@ -69,6 +69,10 @@ schemes:
         "-AkariLog scroll": false
     test:
       config: Debug
+      # AppKit reads this default once, at the process's first layout conflict: set from the
+      # start, a conflict is counted (ConstraintConflictTests) whichever test has the first.
+      commandLineArguments:
+        "-NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints YES": true
       targets:
         - AkariTests
     profile:
