@@ -347,16 +347,19 @@ async fn a_preview_is_parsed_once_and_again_after_an_edit() {
     };
 
     let before = store.content_stats().parsed;
+    let events = store.content_stats().event_parses;
     assert_eq!(
         line(store.reply_target(GENERAL, TARGET)).as_deref(),
         Some("**first**")
     );
     let parsed = store.content_stats().parsed;
     assert_eq!(parsed, before + 1);
+    assert_eq!(store.content_stats().event_parses, events + 1);
     let both = store.reply_targets(GENERAL, vec![TARGET, MESSAGE]);
     assert_eq!(line(both[0].clone()).as_deref(), Some("**first**"));
     assert_eq!(both[1], ReplyTarget::NotLoaded);
     assert_eq!(store.content_stats().parsed, parsed, "read from the cache");
+    assert_eq!(store.content_stats().event_parses, events + 1);
 
     viewing
         .dispatch(
@@ -385,6 +388,126 @@ async fn a_preview_is_parsed_once_and_again_after_an_edit() {
         .await;
     viewing.until(target_changed).await;
     assert_eq!(line(store.reply_target(GENERAL, TARGET)), None);
+    viewing.account.close();
+}
+
+const NORA: &str = "100000000000000777";
+
+fn mentioned(target: ReplyTarget) -> Vec<MentionName> {
+    let ReplyTarget::Loaded { preview } = target else {
+        panic!("not loaded: {target:?}");
+    };
+    let line = preview.formatted.expect("content has a line");
+    line.formatted.blocks[0]
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SpanKind::User { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn known(name: &str) -> MentionName {
+    MentionName::Known {
+        name: name.to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn a_loaded_messages_line_names_whom_the_message_mentions() {
+    let mut viewing = viewing(MockServer::start().await).await;
+    let mut answered = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    answered["id"] = TARGET.get().to_string().into();
+    answered["content"] = format!("ask <@{NORA}>").into();
+    answered["mentions"] = json!([{"id": NORA, "username": "nora", "global_name": "Nora"}]);
+    answered.as_object_mut().unwrap().remove("nonce");
+    viewing.dispatch("MESSAGE_CREATE", answered).await;
+    viewing.until(inserted(TARGET)).await;
+    let mut reply = reply_with("");
+    reply.as_object_mut().unwrap().remove("referenced_message");
+    viewing.dispatch("MESSAGE_CREATE", reply).await;
+    viewing.until(inserted(REPLY)).await;
+    let store = viewing.account.store();
+    assert!(
+        store
+            .core()
+            .user(akari_core::model::UserId::new(NORA.parse().unwrap()))
+            .is_none()
+    );
+
+    let names = mentioned(store.reply_target(GENERAL, TARGET));
+
+    assert_eq!(names, [known("Nora")]);
+    viewing.account.close();
+}
+
+#[tokio::test]
+async fn a_line_without_its_message_names_the_users_the_store_has() {
+    let mut viewing = viewing(MockServer::start().await).await;
+    let content = format!("<@100000000000000002> and <@{NORA}>");
+    viewing
+        .dispatch("MESSAGE_CREATE", reply_with(&content))
+        .await;
+    viewing.until(inserted(REPLY)).await;
+    let store = viewing.account.store();
+    assert!(store.messages(GENERAL, vec![TARGET]).is_empty());
+
+    let names = mentioned(store.reply_target(GENERAL, TARGET));
+
+    assert_eq!(names, [known("Mira"), MentionName::NotLoaded]);
+    viewing.account.close();
+}
+
+#[tokio::test]
+async fn many_targets_have_each_its_own_line() {
+    let mut viewing = viewing(MockServer::start().await).await;
+    let other = MessageId::new(400_000_000_000_000_010);
+    viewing
+        .dispatch("MESSAGE_CREATE", reply_with("first <@100000000000000001>"))
+        .await;
+    viewing.until(inserted(REPLY)).await;
+    let mut second = reply_with("second <@100000000000000002>");
+    second["id"] = "400000000000000011".into();
+    second["message_reference"]["message_id"] = other.get().to_string().into();
+    second["referenced_message"]["id"] = other.get().to_string().into();
+    viewing.dispatch("MESSAGE_CREATE", second).await;
+    viewing
+        .until(inserted(MessageId::new(400_000_000_000_000_011)))
+        .await;
+    let store = viewing.account.store();
+    let lines = |targets: Vec<ReplyTarget>| -> Vec<(String, Vec<MentionName>)> {
+        targets
+            .into_iter()
+            .map(|target| {
+                let ReplyTarget::Loaded { preview } = &target else {
+                    panic!("not loaded: {target:?}");
+                };
+                let text = preview.formatted.clone().unwrap().text;
+                (text, mentioned(target))
+            })
+            .collect()
+    };
+    let expected = [
+        (
+            "second <@100000000000000002>".to_owned(),
+            vec![known("Mira")],
+        ),
+        (
+            "first <@100000000000000001>".to_owned(),
+            vec![known("Akari Tester")],
+        ),
+    ];
+
+    let first = lines(store.reply_targets(GENERAL, vec![other, TARGET]));
+    let parsed = store.content_stats().parsed;
+    let again = lines(store.reply_targets(GENERAL, vec![other, TARGET]));
+
+    assert_eq!(first, expected);
+    assert_eq!(again, expected);
+    assert_eq!(store.content_stats().parsed, parsed);
     viewing.account.close();
 }
 
