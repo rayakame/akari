@@ -124,12 +124,17 @@ final class FakeAccount: Account, @unchecked Sendable {
     // doesn't read it, until it leaves the open ones or is marked read.
     let held = Locked<Set<ChannelId>>([])
 
+    // "open" and "reading", in the order the session told them.
+    let listCalls = Locked<[String]>([])
+
     override func setOpenChannels(channelIds: [ChannelId]) {
+        listCalls.withLock { $0.append("open") }
         openCalls.withLock { $0.append(channelIds) }
         held.withLock { $0.formIntersection(channelIds) }
     }
 
     override func setReading(channelIds: [ChannelId]) {
+        listCalls.withLock { $0.append("reading") }
         readingCalls.withLock { $0.append(channelIds) }
         if let state = readStateAfterReading.current {
             let held = held.current

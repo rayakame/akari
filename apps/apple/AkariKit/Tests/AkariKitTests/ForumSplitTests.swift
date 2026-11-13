@@ -86,6 +86,125 @@ final class ForumSplitTests {
         #expect(zip(opens, opens.dropFirst()).allSatisfy { $0 != $1 }, "told once per change")
     }
 
+    // The core ends a mark's hold on a channel a report leaves out.
+    @Test
+    func aPostMarkedUnreadBesideTheForumStaysHeldInFullView() async throws {
+        let session = inForum()
+        await session.openBeside(thread: id(41), from: forumId)
+        _ = try await account.markUnread(channelId: id(41), messageId: id(4))
+        #expect(account.held.current == [id(41)])
+        let told = account.openCalls.current.count
+
+        session.openInFullView()
+
+        #expect(session.messages?.channelId == id(41) && session.forum == nil && session.split == nil)
+        #expect(Array(account.openCalls.current.dropFirst(told)) == [[id(41)]])
+        #expect(account.held.current == [id(41)])
+        session.close()
+    }
+
+    // The core stops reading a channel that leaves the open ones: it hears of those first.
+    @Test
+    func aNavigationNamesTheOpenListsBeforeTheOnesBeingRead() async {
+        let session = inForum()
+        await session.openBeside(thread: id(41), from: forumId)
+        let told = account.listCalls.current.count
+
+        session.openInFullView()
+
+        #expect(readings.last == [id(41)])
+        #expect(Array(account.listCalls.current.dropFirst(told)) == ["open", "reading"])
+        session.close()
+    }
+
+    enum Navigation: CaseIterable {
+        case fullView, splitView, anotherChannel, goToAnotherChannel, closeSplit, openBeside
+        case anotherPost, forumAgain, home, backToTheServer, backToTheForum, goFromHome
+        case goToTheForumFromHome, relaunch, parentRemoved, postRemoved, close
+    }
+
+    // Whatever a navigation does on the way, the core hears of the open lists once, as they
+    // are after it.
+    @Test(arguments: Navigation.allCases)
+    func aNavigationNamesTheOpenListsOnce(_ navigation: Navigation) async {
+        var session = inForum()
+        await session.openBeside(thread: id(41), from: forumId)
+        switch navigation {
+        case .splitView: session.openInFullView()
+        case .openBeside: session.closeSplit()
+        case .backToTheServer, .goFromHome, .goToTheForumFromHome: session.open(.home)
+        case .backToTheForum: session.open(channel: id(11))
+        case .relaunch: session.close()
+        default: break
+        }
+        let told = account.openCalls.current.count
+
+        let after: [ChannelId]
+        switch navigation {
+        case .fullView:
+            session.openInFullView()
+            after = [id(41)]
+        case .splitView:
+            session.openInSplitView()
+            after = [forumId, id(41)]
+        case .anotherChannel:
+            session.open(channel: id(11))
+            after = [id(11)]
+        case .goToAnotherChannel:
+            session.go(to: id(11))
+            after = [id(11)]
+        case .closeSplit:
+            session.closeSplit()
+            after = [forumId]
+        case .openBeside:
+            await session.openBeside(thread: id(41), from: forumId)
+            after = [forumId, id(41)]
+        case .anotherPost:
+            await session.openBeside(thread: id(42), from: forumId)
+            after = [forumId, id(42)]
+        case .forumAgain:
+            session.open(channel: forumId)
+            after = [forumId]
+        case .home:
+            session.open(.home)
+            after = []
+        case .backToTheServer:
+            session.open(.guild(id(1)))
+            after = [forumId, id(41)]
+        case .backToTheForum:
+            session.go(to: forumId)
+            after = [forumId, id(41)]
+        case .goFromHome:
+            session.go(to: id(42))
+            after = [id(42)]
+        case .goToTheForumFromHome:
+            session.go(to: forumId)
+            after = [forumId, id(41)]
+        case .relaunch:
+            session = makeSession()
+            session.start()
+            after = [forumId, id(41)]
+        case .parentRemoved:
+            store.update { state in
+                state.channels[id(13)] = nil
+                state.list([channel(11)], in: 1)
+            }
+            session.apply(EventBatch([.channelRemoved(channelId: forumId, guildId: id(1))]))
+            after = [id(11)]
+        case .postRemoved:
+            store.update { $0.channels[id(41)] = nil }
+            session.apply(EventBatch([.channelRemoved(channelId: id(41), guildId: id(1))]))
+            after = [forumId]
+        case .close:
+            session.close()
+            after = []
+        }
+
+        #expect(Array(account.openCalls.current.dropFirst(told)) == [after], "\(navigation)")
+        #expect([session.openChannelId, session.split?.channelId].compactMap { $0 } == after || navigation == .close)
+        session.close()
+    }
+
     @Test
     func anotherCardReplacesThePost() async {
         let session = inForum()

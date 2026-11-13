@@ -169,7 +169,11 @@ A thread's starter row acts on the parent's message, but marks the thread unread
 The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
 channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
 every way a list goes says so: a channel marked unread stays unread until its list goes, whatever
-`reading` does meanwhile (scrolling, the window losing key, a reconnect). `close()` names none.
+`reading` does meanwhile (scrolling, the window losing key, a reconnect). A navigation that
+changes the lists in steps (another channel or place, a thread from beside a forum to full view,
+a restore, a batch that closes a channel) names them once, when it is done, and the lists being
+read after them: a list that stays open through it is never left out on the way, so it keeps its
+mark. `close()` names none.
 `threadsButtonParent` is the channel the header's Threads button browses (a text or
 announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
 its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or
