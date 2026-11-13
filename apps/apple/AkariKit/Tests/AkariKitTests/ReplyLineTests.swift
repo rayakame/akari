@@ -457,6 +457,27 @@ final class SessionMessageJumpTests {
         session.close()
     }
 
+    // The parent opens with the thread beside it again: the core hears of both lists once.
+    @Test
+    func aStarterRowsReplyJumpFromFullViewOpensTheParentAndNamesTheOpenListsOnce() async throws {
+        let session = session()
+        await session.openBeside(thread: id(31), from: id(11))
+        session.openInFullView()
+        let thread = try #require(session.messages)
+        #expect(thread.channelId == id(31) && session.split == nil)
+        let row = try #require(thread.rows.first)
+        let told = account.openCalls.current.count
+
+        await thread.jumpToTarget(of: row)
+        await session.messages?.open()
+
+        #expect(session.messages?.channelId == id(11))
+        #expect(session.split?.channelId == id(31))
+        #expect(Array(account.openCalls.current.dropFirst(told)) == [[id(11), id(31)]])
+        #expect(session.messages?.messageJump == .init(messageId: id(1), number: 1))
+        session.close()
+    }
+
     // The New Thread form shows its source message as the list does, the line included.
     @Test
     func aThreadFormsSourceHasItsLineAndFollowsItsTarget() async throws {

@@ -121,10 +121,12 @@ final class ForumSplitTests {
         case fullView, splitView, anotherChannel, goToAnotherChannel, closeSplit, openBeside
         case anotherPost, forumAgain, home, backToTheServer, backToTheForum, goFromHome
         case goToTheForumFromHome, relaunch, parentRemoved, postRemoved, close
+        case jumpToAnotherChannel, jumpFromFullView, jumpFromHome, jumpInThePost
+        case escapeClosesThePost, escapeCancelsAReply, escapeClosesTheThreadForm
     }
 
     // Whatever a navigation does on the way, the core hears of the open lists once, as they
-    // are after it.
+    // are after it, and not at all when they stay.
     @Test(arguments: Navigation.allCases)
     func aNavigationNamesTheOpenListsOnce(_ navigation: Navigation) async {
         var session = inForum()
@@ -132,12 +134,24 @@ final class ForumSplitTests {
         switch navigation {
         case .splitView: session.openInFullView()
         case .openBeside: session.closeSplit()
-        case .backToTheServer, .goFromHome, .goToTheForumFromHome: session.open(.home)
+        case .jumpFromFullView: session.openInFullView()
+        case .backToTheServer, .goFromHome, .goToTheForumFromHome, .jumpFromHome: session.open(.home)
         case .backToTheForum: session.open(channel: id(11))
         case .relaunch: session.close()
+        case .escapeCancelsAReply:
+            store.update { $0.allow(replying(), message: 4, in: 41) }
+            if let split = session.split, let row = split.rows.first {
+                split.composer.startReply(to: row, shift: false)
+            }
+            #expect(session.split?.composer.reply != nil)
+        case .escapeClosesTheThreadForm:
+            store.update { $0.threadCreations[id(11)] = ThreadCreation(public: true, private: true) }
+            session.openThreadForm(in: id(11), location: .keyboardShortcut)
+            #expect(session.threadForm != nil)
         default: break
         }
         let told = account.openCalls.current.count
+        let before = account.openCalls.current.last ?? []
 
         let after: [ChannelId]
         switch navigation {
@@ -198,9 +212,30 @@ final class ForumSplitTests {
         case .close:
             session.close()
             after = []
+        case .jumpToAnotherChannel, .jumpFromFullView:
+            session.jump(to: id(1), in: id(11))
+            after = [id(11)]
+        case .jumpFromHome:
+            session.jump(to: id(5), in: id(42))
+            after = [id(42)]
+        case .jumpInThePost:
+            session.jump(to: id(4), in: id(41))
+            await finished(session.jumping)
+            after = [forumId, id(41)]
+        case .escapeClosesThePost:
+            session.escape(from: id(41))
+            after = [forumId]
+        case .escapeCancelsAReply:
+            session.escape(from: id(41))
+            after = [forumId, id(41)]
+        case .escapeClosesTheThreadForm:
+            session.escape(from: id(11))
+            after = [id(11)]
         }
 
-        #expect(Array(account.openCalls.current.dropFirst(told)) == [after], "\(navigation)")
+        #expect(
+            Array(account.openCalls.current.dropFirst(told)) == (after == before ? [] : [after]),
+            "\(navigation)")
         #expect([session.openChannelId, session.split?.channelId].compactMap { $0 } == after || navigation == .close)
         session.close()
     }
