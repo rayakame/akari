@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import AkariKit
@@ -100,6 +101,49 @@ struct PendingReplyTests {
 
         #expect(composer.reply == nil)
         #expect(composer.focusRequests == 0)
+    }
+
+    @Test
+    func aRowOfAnotherChannelStartsNothing() {
+        let composer = composer()
+        store.update { $0.allow(replying(), message: 300, in: 11) }
+
+        composer.startReply(to: row(300, in: 11), shift: false)
+
+        #expect(composer.reply == nil)
+        #expect(composer.focusRequests == 0)
+        #expect(account.replyHolds.current.isEmpty)
+    }
+
+    @Test
+    func theBarNamesTheAuthorAsTheRowDoes() {
+        let composer = composer()
+        let row = MessageListModel.Row(
+            id: id(100), message: message(100, by: user(2, name: "Ray")), authorName: "Nick")
+
+        composer.startReply(to: row, shift: false)
+
+        #expect(composer.reply?.authorName == "Nick")
+    }
+
+    @Test
+    func aNewReplyClearsTheGoneNoticeAndNoOther() async {
+        let composer = composer()
+        composer.startReply(to: row(100), shift: false)
+        composer.draft = "hi"
+        account.queueError.withLock { $0 = .InvalidRequest }
+        await composer.submit()
+        #expect(composer.problem == .replyTargetGone)
+
+        composer.startReply(to: row(102), shift: false)
+        #expect(composer.problem == nil)
+
+        account.queueError.withLock { $0 = .Closed }
+        await composer.submit()
+        #expect(composer.problem == .failed(.Closed))
+
+        composer.startReply(to: row(100), shift: false)
+        #expect(composer.problem == .failed(.Closed))
     }
 
     @Test
@@ -293,7 +337,7 @@ struct PendingReplyTests {
         composer.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(100))]))
         #expect(composer.reply != nil, "edited or loaded")
 
-        store.update { $0.replyTargets[id(100)] = .deleted }
+        store.update { $0.answer(.deleted, message: 100, in: 10) }
         composer.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(100))]))
         #expect(composer.reply == nil)
     }
@@ -501,7 +545,7 @@ struct ReplyHoldTests {
         let model = makeModel()
         try answer(58, in: model)
         await model.jump(to: id(5))
-        store.update { $0.replyTargets[id(58)] = preview(by: user(2, name: "Renamed")) }
+        store.update { $0.answer(preview(by: user(2, name: "Renamed")), message: 58, in: 10) }
 
         model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(58))]))
 
@@ -513,9 +557,17 @@ struct ReplyHoldTests {
         let model = makeModel()
         try answer(58, in: model)
 
+        let changed = Locked(false)
+        withObservationTracking {
+            _ = model.composer.reply
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+
         model.apply(EventBatch([.userUpdated(userId: id(7))]))
 
         #expect(model.composer.reply?.authorName == "someone")
+        #expect(!changed.current, "the bar isn't drawn again for the same name")
     }
 
     // Pending row 900 answers 58, which was deleted after the send failed.
@@ -529,7 +581,7 @@ struct ReplyHoldTests {
         account.sendError.withLock { $0 = error }
         model.composer.draft = "hi"
         await model.composer.submit()
-        store.update { $0.replyTargets[id(58)] = .deleted }
+        store.update { $0.answer(.deleted, message: 58, in: 10) }
         model.apply(
             EventBatch([
                 .messageInserted(channelId: here, messageId: id(900)),
@@ -566,6 +618,29 @@ struct ReplyHoldTests {
 
         model.composer.discard(id(900))
         #expect(makeModel().rows.first { $0.id == id(900) }?.replyRefused == false)
+    }
+
+    @Test
+    func aRetryThatGoesThroughForgetsTheRefusal() async throws {
+        let model = try await failedReply(with: .ReplyTargetDeleted)
+        #expect(model.composer.replyWasRefused(id(900)))
+
+        account.sendError.withLock { $0 = nil }
+        await model.composer.retry(id(900))
+
+        #expect(!model.composer.replyWasRefused(id(900)))
+        #expect(model.composer.problem == nil)
+    }
+
+    @Test
+    func aRetryThatFailsAsBeforeReadsNoRowAgain() async throws {
+        let model = try await failedReply(with: .Network(kind: .timeout))
+        store.log.forget()
+
+        await model.composer.retry(id(900))
+
+        #expect(refused(model) == false)
+        #expect(store.log.reads.allSatisfy { if case .messages = $0 { false } else { true } })
     }
 
     @Test

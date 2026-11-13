@@ -80,6 +80,55 @@ struct ReplyLineContentTests {
         }
     }
 
+    // The official client's order: a sticker, a command, a voice message, an attachment.
+    @Test
+    func aTargetWithSeveralNamesTheFirstInDiscordsOrder() {
+        let cases: [(ReplyTarget, String, String)] = [
+            (
+                preview(content: "", kind: .chatInputCommand, voice: true, attachments: true, sticker: true),
+                "Click to see sticker", "face.smiling"
+            ),
+            (
+                preview(content: "", kind: .contextMenuCommand, voice: true, embeds: true),
+                "Click to see command", "terminal"
+            ),
+            (preview(content: "", voice: true, embeds: true), "Click to see voice message", "mic.fill"),
+        ]
+        for (target, words, symbol) in cases {
+            #expect(line(target).content == .placeholder(words))
+            #expect(line(target).trailingSymbol == symbol, "\(words)")
+        }
+    }
+
+    @Test
+    func aReplyWithoutTextReadsAsAnAttachmentLikeAPlainMessage() {
+        let line = line(preview(content: "", kind: .reply))
+
+        #expect(line.content == .placeholder("Click to see attachment"))
+        #expect(line.trailingSymbol == "photo")
+    }
+
+    @Test
+    func aPinsLineHasNoSymbolWhateverItCarries() {
+        for target in [
+            preview(content: "", kind: .channelPinnedMessage, attachments: true),
+            preview(content: "", kind: .channelPinnedMessage, sticker: true),
+            preview(kind: .channelPinnedMessage, voice: true),
+        ] {
+            #expect(line(target).content == .placeholder("Message pinned."))
+            #expect(line(target).trailingSymbol == nil)
+        }
+    }
+
+    @Test
+    func aSystemLineWithoutTextHasNoSymbol() {
+        let line = line(preview(content: "", kind: .userJoin))
+
+        #expect(line.content == .placeholder("Click to see message"))
+        #expect(line.trailingSymbol == nil)
+        #expect(self.line(preview(kind: .userJoin)).trailingSymbol == nil)
+    }
+
     @Test
     func aTargetWithTextStillNamesItsMedia() {
         #expect(line(preview(sticker: true)).trailingSymbol == "face.smiling")
@@ -121,7 +170,7 @@ struct ReplyLineTests {
                 message(5, by: ray), message(6, by: ray), reply(7, to: 5, mentionsAuthor: true),
                 reply(8, to: 2))
             state.windows[id(10)] = window([5, 6, 7, 8])
-            state.replyTargets[id(5)] = preview(by: ray, content: "message 5")
+            state.answer(preview(by: ray, content: "message 5"), message: 5, in: 10)
         }
     }
 
@@ -161,7 +210,7 @@ struct ReplyLineTests {
     func aChangedTargetReadsItsRepliesAgainAndNothingElse() {
         let model = makeModel()
         store.update { [ray] state in
-            state.replyTargets[id(5)] = preview(by: ray, content: "edited", edited: true)
+            state.answer(preview(by: ray, content: "edited", edited: true), message: 5, in: 10)
         }
 
         model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(5))]))
@@ -175,7 +224,7 @@ struct ReplyLineTests {
     @Test
     func aTargetDeletedSinceShowsAsDeleted() {
         let model = makeModel()
-        store.update { $0.replyTargets[id(5)] = .deleted }
+        store.update { $0.answer(.deleted, message: 5, in: 10) }
 
         model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(5))]))
 
@@ -186,7 +235,7 @@ struct ReplyLineTests {
     @Test
     func aTargetALoadBroughtShows() {
         let model = makeModel()
-        store.update { [ray] in $0.replyTargets[id(2)] = preview(by: ray, content: "old") }
+        store.update { [ray] in $0.answer(preview(by: ray, content: "old"), message: 2, in: 10) }
 
         model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(2))]))
 
@@ -207,7 +256,7 @@ struct ReplyLineTests {
         store.update { [here] state in
             state.show(reply(9, to: 5, delivery: .failed))
             state.windows[here] = window([], pending: [9])
-            state.replyTargets[id(5)] = nil
+            state.answer(nil, message: 5, in: 10)
             state.channels[here] = nil
         }
         let model = makeModel()
@@ -222,10 +271,32 @@ struct ReplyLineTests {
         #expect(model.messageJump == nil)
     }
 
+    // The answered message is asked for in its own channel, which may be another than the reply's.
+    @Test
+    func aReplyIntoAnotherChannelHasThatChannelsTargetAndKnowsWhetherItIsThere() {
+        let zed = user(3, name: "Zed")
+        store.update { [zed] state in
+            state.show(reply(7, to: 5, targetChannel: 11))
+            state.answer(preview(by: zed, content: "elsewhere"), message: 5, in: 11)
+        }
+
+        let unknown = line(7, in: makeModel())
+        #expect(unknown?.channelId == id(11))
+        #expect(unknown?.target == preview(by: zed, content: "elsewhere"))
+        #expect(unknown?.authorName == "Zed")
+        #expect(unknown?.channelKnown == false)
+        #expect(unknown?.jumps == false)
+
+        store.update { $0.channels[id(11)] = channel(11, guild: 1) }
+        let known = line(7, in: makeModel())
+        #expect(known?.channelKnown == true)
+        #expect(known?.jumps == true)
+    }
+
     @Test
     func aWebhooksTargetIsNamedAsItPosted() {
         store.update { state in
-            state.replyTargets[id(5)] = preview(by: user(9, name: "Hook"), webhook: true)
+            state.answer(preview(by: user(9, name: "Hook"), webhook: true), message: 5, in: 10)
         }
 
         #expect(line(7, in: makeModel())?.authorName == "Hook")
@@ -247,7 +318,7 @@ struct ReplyLineTests {
         #expect(line?.messageId == id(5))
         #expect(line?.name == "@Ray")
 
-        store.update { $0.replyTargets[id(5)] = .deleted }
+        store.update { $0.answer(.deleted, message: 5, in: 10) }
         model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(5))]))
         #expect(model.rows.first?.reply?.target == .deleted)
     }
@@ -271,7 +342,7 @@ struct ReplyJumpTests {
             }
             state.show(reply(7, to: 6), reply(8, to: 2))
             state.windows[id(10)] = window([5, 6, 7, 8])
-            state.replyTargets[id(6)] = preview()
+            state.answer(preview(), message: 6, in: 10)
         }
         account.windowAfter.withLock {
             $0 = { load in
@@ -321,6 +392,37 @@ struct ReplyJumpTests {
         #expect(model.messageJump == .init(messageId: id(2), number: 1))
         #expect(!model.atPresent)
         #expect(model.replyReturn == id(8))
+    }
+
+    @Test
+    func aPendingReplysLineJumpsWithoutAWayBack() async {
+        store.update { [here] state in
+            state.show(reply(900, to: 2, delivery: .pending))
+            state.windows[here] = window([5, 6, 7, 8], pending: [900])
+        }
+        let model = makeModel()
+
+        await model.jumpToTarget(of: row(900, in: model))
+
+        #expect(model.messageJump == .init(messageId: id(2), number: 1))
+        #expect(!model.atPresent)
+        #expect(model.replyReturn == nil)
+    }
+
+    @Test
+    func theJumpToUnreadEndsTheWayBack() async {
+        store.update { [here] state in
+            state.readStates[here] = ReadState(acked: id(1), mentions: 0, estimated: false)
+        }
+        let model = makeModel()
+        await model.jumpToTarget(of: row(8, in: model))
+        #expect(model.replyReturn == id(8))
+        #expect(model.newMessagesLine == id(2))
+
+        await model.jumpToUnread()
+
+        #expect(model.unreadJumps == 1)
+        #expect(model.replyReturn == nil)
     }
 
     @Test
@@ -448,7 +550,7 @@ struct ReplyJumpTests {
 
     @Test
     func aDeletedTargetIsNotJumpedTo() async {
-        store.update { $0.replyTargets[id(6)] = .deleted }
+        store.update { $0.answer(.deleted, message: 6, in: 10) }
         let model = makeModel()
 
         await model.jumpToTarget(of: row(7, in: model))
@@ -513,7 +615,7 @@ final class SessionMessageJumpTests {
                 message(1, in: 11), message(2, in: 11), message(3, in: 12),
                 message(31, in: 31, kind: .threadStarterMessage))
             state.starters[id(31)] = .loaded(message: reply(2, to: 1, in: 11))
-            state.replyTargets[id(1)] = preview()
+            state.answer(preview(), message: 1, in: 11)
         }
     }
 
@@ -580,7 +682,7 @@ final class SessionMessageJumpTests {
         #expect(form.sourceReply?.messageId == id(1))
         #expect(form.sourceReply?.name == "@Ray")
 
-        store.update { $0.replyTargets[id(1)] = .deleted }
+        store.update { $0.answer(.deleted, message: 1, in: 11) }
         session.apply(EventBatch([.replyTargetChanged(channelId: id(11), targetId: id(1))]))
         #expect(form.sourceReply?.target == .deleted)
         session.close()
@@ -595,6 +697,36 @@ final class SessionMessageJumpTests {
 
         #expect(session.messages?.channelId == id(12))
         #expect(session.messages?.messageJump == .init(messageId: id(3), number: 1))
+        #expect(store.log.actions.contains(.view(id(12))))
+
+        store.log.forget()
+        await session.messages?.open()
+
+        #expect(session.messages?.messageJump == .init(messageId: id(3), number: 1))
+        #expect(store.log.actions.allSatisfy { if case .load = $0 { false } else { true } })
+        session.close()
+    }
+
+    @Test
+    func aThreadFormWhoseSourceIsDeletedLosesItsLine() async throws {
+        store.update { state in
+            state.show(reply(2, to: 1, in: 11, mentionsAuthor: true))
+            state.threadCreations[id(11)] = ThreadCreation(public: true, private: true)
+            state.startable = [id(2)]
+        }
+        let session = session()
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        let form = try #require(session.threadForm)
+        #expect(form.sourceReply != nil)
+
+        store.update { state in
+            state.messages[id(2)] = nil
+            state.windows[id(11)] = window([1])
+        }
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(2))]))
+
+        #expect(form.source == nil)
+        #expect(form.sourceReply == nil)
         session.close()
     }
 }
