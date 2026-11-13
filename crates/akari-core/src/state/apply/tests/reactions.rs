@@ -1221,12 +1221,31 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
     let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
     add(&mut state, GENERAL, 10, MIRA, FIRE);
     remove(&mut state, GENERAL, 10, MIRA, FIRE);
-    add(&mut state, GENERAL, 11, ME, UP);
+    add(&mut state, GENERAL, 10, ME, FIRE);
+    remove(&mut state, GENERAL, 10, ME, FIRE);
+    remove(&mut state, GENERAL, 11, ME, UP);
     settle(&mut state, &taken.unwrap(), Some((true, false)));
     assert_eq!(
         reactions(&state, GENERAL, 10),
         one(UP, 1, true),
-        "others' reactions and other messages say nothing of it"
+        "others' reactions, other emoji and other messages say nothing of it"
+    );
+}
+
+#[test]
+fn a_refused_removal_adds_nothing_to_a_super_reaction_made_meanwhile() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, ME, UP);
+
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    settle(&mut state, &taken.unwrap(), Some((true, false)));
+
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 0, 1, false, true)],
+        "the user's on another device, not a second one"
     );
 }
 
