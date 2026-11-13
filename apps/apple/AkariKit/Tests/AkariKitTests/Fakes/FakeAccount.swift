@@ -152,12 +152,22 @@ final class FakeAccount: Account, @unchecked Sendable {
     let markUnreadError = Locked<RequestError?>(nil)
     let markUnreadOutcome = Locked(MarkOutcome.marked)
 
+    private let heldMarks = Locked<[MessageId: AsyncQueue<Result<MarkOutcome, RequestError>>]>([:])
+
+    // A mark from `message` waits for what is sent here.
+    func holdMark(from message: MessageId) -> AsyncQueue<Result<MarkOutcome, RequestError>> {
+        let answers = AsyncQueue<Result<MarkOutcome, RequestError>>()
+        heldMarks.withLock { $0[message] = answers }
+        return answers
+    }
+
     override func markUnread(channelId: ChannelId, messageId: MessageId) async throws -> MarkOutcome {
         log.append(.markUnread(channelId, messageId))
-        if let error = markUnreadError.current {
+        let answer = await heldMarks.current[messageId]?.next()
+        if let error = markUnreadError.current, answer == nil {
             throw error
         }
-        let outcome = markUnreadOutcome.current
+        let outcome = try answer?.get() ?? markUnreadOutcome.current
         if outcome == .marked, openCalls.current.last?.contains(channelId) == true {
             held.withLock { _ = $0.insert(channelId) }
         }

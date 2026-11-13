@@ -273,6 +273,8 @@ keeps the channel unread while it stays open are in
   for Discord's answer. If Discord refuses, they go back and one alert says so ("Couldn't Mark as
   Unread"). A mark that something later replaced before it counted (Escape right after, the
   channel read or marked on another device, a new session with another position) takes its line
-  back without an alert: nothing failed.*
+  back without an alert: nothing failed. Back is where Discord has the line: after two marks in
+  a row, at the first one's message only if Discord took that mark, else where the line was
+  before both.*
 - *Akari: the official client's Alt+Enter on a message with keyboard focus is left out with
   the other keys of a focused message.*

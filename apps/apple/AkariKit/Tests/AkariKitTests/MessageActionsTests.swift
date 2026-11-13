@@ -52,7 +52,11 @@ final class MessageActionsTests {
             viewThread: { [unowned self] in threadsViewed.append("\($0.rawValue) \($1.rawValue)") },
             marking: { [unowned self] channel, message in
                 marks.append("mark \(channel.rawValue) \(message.rawValue)")
-                return { [unowned self] in marks.append("undo \(message.rawValue)") }
+                return { [unowned self] taken in
+                    if !taken {
+                        marks.append("undo \(message.rawValue)")
+                    }
+                }
             },
             failed: { [unowned self] in failures.append($0) })
     }
@@ -477,6 +481,36 @@ final class SessionMessageActionsTests {
         session.close()
     }
 
+    // Both marks are with the core before either is answered; the answers come in either order.
+    @Test(arguments: [
+        (MarkOutcome.replaced, [101, 100], nil), (.replaced, [100, 101], nil),
+        (.marked, [101, 100], 101), (.marked, [100, 101], 101),
+    ] as [(MarkOutcome, [UInt64], UInt64?)])
+    func aRefusedSecondMarkGoesBackToWhatDiscordHas(
+        first: MarkOutcome, order: [UInt64], line: UInt64?
+    ) async throws {
+        let list = try unreadFrom101()
+        store.update { $0.allow(allowed(), message: 100, in: 11) }
+        let actions = session.messageActions(for: list) { _ in }
+        var marks: [UInt64: (answers: AsyncQueue<Result<MarkOutcome, RequestError>>, done: Task<Void, Never>)] = [:]
+        for raw in [101, 100] as [UInt64] {
+            let answers = account.holdMark(from: id(raw))
+            let row = try #require(list.rows.first { $0.id == id(raw) })
+            marks[raw] = (answers, Task { await actions.markUnread(from: row) })
+            await answers.pulled(1)
+        }
+        #expect(list.newMessagesLine == id(100))
+
+        for raw in order {
+            marks[raw]?.answers.send(raw == 101 ? .success(first) : .failure(.ServerError(status: 502)))
+            await marks[raw]?.done.value
+        }
+
+        #expect(list.newMessagesLine == line.map { id($0) })
+        #expect(session.messageActionFailure?.title == "Couldn't Mark as Unread")
+        session.close()
+    }
+
     // Marked twice from the same message: the first mark's answer isn't the second one's.
     @Test
     func anEarlierMarksAnswerLeavesALaterMarksLine() throws {
@@ -484,7 +518,7 @@ final class SessionMessageActionsTests {
 
         let first = list.markUnread(from: id(101))
         _ = list.markUnread(from: id(101))
-        first()
+        first(false)
 
         #expect(list.newMessagesLine == id(101))
         session.close()

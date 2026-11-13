@@ -162,7 +162,9 @@ new messages line over the message at once, asks `Account.markUnread`, and on a 
 line back and leaves one `messageActionFailure` on the session, in Akari's words, until
 `dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
 ack, another mark, another device or a READY took its place) puts the line back without an
-alert, unless a later mark has the line by then.
+alert, unless a later mark has the line by then. The line goes back to where Discord has it: the
+newest mark it took (`MarkOutcome.marked`), else the position from before the unanswered marks,
+whatever order the answers come in.
 A thread's starter row acts on the parent's message, but marks the thread unread.
 The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
 channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
