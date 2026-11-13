@@ -1032,6 +1032,10 @@ fn created(id: u64, body: &Value) -> Value {
     message["content"] = body["content"].clone();
     message["nonce"] = body["nonce"].clone();
     message["author"] = json!({"id": ME, "username": "akari_tester"});
+    if let Some(reference) = body.get("message_reference") {
+        message["type"] = 19.into();
+        message["message_reference"] = reference.clone();
+    }
     message
 }
 
@@ -1161,12 +1165,15 @@ async fn the_echo_first_replaces_the_pending_message() {
     sends.mount(&server).await;
     let (account, subscription, mut connection) = sending(&mut fake, &server).await;
 
-    let (sent, ()) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
-        let nonce = sends.first_nonce().await;
-        connection
-            .send(echo(2, 400_000_000_000_000_050, &nonce))
-            .await;
-    });
+    let (sent, ()) = tokio::join!(
+        account.send_message(general(), "hello".to_owned(), None),
+        async {
+            let nonce = sends.first_nonce().await;
+            connection
+                .send(echo(2, 400_000_000_000_000_050, &nonce))
+                .await;
+        }
+    );
 
     assert_eq!(sent.unwrap().get(), 400_000_000_000_000_050);
     let events = sync(&mut connection, &subscription, 3).await;
@@ -1189,7 +1196,7 @@ async fn a_late_echo_after_the_response_changes_nothing() {
     let (account, subscription, mut connection) = sending(&mut fake, &server).await;
 
     account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap();
     let nonce = sends.first_nonce().await;
@@ -1217,7 +1224,7 @@ async fn an_echo_after_a_failed_send_still_shows_the_message() {
     let (account, _subscription, mut connection) = sending(&mut fake, &server).await;
 
     let err = account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap_err();
     let failed = outbox(&account);
@@ -1246,12 +1253,15 @@ async fn a_send_that_discord_took_but_answered_with_502_appears_once() {
     sends.mount(&server).await;
     let (account, subscription, mut connection) = sending(&mut fake, &server).await;
 
-    let (sent, ()) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
-        let nonce = sends.first_nonce().await;
-        connection
-            .send(echo(2, 400_000_000_000_000_050, &nonce))
-            .await;
-    });
+    let (sent, ()) = tokio::join!(
+        account.send_message(general(), "hello".to_owned(), None),
+        async {
+            let nonce = sends.first_nonce().await;
+            connection
+                .send(echo(2, 400_000_000_000_000_050, &nonce))
+                .await;
+        }
+    );
 
     sent.unwrap();
     let bodies = sends.bodies();
@@ -1275,7 +1285,7 @@ async fn a_failed_message_stays_until_retried_or_discarded() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap_err();
     let failed = outbox(&account);
@@ -1294,7 +1304,7 @@ async fn a_retry_reuses_the_nonce() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap_err();
     let pending = Snowflake::new(outbox(&account)[0].0);
@@ -1317,9 +1327,9 @@ async fn sends_in_one_channel_keep_their_order() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     let (one, two, three) = tokio::join!(
-        account.send_message(general(), "one".to_owned()),
-        account.send_message(general(), "two".to_owned()),
-        account.send_message(general(), "three".to_owned()),
+        account.send_message(general(), "one".to_owned(), None),
+        account.send_message(general(), "two".to_owned(), None),
+        account.send_message(general(), "three".to_owned(), None),
     );
 
     assert!(one.is_ok() && two.is_ok() && three.is_ok());
@@ -1345,9 +1355,9 @@ async fn a_retried_send_keeps_its_place_before_later_sends() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     let (one, two, three) = tokio::join!(
-        account.send_message(general(), "one".to_owned()),
-        account.send_message(general(), "two".to_owned()),
-        account.send_message(general(), "three".to_owned()),
+        account.send_message(general(), "one".to_owned(), None),
+        account.send_message(general(), "two".to_owned(), None),
+        account.send_message(general(), "three".to_owned(), None),
     );
 
     assert!(one.is_ok() && two.is_ok() && three.is_ok());
@@ -1390,7 +1400,7 @@ async fn a_cancelled_send_leaves_the_message_failed() {
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(100),
-        account.send_message(general(), "hello".to_owned()),
+        account.send_message(general(), "hello".to_owned(), None),
     )
     .await;
 
@@ -1431,10 +1441,13 @@ async fn a_send_shows_at_once_and_goes_out_even_if_the_jump_fails() {
         .await
         .unwrap();
 
-    let (sent, shown) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        outbox(&account)
-    });
+    let (sent, shown) = tokio::join!(
+        account.send_message(general(), "hello".to_owned(), None),
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            outbox(&account)
+        }
+    );
 
     assert!(sent.is_ok(), "{sent:?}");
     assert_eq!(shown.len(), 1, "{shown:?}");
@@ -1462,7 +1475,7 @@ async fn sending_in_a_detached_window_jumps_to_the_present() {
         .unwrap();
 
     account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap();
 
@@ -1497,7 +1510,7 @@ async fn empty_messages_are_refused_without_a_request() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     let err = account
-        .send_message(general(), " \n\t ".to_owned())
+        .send_message(general(), " \n\t ".to_owned(), None)
         .await
         .unwrap_err();
 
@@ -1515,7 +1528,7 @@ async fn a_captcha_leaves_the_message_failed_with_the_challenge() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     let err = account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap_err();
 
@@ -2000,7 +2013,7 @@ async fn a_message_over_the_limit_is_refused_before_anything_is_queued() {
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
     let err = account
-        .send_message(general(), "a".repeat(2001))
+        .send_message(general(), "a".repeat(2001), None)
         .await
         .unwrap_err();
 
@@ -2012,7 +2025,7 @@ async fn a_message_over_the_limit_is_refused_before_anything_is_queued() {
     assert!(sends.bodies().is_empty());
     // 2,000 code points, 2,001 UTF-16 units.
     let fits = format!("{}👍", "a".repeat(1999));
-    account.send_message(general(), fits).await.unwrap();
+    account.send_message(general(), fits, None).await.unwrap();
     assert_eq!(sends.bodies().len(), 1);
 }
 
@@ -2027,10 +2040,13 @@ async fn a_send_starts_the_cooldown_when_it_is_queued() {
     assert_eq!(slowmode_until(&account), None);
 
     let before = std::time::SystemTime::now();
-    let (sent, pending) = tokio::join!(account.send_message(general(), "hi".to_owned()), async {
-        sends.first_nonce().await;
-        slowmode_until(&account)
-    });
+    let (sent, pending) = tokio::join!(
+        account.send_message(general(), "hi".to_owned(), None),
+        async {
+            sends.first_nonce().await;
+            slowmode_until(&account)
+        }
+    );
 
     sent.unwrap();
     let pending = pending.expect("no cooldown while the send was pending");
@@ -2052,7 +2068,7 @@ async fn a_failed_send_clears_the_cooldown_it_started() {
         slowmode_sending(&mut fake, &server, json!([])).await;
 
     let err = account
-        .send_message(general(), "hi".to_owned())
+        .send_message(general(), "hi".to_owned(), None)
         .await
         .unwrap_err();
 
@@ -2072,7 +2088,7 @@ async fn a_slowmode_answer_holds_until_retry_after() {
         slowmode_sending(&mut fake, &server, json!([])).await;
 
     let before = std::time::SystemTime::now();
-    let err = timeout(WAIT, account.send_message(general(), "hi".to_owned()))
+    let err = timeout(WAIT, account.send_message(general(), "hi".to_owned(), None))
         .await
         .expect("a long slowmode wait must fail at once")
         .unwrap_err();
@@ -2102,7 +2118,7 @@ async fn exempt_users_get_no_cooldown() {
     let (account, _subscription, _connection) = slowmode_sending(&mut fake, &server, bypass).await;
 
     account
-        .send_message(general(), "hi".to_owned())
+        .send_message(general(), "hi".to_owned(), None)
         .await
         .unwrap();
 
@@ -2142,7 +2158,7 @@ async fn discords_length_refusal_is_too_long_with_its_limit() {
     for _ in 0..3 {
         errors.push(
             account
-                .send_message(general(), "hello".to_owned())
+                .send_message(general(), "hello".to_owned(), None)
                 .await
                 .unwrap_err(),
         );
@@ -2175,7 +2191,7 @@ async fn a_queued_message_waits_for_delivery_then_sends() {
     sends.mount(&server).await;
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
 
-    let pending = account.queue_message(general(), "hello").unwrap();
+    let pending = account.queue_message(general(), "hello", None).unwrap();
 
     assert_eq!(outbox(&account), [(pending.get(), Delivery::Pending)]);
     assert!(sends.bodies().is_empty());
@@ -2196,7 +2212,7 @@ async fn a_pending_message_is_delivered_once() {
     let sends = Sends::new(&[200]).delayed(Duration::from_millis(100));
     sends.mount(&server).await;
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
-    let pending = account.queue_message(general(), "hello").unwrap();
+    let pending = account.queue_message(general(), "hello", None).unwrap();
 
     let (first, second) = tokio::join!(
         account.deliver_message(general(), pending),
@@ -2224,7 +2240,7 @@ async fn a_message_being_retried_isnt_delivered_again() {
     sends.mount(&server).await;
     let (account, _subscription, _connection) = sending(&mut fake, &server).await;
     account
-        .send_message(general(), "hello".to_owned())
+        .send_message(general(), "hello".to_owned(), None)
         .await
         .unwrap_err();
     let pending = Snowflake::new(outbox(&account)[0].0);
@@ -2251,7 +2267,7 @@ async fn a_closed_account_refuses_before_anything_is_queued() {
     account.close();
 
     assert!(matches!(
-        account.queue_message(general(), "hello"),
+        account.queue_message(general(), "hello", None),
         Err(RequestError::Closed)
     ));
     assert!(outbox(&account).is_empty());
@@ -4298,6 +4314,7 @@ mod forum_unreads;
 mod images;
 mod post_create;
 mod reading;
+mod replies;
 mod scans;
 mod starters;
 mod thread_create;

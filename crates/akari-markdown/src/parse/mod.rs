@@ -28,6 +28,8 @@ pub(crate) struct Rules {
     pub(crate) links: bool,
     pub(crate) lists: bool,
     pub(crate) headings: bool,
+    /// A reply's one-line preview: no quotes, and a code block is inline code.
+    pub(crate) line: bool,
 }
 
 impl Rules {
@@ -37,6 +39,7 @@ impl Rules {
         links: true,
         lists: true,
         headings: true,
+        line: false,
     };
 }
 
@@ -444,7 +447,7 @@ impl Parser {
             b'[' if nest && rules.links => self.masked_link(input, at, range, ctx, frame),
             b'-' if nest => self.dash(input, at, range, ctx),
             b'#' => self.hash(input, at, range, ctx),
-            b'>' if nest && rules.blocks => self.quote(input, at, range, ctx),
+            b'>' if nest && rules.blocks && !rules.line => self.quote(input, at, range, ctx),
             b'0'..=b'9' => self.digit(input, at, range, ctx),
             b':' => self.shortcode(input, at, range),
             0x80.. => self.emoji(input, at, range),
@@ -486,11 +489,24 @@ impl Parser {
         ctx: Ctx,
         frame: &mut Frame,
     ) -> Option<Match> {
-        self.rules
+        let block = self
+            .rules
             .blocks
             .then(|| self.code_block(input, at, range, frame))
-            .flatten()
-            .or_else(|| self.inline_code(input, at, range, ctx, frame))
+            .flatten();
+        match block {
+            Some(Match {
+                node: Node::CodeBlock { code, source, .. },
+                next,
+                nested,
+            }) if self.rules.line => Some(Match {
+                node: Node::Code { code, source },
+                next,
+                nested,
+            }),
+            Some(block) => Some(block),
+            None => self.inline_code(input, at, range, ctx, frame),
+        }
     }
 
     fn asterisk(

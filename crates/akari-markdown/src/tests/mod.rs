@@ -7,6 +7,7 @@ mod emoji;
 mod links;
 mod outline;
 mod properties;
+mod replies;
 mod source_range;
 mod stack;
 mod text;

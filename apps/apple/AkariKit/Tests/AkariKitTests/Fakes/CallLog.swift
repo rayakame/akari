@@ -13,6 +13,8 @@ final class CallLog: Sendable {
         case load(ChannelId, MessageLoad)
         case supersede(ChannelId)
         case send(ChannelId, String)
+        // Logged before its send.
+        case reply(ChannelId, MessageId, mention: Bool)
         case deliver(ChannelId, MessageId)
         case retry(ChannelId, MessageId)
         case discard(ChannelId, MessageId)

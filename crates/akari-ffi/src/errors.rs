@@ -360,8 +360,12 @@ pub enum RequestError {
     /// `limit` is Discord's limit then.
     #[error("the message is longer than {limit} characters")]
     TooLong { limit: u32 },
-    /// Empty content, a send before the account is online, or a retry of a message that
-    /// isn't failed.
+    /// A reply's target is gone: Discord refused the reference. The failed reply stays with
+    /// its text, and its target reads as `Deleted`.
+    #[error("the message replied to was deleted")]
+    ReplyTargetDeleted,
+    /// Empty content, a send before the account is online, a retry of a message that isn't
+    /// failed, or a reply to a message that may not be answered.
     #[error("invalid request")]
     InvalidRequest,
     /// The account is closed.
@@ -395,6 +399,7 @@ impl From<akari_core::RequestError> for RequestError {
             E::TooLong { limit } => Self::TooLong {
                 limit: u32::try_from(limit).unwrap_or(u32::MAX),
             },
+            E::ReplyTargetDeleted => Self::ReplyTargetDeleted,
             E::UnexpectedResponse => Self::UnexpectedResponse,
             E::InvalidRequest => Self::InvalidRequest,
             E::Closed => Self::Closed,

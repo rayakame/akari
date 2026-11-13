@@ -4,7 +4,7 @@ use super::bounds::assert_bounded;
 use super::spans;
 use crate::{Document, InlineKind, parse, source_range};
 
-fn markdown() -> impl Strategy<Value = String> {
+pub(super) fn markdown() -> impl Strategy<Value = String> {
     let delimiter = prop::sample::select(
         "*_~|`>#-[]()<@&:!t0123456789 \n\\.\"'/"
             .chars()

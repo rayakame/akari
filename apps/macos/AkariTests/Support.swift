@@ -280,9 +280,11 @@ extension View {
 }
 
 /// What an ordinary message of another user allows, for fake stores.
-nonisolated func testMessageActions(createThread: Bool = false, viewThread: Bool = false) -> MessageActions {
+nonisolated func testMessageActions(
+    createThread: Bool = false, viewThread: Bool = false, reply: Bool = false, edit: Bool = false
+) -> MessageActions {
     MessageActions(
-        reply: false, replyPings: false, mentionToggle: false, edit: false, delete: false,
+        reply: reply, replyPings: reply, mentionToggle: reply, edit: edit, delete: false,
         pin: false, unpin: false, react: false, toggleReaction: false, removeReactions: false,
         markUnread: true, copyLink: true, createThread: createThread, viewThread: viewThread)
 }

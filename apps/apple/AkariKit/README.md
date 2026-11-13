@@ -95,7 +95,23 @@ screen, so views render from them without calling into Rust.
   the slowmode from akari-core, and the problem shown under the composer in Akari's words.
   `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
   and clears it only once the core has queued the message;
-  `retry(_:)` and `discard(_:)` act on failed messages.
+  `retry(_:)` and `discard(_:)` act on failed messages. `reply` is the channel's pending reply
+  (`PendingReply`: the message, its author's name, `mention` and whether the bar shows the
+  switch), one per channel, kept with the draft while other channels are open:
+  `startReply(to:shift:)` starts it where `MessageActions.reply` allows (the ping on by
+  `replyPings`, off with Shift) and asks for the focus (`focusRequests`),
+  `toggleReplyMention()` is the bar's switch, `cancelReply()` its ✕. It ends when the send is
+  queued, when its message is deleted (a bulk delete too, or `ReplyTargetChanged` to deleted),
+  and when the core refuses the reply before queueing it (`Problem.replyTargetGone`; the draft
+  stays). `reply`'s one setter is where the core is told: a new message is held
+  (`Account.holdReply`), so the reply can be sent after the message left the loaded ones, and
+  an end other than the send lets go (`releaseReply`; the core does that itself when it queues
+  the reply). A reply read back from the session's drafts on returning to a channel holds
+  nothing again: the core's hold lasts for the session. The bar's name is the list's: the
+  message list renames it when names change, from the row or, once the message left the
+  list, from the held preview. `replyWasRefused(_:)` says whether a failed message is a reply
+  Discord refused for its deleted message (`RequestError.ReplyTargetDeleted` on its send or
+  retry, until the next retry or its discard); the row has it as `replyRefused`.
 - `ViewerModel` is the media viewer's (`docs/ui/viewer.md`): `attachments(of:from:shows:)` and
   `embed(_:from:)` pick the items a click opens (a message's shown images and videos, an embed's
   gallery, its image or GIFV alone), and `messages.viewer(_:at:of:)` makes the model with the
@@ -155,9 +171,10 @@ waits in `membershipError`, in Discord's words, until `dismissMembershipError()`
 in the official client's order, and `perform(_:on:shift:)` for a click. The orders are three
 tables in the model (`barOrder`, `shiftBarOrder`, `menuOrder`) that name every action, also
 those whose feature isn't built; one switch (`Offer.has`) says which show, from `Store.messageActions`, asked
-every time since nothing announces a change. Today: Copy Text, Copy Message Link (the link is
-the core's, `Store.messageLink`), Mark Unread, Create Thread, View Thread, and Retry and Delete
-for a failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
+every time since nothing announces a change. Today: Reply (`ComposerModel.startReply`, Shift
+as it is at the click; a message the user can edit has it in the Shift row only), Copy Text,
+Copy Message Link (the link is the core's, `Store.messageLink`), Mark Unread, Create Thread,
+View Thread, and Retry and Delete for a failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
 new messages line over the message at once, asks `Account.markUnread`, and on a refusal puts the
 line back and leaves one `messageActionFailure` on the session, in Akari's words, until
 `dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
@@ -166,6 +183,23 @@ alert, unless a later mark has the line by then. The line goes back to where Dis
 newest mark it took (`MarkOutcome.marked`), else the position from before the unanswered marks,
 whatever order the answers come in.
 A thread's starter row acts on the parent's message, but marks the thread unread.
+A row's `reply` (`ReplyLine`, `nil` unless its shown message answers one) is what the line over
+a reply shows: the answered message's state (`ReplyTarget`), `author` for the small avatar,
+`name` with its "@" when the reply mentions them, `content` (the one-line `RichText` with
+`edited`, or the official client's words as a placeholder), `leadingSymbol` and
+`trailingSymbol` (SF Symbols), `jumps` (not once deleted, nor when the store no longer has the
+answered message's channel: a failed reply outlives it) and a label for VoiceOver.
+`MessageListModel.jumpToTarget(of:)` is the line's click: `jump(to:)` in the list, loading
+around a message that isn't loaded, or `SessionModel.jump(to:in:)` for a message of another
+channel (a starter row's original: the open list of that channel, else the channel opens and
+jumps in `open()`; if that jump doesn't land and the list has no rows, `open()` loads the
+newest messages). When the jump left the present, `replyReturn` names the reply and
+`returnToReply()` goes back and ends it once it landed (a failed load leaves it); any other
+jump ends it. `shownJump` is the last jump a view
+scrolled to, so a view made later doesn't repeat it. `replyingTo` is the message the pending
+reply answers. `SessionModel.escape(from:)` takes the pane the key was pressed in: an open
+New Thread form closes first, then a pending reply is cancelled (that pane's before the other's)
+and nothing else happens; `MessageListModel.escape()` cancels its own reply the same way.
 The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
 channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
 every way a list goes says so: a channel marked unread stays unread until its list goes, whatever
@@ -249,7 +283,9 @@ read only those badges (`channelBadges`, `guildBadges`), and the DM list its `un
 The batch also keeps, apart from its messages, the messages whose reactions changed
 (`reactionsChanged`, per channel), the messages replies answer that changed
 (`replyTargetsChanged`, per the target's channel) and the channels whose pins dot changed
-(`pinsUnreadChanged`); no model reads them yet.
+(`pinsUnreadChanged`). A message list reads again only the rows whose reply answers a changed
+message, the composer ends a pending reply whose message was deleted, and the New Thread form
+rereads its source's line; no model reads the other two yet.
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.

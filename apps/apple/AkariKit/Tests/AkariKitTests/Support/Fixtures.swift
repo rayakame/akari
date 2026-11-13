@@ -135,3 +135,32 @@ let noBadge = Badge(unread: false, mentions: 0)
 func badge(unread: Bool = true, mentions: UInt32 = 0) -> Badge {
     Badge(unread: unread, mentions: mentions)
 }
+
+/// A loaded reply target as the store gives it; `formatted` as the core parses its content.
+func preview(
+    by author: User = user(2, name: "Ray"), content: String = "the original",
+    kind: MessageType = .default, edited: Bool = false, webhook: Bool = false,
+    voice: Bool = false, attachments: Bool = false, embeds: Bool = false, sticker: Bool = false,
+    forwarded: Bool = false
+) -> ReplyTarget {
+    .loaded(
+        preview: ReplyPreview(
+            kind: kind, author: author, fromWebhook: webhook, content: content, edited: edited,
+            voiceMessage: voice, hasAttachments: attachments, hasEmbeds: embeds, hasSticker: sticker,
+            forwarded: forwarded,
+            formatted: content.isEmpty
+                ? nil : RichText(text: content, formatted: formattedText(content: content))))
+}
+
+/// A reply to `target` in the same channel.
+func reply(
+    _ raw: UInt64, to target: UInt64, in channelRaw: UInt64 = 10, by author: User = user(1),
+    mentionsAuthor: Bool = false, kind: MessageType = .reply, delivery: Delivery = .sent,
+    targetChannel: UInt64? = nil
+) -> Message {
+    var reply = message(raw, in: channelRaw, by: author, delivery: delivery, kind: kind)
+    reply.repliedTo = RepliedTo(
+        channelId: id(targetChannel ?? channelRaw), messageId: id(target),
+        mentionsAuthor: mentionsAuthor)
+    return reply
+}

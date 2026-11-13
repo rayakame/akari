@@ -592,6 +592,24 @@ impl Message {
         }
     }
 
+    // Shaped as the official client's optimistic reply; `pinged` is the target's author.
+    pub(crate) fn answering(
+        mut self,
+        target: MessageId,
+        pinged: Option<Arc<User>>,
+        guild: Option<model::GuildId>,
+    ) -> Self {
+        self.kind = model::MessageType::Reply;
+        self.reference = Some(Box::new(MessageReference {
+            kind: model::MessageReferenceType::Default,
+            message_id: Some(target),
+            channel_id: Some(self.channel_id),
+            guild_id: guild,
+        }));
+        self.mentions = pinged.into_iter().collect();
+        self
+    }
+
     pub(crate) fn patch(&self, update: MessageUpdate, intern: Intern<'_>) -> Self {
         let mut next = self.clone();
         next.kind = update.kind.unwrap_or(next.kind);

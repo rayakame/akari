@@ -11,7 +11,7 @@ use super::order::{self, guild_order};
 use super::permissions::compute;
 use super::reactions::{ReactionChange, ReactionEmoji};
 use super::read_states::{Ack, ReadStates};
-use super::replies::ReplyTarget;
+use super::replies::{ReplyTarget, ReplyTo};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     DisplaySettings, GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
@@ -22,8 +22,8 @@ use super::types::{
     ThreadMembership, User,
 };
 use super::windows::{
-    CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch,
-    WindowLimits, Windows,
+    Answered, CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, Outgoing,
+    StarterFetch, WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
@@ -1756,13 +1756,45 @@ impl State {
     pub(crate) fn queue(
         &mut self,
         channel: ChannelId,
-        message: Arc<Message>,
+        message: Message,
+        reply: Option<ReplyTo>,
         now_millis: i64,
         events: &mut Vec<StoreEvent>,
-    ) {
+    ) -> bool {
         let send = message.id;
-        self.windows.queue(channel, message, events);
+        match reply {
+            Some(reply) => {
+                let Some(preview) = self.answered(channel, reply.message, now_millis) else {
+                    return false;
+                };
+                let guild = self
+                    .entities
+                    .channels
+                    .get(&channel)
+                    .and_then(|channel| channel.guild_id);
+                let mention = reply.mention && self.me() != Some(preview.author.id);
+                let pinged = mention.then(|| preview.author.clone());
+                let message = Arc::new(message.answering(reply.message, pinged, guild));
+                let answers = Some(Answered {
+                    target: reply.message,
+                    preview,
+                    mention,
+                });
+                self.windows.queue(channel, message, answers, events);
+            }
+            None => self.windows.queue(channel, Arc::new(message), None, events),
+        }
         self.start_cooldown(channel, send, now_millis);
+        true
+    }
+
+    pub(crate) fn target_gone(
+        &mut self,
+        channel: ChannelId,
+        target: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.target_gone(channel, target, events);
     }
 
     pub(crate) fn confirm(
@@ -1791,7 +1823,7 @@ impl State {
         pending: MessageId,
         now_millis: i64,
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Arc<Message>> {
+    ) -> Option<Outgoing> {
         let message = self.windows.retry(channel, pending, events)?;
         self.start_cooldown(channel, pending, now_millis);
         Some(message)
@@ -1810,7 +1842,7 @@ impl State {
         self.windows.snapshot(channel)
     }
 
-    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Outgoing> {
         self.windows.pending(channel, id)
     }
 

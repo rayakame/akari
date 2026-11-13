@@ -1382,13 +1382,14 @@ fn queueing_or_retrying_a_send_starts_its_cooldown_in_the_same_write() {
 
     store.queue_message(
         general,
-        Arc::new(Message::pending(
+        Message::pending(
             pending,
             general,
             Arc::new(me.user.clone()),
             "hi".to_owned(),
             0,
-        )),
+        ),
+        None,
     );
     assert!(store.slowmode(general).unwrap().until.is_some());
 

@@ -788,7 +788,7 @@ fn an_unsent_replys_target_is_never_trimmed() {
         )
     };
     let now = state.now_millis();
-    state.queue(general, Arc::new(unsent), now, &mut Vec::new());
+    state.queue(general, unsent, None, now, &mut Vec::new());
     apply(
         &mut state,
         "MESSAGE_DELETE",
@@ -1297,3 +1297,163 @@ fn many_targets_are_read_at_once_in_the_order_asked() {
     assert_eq!(targets[1], ReplyTarget::NotLoaded);
     assert!(matches!(targets[2], ReplyTarget::Loaded(_)));
 }
+
+fn queue_reply(state: &mut State, id: u64, target: u64, mention: bool) -> (bool, Vec<String>) {
+    let me = state.current_user().unwrap();
+    let general = Snowflake::new(GENERAL);
+    let pending = Message::pending(
+        Snowflake::new(id),
+        general,
+        Arc::new(me.user.clone()),
+        "an answer".to_owned(),
+        0,
+    );
+    let reply = Some(crate::state::ReplyTo {
+        message: Snowflake::new(target),
+        mention,
+    });
+    let now = state.now_millis();
+    let mut events = Vec::new();
+    let queued = state.queue(general, pending, reply, now, &mut events);
+    (queued, events.iter().map(describe).collect())
+}
+
+#[test]
+fn a_queued_reply_is_a_reply_row_and_loads_its_target() {
+    let mut state = viewing(GENERAL);
+    load(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[original(GENERAL, "the original")],
+    );
+    assert_eq!(target(&state, GENERAL, TARGET), "not loaded");
+
+    let (queued, events) = queue_reply(&mut state, 9000, TARGET, true);
+
+    assert!(queued);
+    assert_eq!(
+        events,
+        [changed(GENERAL, TARGET), "MessageInserted(9000)".to_owned()]
+    );
+    assert_eq!(target(&state, GENERAL, TARGET), "the original");
+    let general = Snowflake::new(GENERAL);
+    let outgoing = state.pending(general, Snowflake::new(9000)).unwrap();
+    assert!(outgoing.mention);
+    let row = outgoing.message;
+    assert_eq!(row.kind, MessageType::Reply);
+    assert_eq!(row.replied_to(), Some((general, Snowflake::new(TARGET))));
+    let author = state
+        .message(general, Snowflake::new(TARGET))
+        .unwrap()
+        .author
+        .id;
+    assert!(row.mentions_user(author));
+    assert!(state.reply_mentions_author(&row));
+
+    let (queued, events) = queue_reply(&mut state, 9001, 4242, true);
+    assert!(!queued, "the store has no such message");
+    assert!(events.is_empty());
+    assert!(state.pending(general, Snowflake::new(9001)).is_none());
+}
+
+#[test]
+fn a_queued_replys_new_target_keeps_the_bound() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    let replies: Vec<Value> = (0..150_u64)
+        .map(|index| {
+            let target = 1000 + index;
+            reply_to(
+                2000 + index,
+                GENERAL,
+                target,
+                Some(message(target, GENERAL)),
+            )
+        })
+        .collect();
+    load(&mut state, GENERAL, LoadKind::Latest, &replies);
+    let around = LoadKind::Around(Snowflake::new(5000));
+    load(&mut state, GENERAL, around, &[message(5000, GENERAL)]);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, 5000), "not loaded");
+
+    assert!(queue_reply(&mut state, 9000, 5000, true).0);
+
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert!(matches!(
+        state.reply_target(general, Snowflake::new(5000)),
+        ReplyTarget::Loaded(_)
+    ));
+}
+
+#[test]
+fn a_pending_replys_target_and_ping_choice_outlast_its_window() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    load(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[original(GENERAL, "the original")],
+    );
+    assert!(queue_reply(&mut state, 9000, TARGET, false).0);
+    let row = state
+        .pending(general, Snowflake::new(9000))
+        .unwrap()
+        .message;
+    assert!(row.mentions.is_empty());
+
+    // A jump replaces the window with more targets than the bound keeps.
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(
+            general,
+            LoadKind::Around(Snowflake::new(5000)),
+            2,
+            &mut events,
+        )
+        .unwrap();
+    let replies: Vec<Value> = (0..150_u64)
+        .map(|index| {
+            let mut original = message(1000 + index, GENERAL);
+            original["content"] = "another".into();
+            reply_to(5000 + index, GENERAL, 1000 + index, Some(original))
+        })
+        .collect();
+    state.finish_load(ticket, page(&replies), false, &mut events);
+
+    assert_eq!(state.windows.targets_len(general), 151);
+    assert_eq!(target(&state, GENERAL, TARGET), "the original");
+    assert!(
+        !state
+            .pending(general, Snowflake::new(9000))
+            .unwrap()
+            .mention
+    );
+
+    // Failed, it still names its target; discarded, it lets go of it.
+    state.fail(general, Snowflake::new(9000), &mut events);
+    let ticket = state
+        .begin_load(general, LoadKind::Latest, 3, &mut events)
+        .unwrap();
+    let present = [reply_to(6000, GENERAL, 7000, Some(message(7000, GENERAL)))];
+    state.finish_load(ticket, page(&present), true, &mut events);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, TARGET), "the original");
+    let retried = state
+        .retry(general, Snowflake::new(9000), 0, &mut events)
+        .unwrap();
+    assert!(!retried.mention);
+    state.fail(general, Snowflake::new(9000), &mut events);
+    state.discard(general, Snowflake::new(9000), &mut events);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(6001, GENERAL, 7001, Some(message(7001, GENERAL))),
+    );
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, TARGET), "not loaded");
+}
+
+mod holds;

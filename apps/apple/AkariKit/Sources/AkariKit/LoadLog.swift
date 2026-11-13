@@ -95,6 +95,7 @@ public enum LoadLog {
         case .UnexpectedResponse: "unexpected response"
         case .TooLong: "too long"
         case .InvalidRequest: "invalid request"
+        case .ReplyTargetDeleted: "reply target deleted"
         case .Closed: "closed"
         }
     }

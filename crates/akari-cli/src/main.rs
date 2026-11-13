@@ -337,4 +337,56 @@ mod tests {
         };
         assert_eq!(text.join(" "), "hello there");
     }
+
+    #[test]
+    fn send_takes_the_message_it_answers_and_whether_to_ping() {
+        let reply = |args: &[&str]| {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Command::Session(SessionCommand::Send {
+                reply,
+                no_mention,
+                channel_id,
+                text,
+                ..
+            }) = cli.command
+            else {
+                panic!("expected send");
+            };
+            (reply, no_mention, channel_id, text.join(" "))
+        };
+
+        assert_eq!(
+            reply(&["akari-cli", "send", "--reply", "7", "1", "hi", "there"]),
+            (Some(7), false, 1, "hi there".to_owned())
+        );
+        assert_eq!(
+            reply(&[
+                "akari-cli",
+                "send",
+                "--reply",
+                "7",
+                "--no-mention",
+                "1",
+                "hi"
+            ]),
+            (Some(7), true, 1, "hi".to_owned())
+        );
+        assert_eq!(
+            reply(&["akari-cli", "send", "1", "about", "--reply", "7"]),
+            (None, false, 1, "about --reply 7".to_owned())
+        );
+        assert!(Cli::try_parse_from(["akari-cli", "send", "--no-mention", "1", "hi"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "akari-cli",
+                "send",
+                "--reply",
+                "7",
+                "--repeat-nonce",
+                "1",
+                "hi"
+            ])
+            .is_err()
+        );
+    }
 }

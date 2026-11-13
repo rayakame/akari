@@ -4,6 +4,9 @@ final class Drafts {
     private var texts: [ChannelId: String] = [:]
     var forms: [ChannelId: ThreadFormDraft] = [:]
     var posts: [ChannelId: PostFormDraft] = [:]
+    var replies: [ChannelId: PendingReply] = [:]
+    // Failed replies Discord refused because the message they answer was deleted.
+    var refusedReplies: Set<MessageId> = []
 
     subscript(channel: ChannelId) -> String {
         get { texts[channel] ?? "" }

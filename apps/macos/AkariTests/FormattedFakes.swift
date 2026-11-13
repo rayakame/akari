@@ -45,6 +45,18 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     { nil }
 
     override func reservePlacing() -> UInt64 { 0 }
+
+    // As akari-core: the message each channel's pending reply answers.
+    let heldReplies = OSAllocatedUnfairLock<[ChannelId: MessageId]>(initialState: [:])
+
+    override func holdReply(channelId: ChannelId, messageId: MessageId) -> Bool {
+        heldReplies.withLock { $0[channelId] = messageId }
+        return true
+    }
+
+    override func releaseReply(channelId: ChannelId) {
+        heldReplies.withLock { $0[channelId] = nil }
+    }
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
@@ -233,7 +245,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         let base = channelId.rawValue * 1000
         return MessageWindow(
             messageIds: (1...count).map { MessageId(rawValue: base + $0) }, pendingIds: [],
-            latest: true, oldest: true, stale: false)
+            latest: !away.withLock { $0 }, oldest: true, stale: false)
     }
 
     // Every so many messages formatted, the rest one plain line.
@@ -250,8 +262,10 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                         messageId: MessageId(rawValue: channelId.rawValue * 1000 + pinned),
                         channelId: channelId, guildId: GuildId(rawValue: 1)) : nil
             }
-            return Message(
-                id: id, channelId: channelId, kind: pin == nil ? .default : .channelPinnedMessage,
+            let answered = replies.withLock { $0[UInt64(number)] }
+            var message = Message(
+                id: id, channelId: channelId,
+                kind: pin != nil ? .channelPinnedMessage : answered != nil ? .reply : .default,
                 author: person(UInt64(2 + number % 2)),
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
@@ -261,7 +275,35 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 reference: pin, hasThread: false, mentions: [],
                 call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,
                 applicationName: nil, embedFields: [])
+            message.repliedTo = answered.map {
+                RepliedTo(
+                    channelId: channelId, messageId: MessageId(rawValue: channelId.rawValue * 1000 + $0),
+                    mentionsAuthor: false)
+            }
+            return message
         }
+    }
+
+    /// Set: newer messages than the window's exist, so its lists are away from the present.
+    let away = OSAllocatedUnfairLock(initialState: false)
+
+    /// Set: the message with the key's number answers the one with the value's, in every channel.
+    let replies = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
+
+    override func replyTarget(channelId: ChannelId, targetId: MessageId) -> ReplyTarget {
+        guard let message = messages(channelId: channelId, ids: [targetId]).first else {
+            return .notLoaded
+        }
+        return .loaded(
+            preview: ReplyPreview(
+                kind: message.kind, author: message.author, fromWebhook: false,
+                content: message.content, edited: false, voiceMessage: false, hasAttachments: false,
+                hasEmbeds: false, hasSticker: false, forwarded: false,
+                formatted: RichText(text: message.content, formatted: message.formatted)))
+    }
+
+    override func replyTargets(channelId: ChannelId, targetIds: [MessageId]) -> [ReplyTarget] {
+        targetIds.map { replyTarget(channelId: channelId, targetId: $0) }
     }
 
     override func messageLengthLimit() -> UInt32 {
@@ -273,11 +315,21 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         ThreadCreation(public: true, private: true)
     }
 
+    /// Set: every message can be answered, with the ping and its switch.
+    let answerable = OSAllocatedUnfairLock(initialState: false)
+
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
-        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+        testMessageActions(
+            createThread: canStartThread(channelId: channelId, messageId: messageId),
+            reply: answerable.withLock { $0 })
     }
 
-    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
+    /// Set: a thread can be started from every message.
+    let startsThreads = OSAllocatedUnfairLock(initialState: false)
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
+        startsThreads.withLock { $0 }
+    }
     override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
 
     override func slowmode(channelId: ChannelId) -> Slowmode? {

@@ -948,7 +948,7 @@ fn echo(id: u64, nonce: u64) -> model::Message {
 impl Harness {
     fn queue(&mut self, message: Arc<Message>) -> Vec<String> {
         let mut events = Vec::new();
-        self.windows.queue(channel(CH), message, &mut events);
+        self.windows.queue(channel(CH), message, None, &mut events);
         describe(&events)
     }
 
@@ -1012,6 +1012,94 @@ fn a_response_replaces_its_pending_message_and_the_echo_changes_nothing() {
     assert_eq!(harness.ids(), [20]);
 }
 
+// A send from a window away from the present jumps there while it is delivered.
+fn sending_detached() -> (Harness, LoadTicket) {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    harness.queue(pending(500, "hi"));
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    (harness, ticket)
+}
+
+#[test]
+fn a_sent_message_stays_whichever_of_its_answer_and_the_jumps_page_comes_first() {
+    let (mut page_first, ticket) = sending_detached();
+    page_first.finish(ticket, &[28, 31], 3);
+    let answer = page_first.confirm(500, echo(30, 500));
+
+    let (mut answer_first, ticket) = sending_detached();
+    let held = answer_first.confirm(500, echo(30, 500));
+    let page = answer_first.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(answer, ["Replaced(500 -> 30)"]);
+    assert_eq!(page_first.ids(), [28, 30, 31]);
+    assert_eq!(held, ["Replaced(500 -> 30)"]);
+    assert_eq!(page, ["Cleared(1)", "Loaded(28..31)"]);
+    assert_eq!(answer_first.ids(), [28, 30, 31]);
+    assert!(answer_first.window().latest);
+    assert!(answer_first.outbox().is_empty());
+}
+
+#[test]
+fn a_sent_message_the_jumps_page_has_is_there_once() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+
+    let events = harness.finish(ticket, &[28, 30, 31], 5);
+
+    assert_eq!(events, ["Cleared(1)", "Loaded(28..31)"]);
+    assert_eq!(harness.ids(), [28, 30, 31]);
+}
+
+#[test]
+fn a_sent_message_deleted_before_the_jumps_page_stays_deleted() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+    harness.delete(30);
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
+#[test]
+fn a_sent_message_from_before_a_reconnect_is_left_to_the_page() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+    harness.windows.mark_stale(&mut Vec::new());
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
+#[test]
+fn a_sent_message_stays_when_a_refresh_that_lacks_it_has_a_newer_one() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    harness.windows.mark_stale(&mut Vec::new());
+    harness.queue(pending(500, "hi"));
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    harness.confirm(500, echo(12, 500));
+
+    let events = harness.finish(ticket, &[11, 13], 5);
+
+    assert_eq!(events, ["Loaded(13..13)", "Loaded(12..12)", "Refreshed(1)"]);
+    assert_eq!(harness.ids(), [10, 11, 12, 13]);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn another_users_held_message_older_than_the_pages_newest_is_left_to_the_page() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.live(wire(30));
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
 #[test]
 fn a_failed_message_can_be_retried_or_discarded() {
     let mut harness = Harness::viewing(LIMITS);
@@ -1042,7 +1130,7 @@ fn a_failed_message_can_be_retried_or_discarded() {
         ]
     );
     assert_eq!(
-        retried.map(|message| message.delivery),
+        retried.map(|outgoing| outgoing.message.delivery),
         Some(Delivery::Pending)
     );
     assert!(discarded);
@@ -1645,4 +1733,41 @@ fn held_messages_dropped_within_the_page_keep_the_rows() {
 
     assert_eq!(harness.ids(), [22, 23, 24, 26, 27]);
     assert!(harness.window().latest);
+}
+
+#[test]
+fn a_reply_without_the_ping_stays_one_when_its_channel_goes() {
+    let mut harness = Harness::viewing(LOADS);
+    let target = stored(1);
+    let answered = |mention| {
+        Some(Answered {
+            target: target.id,
+            preview: Arc::new(ReplyPreview::of(&target)),
+            mention,
+        })
+    };
+    let mut events = Vec::new();
+    harness.windows.queue(
+        channel(CH),
+        pending(500, "quiet"),
+        answered(false),
+        &mut events,
+    );
+    harness.windows.queue(
+        channel(CH),
+        pending(501, "loud"),
+        answered(true),
+        &mut events,
+    );
+
+    harness.windows.drop_channel(channel(CH));
+
+    let mention = |id| {
+        harness
+            .windows
+            .pending(channel(CH), Snowflake::new(id))
+            .map(|outgoing| outgoing.mention)
+    };
+    assert_eq!(mention(500), Some(false));
+    assert_eq!(mention(501), Some(true));
 }

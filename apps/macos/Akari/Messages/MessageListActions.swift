@@ -31,6 +31,11 @@ protocol MessageListActions: AnyObject {
     func openThreads(of channel: ChannelId)
     // "a message" in a pin's line; the table scrolls once the model has jumped.
     func jump(to message: MessageId)
+    // A click on a reply's line: to the message it answers.
+    func jumpToTarget(of row: MessageListModel.Row)
+    // The table scrolled to a jump, and the last one any table of the list scrolled to.
+    func jumpShown(_ number: Int)
+    func lastShownJump() -> Int
     // A server a system line names.
     func openGuild(_ id: GuildId)
     // A masked link may ask first (D65).
@@ -64,6 +69,9 @@ protocol MessageListActions: AnyObject {
 }
 
 extension MessageListActions {
+    func jumpToTarget(of row: MessageListModel.Row) {}
+    func jumpShown(_ number: Int) {}
+    func lastShownJump() -> Int { .max }
     func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] { [] }
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] { [] }
     func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}

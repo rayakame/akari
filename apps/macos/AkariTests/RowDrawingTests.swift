@@ -268,6 +268,39 @@ struct ConstraintConflictTests {
         #expect(window.conflicts == 0)
     }
 
+    // SwiftUI puts the New Thread form's preview into the window before it gives it a size.
+    @Test
+    func aPreviewWithoutASizeYetConflictsWithNothing() {
+        let key = "NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints"
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        UserDefaults.standard.setVolatileDomain(
+            arguments.merging([key: true]) { $1 }, forName: UserDefaults.argumentDomain)
+        defer {
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
+        let window = TestWindow.hide(
+            RecordingWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 300)), styleMask: [.titled],
+                backing: .buffered, defer: false))
+        let message = row(1, by: author(2, "Ray"), at: noon, content: "the message a thread starts from").message
+        let preview = MessagePreviewView()
+        MessagePreview.configure(preview.cell, with: message, now: noon)
+
+        window.contentView?.addSubview(preview)
+        window.layoutIfNeeded()
+        #expect(window.conflicts == 0)
+
+        let height = MessagePreview.height(of: message, width: 480)
+        for size in [NSSize(width: 480, height: height), .zero, NSSize(width: 480, height: height)] {
+            preview.frame = NSRect(origin: .zero, size: size)
+            window.layoutIfNeeded()
+        }
+
+        #expect(window.conflicts == 0)
+        #expect(preview.cell.superview === preview && preview.cell.frame == preview.bounds)
+        #expect(preview.cell.frame.height > 20)
+    }
+
     @Test
     func anUnsatisfiableConstraintIsCounted() {
         #expect(
@@ -351,8 +384,11 @@ struct CellBuildingTests {
     @Test
     func aMessageCellBuildsItsRetryButtonsOnlyForAFailedMessage() {
         let cell = MessageCell()
+        // The reply line's two are every cell's, hidden without a reply.
+        let own = { buttons(in: cell).filter { !($0 is ReplyContentButton || $0 is ReplySpineView) } }
         configure(cell, .sent)
-        #expect(buttons(in: cell).isEmpty)
+        #expect(own().isEmpty)
+        #expect(buttons(in: cell).allSatisfy { $0.isHiddenOrHasHiddenAncestor })
 
         configure(cell, .failed)
         let shown = buttons(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }

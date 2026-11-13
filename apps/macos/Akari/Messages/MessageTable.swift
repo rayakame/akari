@@ -123,11 +123,18 @@ struct MessageArea: View {
                     }
                     .overlay(alignment: .bottom) {
                         VStack(spacing: 0) {
-                            if let text = JumpBar.text(
+                            if let kind = JumpBar.kind(
                                 atPresent: messages.atPresent, isStale: messages.isStale,
-                                hasRows: !messages.rows.isEmpty)
+                                hasRows: !messages.rows.isEmpty,
+                                fromReply: messages.replyReturn != nil)
                             {
-                                JumpBar(text: text) { bridge.jumpToPresent() }
+                                JumpBar(kind) {
+                                    if kind == .reply {
+                                        bridge.returnToReply()
+                                    } else {
+                                        bridge.jumpToPresent()
+                                    }
+                                }
                             }
                             // Above the composer, as in the official client: send errors on
                             // the left, slowmode on the right, over the list's last pixels.
@@ -142,7 +149,8 @@ struct MessageArea: View {
                     onShiftEscape: { bridge.markServerRead() },
                     onShiftPageUp: { bridge.jumpToUnread() },
                     onAttach: { link.composer = $0 },
-                    autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused
+                    autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused,
+                    onReplyJump: { bridge.jump(to: $0) }
                 )
                 .id(messages.channelId)
             }
@@ -163,6 +171,7 @@ struct MessageArea: View {
             hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
+            replyingTo: messages.replyingTo,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
             images: ImageCacheRef(images, placeholders: placeholders), motion: motion,
             focused: focused)
@@ -283,8 +292,12 @@ final class MessageListBridge: MessageListActions {
         if let escapeAll {
             escapeAll()
         } else {
+            // A pending reply takes the key: nothing is marked and nothing scrolls.
+            let replying = messages.composer.reply != nil
             Task { await messages.escape() }
-            link.controller?.jumpToPresent(load: false)
+            if !replying {
+                link.controller?.jumpToPresent(load: false)
+            }
         }
         link.composer?.takeFocus()
     }
@@ -337,6 +350,22 @@ final class MessageListBridge: MessageListActions {
 
     func jump(to message: MessageId) {
         Task { await messages.jump(to: message) }
+    }
+
+    func jumpToTarget(of row: MessageListModel.Row) {
+        Task { await messages.jumpToTarget(of: row) }
+    }
+
+    func returnToReply() {
+        Task { await messages.returnToReply() }
+    }
+
+    func jumpShown(_ number: Int) {
+        messages.shownJump = max(messages.shownJump, number)
+    }
+
+    func lastShownJump() -> Int {
+        messages.shownJump
     }
 
     func openGuild(_ id: GuildId) {

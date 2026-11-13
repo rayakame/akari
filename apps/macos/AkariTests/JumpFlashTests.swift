@@ -4,9 +4,9 @@ import Testing
 
 @testable import Akari
 
-// Discord's client highlights the message a jump lands on (its flash component and CSS, read
-// 2026-10-20): #5865F2 at 41/255 over the message, faded in over 0.2 s with CSS's ease, held
-// to 2 s, faded out over 0.2 s; with reduced motion on and off at once.
+// Discord's client highlights the message a jump lands on (its flash component and CSS, canary
+// 671549): #5865F2 at 41/255 over the message, faded in over 0.2 s with CSS's ease, held to
+// 2 s, faded out over 0.6 s; with reduced motion on and off at once.
 @MainActor
 struct JumpFlashTests {
     final class Clock {
@@ -42,9 +42,9 @@ struct JumpFlashTests {
 
         let fade = try #require(try flash(of: 120) as? CAKeyframeAnimation)
         #expect(fade.keyPath == "opacity")
-        #expect(fade.duration == 2.2)
+        #expect(fade.duration == 2.6)
         #expect(fade.values as? [Double] == [0, 1, 1, 0])
-        #expect(fade.keyTimes?.map(\.doubleValue) == [0, 0.2 / 2.2, 2 / 2.2, 1])
+        #expect(fade.keyTimes?.map(\.doubleValue) == [0, 0.2 / 2.6, 2 / 2.6, 1])
         let ease = fade.timingFunctions?.map { function in
             (0..<4).map { index in
                 var point: [Float] = [0, 0]
@@ -118,8 +118,8 @@ struct JumpFlashTests {
         #expect(try flash(of: 150) == nil)
     }
 
-    // A cell shown again mid-flash carries on; one shown for another message, or after the 2.2 s,
-    // doesn't.
+    // A cell shown again mid-flash carries on, through the fade out too; one shown for another
+    // message, or after the 2.6 s, doesn't.
     @Test
     func aCellShownAgainKeepsOnlyAFlashStillRunning() throws {
         jumped(to: 120)
@@ -128,16 +128,22 @@ struct JumpFlashTests {
         cell.flash(elapsed: nil, reducesMotion: false)
         #expect(cell.flashAnimation == nil)
         clock.now += 1
+        let before = cell.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
         list.show(MessageTableState(rows: list.page + [row(201, at: list.noon)], messageJump: jump(to: 120, 1)))
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
         let shown = try #require(try list.cell(of: 120) as? MessageCell)
         let begin = try #require(shown.flashAnimation).beginTime
-        let layerNow = shown.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
-        #expect(abs(layerNow - begin - 1) < 0.1, "it carries on 1 s in")
+        let after = shown.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
+        #expect((before - 1...after - 1).contains(begin), "it carries on 1 s in")
 
         clock.now += 1.3
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
+        #expect(try flash(of: 120) != nil, "2.3 s in it is fading out")
+
+        clock.now += 0.4
+        list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
         #expect(try flash(of: 120) == nil)
+        #expect(try #require(try list.cell(of: 120) as? MessageCell).flashOverlayAnimation == nil)
     }
 
     // Discord has one flash at a time.

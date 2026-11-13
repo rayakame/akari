@@ -21,6 +21,9 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
+futures-util.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+tokio-tungstenite.workspace = true
 wiremock.workspace = true
 
 [lints]

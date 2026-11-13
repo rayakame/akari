@@ -82,7 +82,8 @@ group when any of these holds:
 4. Its author's user ID differs from the previous message's.
 5. Both are webhook messages and their author names differ. One webhook can post under
    several names.
-6. It is a reply, or the result of a slash command or a context-menu command.
+6. It is a reply, or the result of a slash command or a context-menu command. A reply has the
+   line about the message it answers over its header ([replies.md](replies.md)).
 7. It has a thread started from it (observed 2026-10-19: Ray's 17:22 message with a thread
    started a group 6 minutes after his 17:16 one). The message after it doesn't start one for
    that: it continues the group under the thread's box, without a header (observed 2026-10-20:
@@ -257,20 +258,25 @@ one ([Threads](#threads)).
 
 ### The flash
 
-When a jump lands on a message (a pin's "a message", a poll's title; in Discord also a reply's
-quote and search results), Discord's client highlights it: `messageHighlight`, #5865F2 at 41/255
-in both themes, over the message's box (not the space above its group), its trailing corners
-rounded 4. It fades in over 0.2 s (CSS `ease`), holds until 2 s after the jump and fades out over
-0.2 s; with reduced motion it comes and goes at once. A new jump restarts it, and only one
-message flashes at a time. Read from its flash
-component (a 2 s timer) and its CSS (a 0.2 s `background-color` transition), 2026-10-20. *Akari:
-the same, with macOS's Reduce Motion. A jump to a message deleted since flashes nothing, as in
-Discord; the unread bar's jump doesn't flash.*
+When a jump lands on a message (a pin's "a message", a reply's line and the reply bar
+([replies.md](replies.md#the-jump)), a poll's title; in Discord also search results), Discord's
+client highlights it with two layers over the message's box (not the space above its group),
+its trailing corners rounded 4: each is `messageHighlight`, #5865F2 at 41/255 in both themes,
+and the upper one has a bar of 2 in `textBrand` on its left edge. Both fade in over 0.2 s (CSS
+`ease`), hold until 2 s after the jump and fade out over 0.6 s. In its first 0.6 s the upper
+layer blinks twice (out at 0.12 s and 0.36 s, back at 0.24 s and 0.48 s, `ease-in-out`). With
+reduced motion both come and go at once and nothing blinks. A new jump restarts it, and only one
+message flashes at a time. Read from its flash component (a 2 s timer) and its stylesheet,
+canary 671549, 2026-11-12; a read of 2026-10-20 had one layer and a fade out of 0.2 s. *Akari:
+the same, with macOS's Reduce Motion. The blink starts with the flash; the official client
+waits until the row has rested on screen for three frames and gives the blink up after 1 s. A
+jump to a message deleted since flashes nothing, as in Discord; the unread bar's jump doesn't
+flash.*
 
 ## Selecting text
 
 Discord lets the user select a message's text, a system message's line and the channel start's
-text; names, times, day dividers and the reply line can't be selected. *Akari: the same. The
+text; names, times, day dividers and a reply's line ([replies.md](replies.md)) can't be selected. *Akari: the same. The
 selectable texts are all text views like a message's, so they select alike, and a click, double
 click or drag never changes their font, color or baseline (a selectable label's field editor
 would).*
@@ -443,6 +449,9 @@ box at once.*
 - Sending a message also jumps to the present.
 - Akari's bar: 32 tall, 16 from the sides, corner radius 8, `brand` with white 14 medium text:
   "You're reading older messages" and "Jump to present".
+- After a jump from a reply's line that left the present, the bar reads "You Are Viewing a
+  Reply." with "Jump To Original Message", which goes back to the reply
+  ([replies.md](replies.md#the-jump)).
 
 ## Catching up
 

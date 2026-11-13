@@ -105,6 +105,9 @@ struct Window {
     holding: u32,
     // Live messages that arrived while stale or holding; appending them would leave a gap.
     held: Vec<Arc<Message>>,
+    // Held messages Discord confirmed as ours since the last reconnect: a page without one
+    // was read before it, even where it has a newer message.
+    sent: Vec<MessageId>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
     // The newest placing, in the host's order, of a Latest or Around load or a supersede: an
@@ -120,6 +123,8 @@ struct Window {
     held_dropped: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
+    // The outbox's replies that don't ping their target's author.
+    quiet: Vec<MessageId>,
     loading: u32,
     // Edits, deletes and reactions while a load runs, each with its number; a page may predate
     // those that came after its load began.
@@ -139,7 +144,26 @@ enum Missed {
     Reacted(MessageId, ReactionChange),
 }
 
+pub(crate) struct Outgoing {
+    pub(crate) message: Arc<Message>,
+    pub(crate) mention: bool,
+}
+
+pub(crate) struct Answered {
+    pub(crate) target: MessageId,
+    pub(crate) preview: Arc<ReplyPreview>,
+    // Kept beside the outbox for a retry.
+    pub(crate) mention: bool,
+}
+
 impl Window {
+    fn outgoing(&self, message: &Arc<Message>) -> Outgoing {
+        Outgoing {
+            message: message.clone(),
+            mention: !self.quiet.contains(&message.id),
+        }
+    }
+
     fn appends_live(&self) -> bool {
         self.latest && !self.stale && self.holding == 0
     }
@@ -171,6 +195,7 @@ impl Window {
             self.release_held(channel_id, limit, events);
         } else if !self.holds_live() {
             self.held.clear();
+            self.sent.clear();
             self.held_deleted = None;
             self.held_dropped = None;
         }
@@ -214,9 +239,12 @@ impl Window {
 
     fn release_held(&mut self, channel_id: ChannelId, limit: usize, events: &mut Vec<StoreEvent>) {
         let newest = self.messages.last().map(|message| message.id);
+        let sent = std::mem::take(&mut self.sent);
         let held: Vec<_> = std::mem::take(&mut self.held)
             .into_iter()
-            .filter(|message| newest.is_none_or(|newest| message.id > newest))
+            .filter(|message| {
+                newest.is_none_or(|newest| message.id > newest) || sent.contains(&message.id)
+            })
             .collect();
         let dropped = self
             .held_dropped
@@ -430,6 +458,8 @@ pub(crate) struct Windows {
     // Sent along with the thread's first message, or what the fetch found.
     starters: HashMap<ChannelId, Starter>,
     targets: ReplyTargets,
+    // The message each channel's pending reply answers: its target stays without the window.
+    holds: HashMap<ChannelId, MessageId>,
 }
 
 // `Some(None)`: Discord sent it along as deleted.
@@ -464,6 +494,7 @@ impl Windows {
             generations: 0,
             starters: HashMap::new(),
             targets: ReplyTargets::default(),
+            holds: HashMap::new(),
         }
     }
 
@@ -740,13 +771,13 @@ impl Windows {
         messages.get(index).cloned()
     }
 
-    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
-        self.windows
-            .get(&channel)?
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Outgoing> {
+        let window = self.windows.get(&channel)?;
+        window
             .outbox
             .iter()
             .find(|message| message.id == id && message.delivery == Delivery::Pending)
-            .cloned()
+            .map(|message| window.outgoing(message))
     }
 
     // The newest loaded message; pending and failed ones aren't in `messages`.
@@ -854,7 +885,11 @@ impl Windows {
         match pending {
             Some((pending_id, index)) => {
                 window.outbox.remove(index);
+                window.quiet.retain(|quiet| *quiet != pending_id);
                 window.place(channel_id, message.clone(), limit, false, events);
+                if Window::position(&window.held, message.id).is_ok() {
+                    window.sent.push(message.id);
+                }
                 events.push(StoreEvent::MessageReplaced {
                     channel_id,
                     pending_id,
@@ -914,6 +949,15 @@ impl Windows {
         self.targets.set(channel, id, target, events);
     }
 
+    pub(crate) fn target_gone(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.targets.delete(channel, id, events);
+    }
+
     pub(crate) fn reply_target(&self, channel: ChannelId, id: MessageId) -> ReplyTarget {
         self.targets.get(channel, id)
     }
@@ -939,7 +983,56 @@ impl Windows {
             .filter_map(|message| message.replied_to())
             .filter(|(named, _)| *named == channel)
             .map(|(_, id)| id)
+            .chain(self.holds.get(&channel).copied())
             .collect()
+    }
+
+    pub(crate) fn hold_reply(&mut self, target: &Message, events: &mut Vec<StoreEvent>) {
+        let channel = target.channel_id;
+        let preview = Arc::new(ReplyPreview::of(target));
+        self.targets
+            .set(channel, target.id, ReplyTarget::Loaded(preview), events);
+        self.holds.insert(channel, target.id);
+        self.loosen_targets(channel);
+    }
+
+    pub(crate) fn release_reply(&mut self, channel: ChannelId) {
+        if self.holds.remove(&channel).is_some() {
+            self.loosen_targets(channel);
+        }
+    }
+
+    pub(crate) fn release_replies(&mut self) {
+        let channels: Vec<ChannelId> = self.holds.drain().map(|(channel, _)| channel).collect();
+        for channel in channels {
+            self.loosen_targets(channel);
+        }
+    }
+
+    pub(crate) fn held_reply(&self, channel: ChannelId) -> Option<MessageId> {
+        self.holds.get(&channel).copied()
+    }
+
+    pub(crate) fn held_preview(
+        &self,
+        channel: ChannelId,
+        target: MessageId,
+    ) -> Option<Arc<ReplyPreview>> {
+        if self.held_reply(channel) != Some(target) {
+            return None;
+        }
+        match self.targets.get(channel, target) {
+            ReplyTarget::Loaded(preview) => Some(preview),
+            ReplyTarget::Deleted | ReplyTarget::NotLoaded => None,
+        }
+    }
+
+    fn loosen_targets(&mut self, channel: ChannelId) {
+        if self.windows.contains_key(&channel) {
+            self.trim_targets(channel);
+        } else {
+            self.prune_targets(channel);
+        }
     }
 
     fn trim_targets(&mut self, channel: ChannelId) {
@@ -968,12 +1061,27 @@ impl Windows {
         &mut self,
         channel: ChannelId,
         message: Arc<Message>,
+        answers: Option<Answered>,
         events: &mut Vec<StoreEvent>,
     ) {
-        if let Some(window) = self.windows.get_mut(&channel) {
+        let Some(window) = self.windows.get_mut(&channel) else {
+            return;
+        };
+        let Some(answered) = answers else {
             window.outbox.push(message.clone());
             events.push(StoreEvent::MessageInserted(message));
+            return;
+        };
+        if !answered.mention {
+            window.quiet.push(message.id);
         }
+        window.outbox.push(message.clone());
+        let target = ReplyTarget::Loaded(answered.preview);
+        self.targets.set(channel, answered.target, target, events);
+        events.push(StoreEvent::MessageInserted(message));
+        // The row names the target from here on.
+        self.holds.remove(&channel);
+        self.trim_targets(channel);
     }
 
     fn set_delivery(
@@ -983,7 +1091,7 @@ impl Windows {
         from: Delivery,
         to: Delivery,
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Arc<Message>> {
+    ) -> Option<Outgoing> {
         let window = self.windows.get_mut(&channel)?;
         let queued = window
             .outbox
@@ -993,7 +1101,8 @@ impl Windows {
         next.delivery = to;
         *queued = Arc::new(next);
         events.push(StoreEvent::MessageUpdated(queued.clone()));
-        Some(queued.clone())
+        let queued = queued.clone();
+        Some(window.outgoing(&queued))
     }
 
     pub(crate) fn fail(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
@@ -1005,7 +1114,7 @@ impl Windows {
         channel: ChannelId,
         id: MessageId,
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Arc<Message>> {
+    ) -> Option<Outgoing> {
         self.set_delivery(channel, id, Delivery::Failed, Delivery::Pending, events)
     }
 
@@ -1026,6 +1135,7 @@ impl Windows {
             return false;
         };
         window.outbox.remove(index);
+        window.quiet.retain(|quiet| *quiet != id);
         events.push(StoreEvent::MessageDeleted {
             channel_id: channel,
             message_id: id,
@@ -1300,6 +1410,7 @@ impl Windows {
                 }
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
+                let sent = std::mem::take(&mut window.sent);
                 let held_deleted = window.held_deleted;
                 // As for a release: the page can't join held messages past a dropped one.
                 let past_dropped =
@@ -1308,9 +1419,11 @@ impl Windows {
                     page.clear();
                 }
                 let outbox = std::mem::take(&mut window.outbox);
+                let quiet = std::mem::take(&mut window.quiet);
                 *window = Window {
                     generation,
                     outbox,
+                    quiet,
                     placing: window.placing,
                     around_placing: window.around_placing,
                     ..Window::default()
@@ -1325,12 +1438,15 @@ impl Windows {
                 window.present_through = through.max(held_deleted).filter(|_| at_present);
                 if at_present {
                     let newest = window.messages.last().map(|message| message.id);
-                    for message in held
-                        .into_iter()
-                        .filter(|message| newest.is_none_or(|newest| message.id > newest))
-                    {
-                        added.add(message.id);
-                        window.messages.push(message);
+                    let joining = held.into_iter().filter(|message| {
+                        newest.is_none_or(|newest| message.id > newest)
+                            || sent.contains(&message.id)
+                    });
+                    for message in joining {
+                        if let Err(index) = Window::position(&window.messages, message.id) {
+                            added.add(message.id);
+                            window.messages.insert(index, message);
+                        }
                     }
                 }
                 added.push(channel_id, events);
@@ -1529,6 +1645,7 @@ impl Windows {
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
         self.drop_starter(channel);
+        self.holds.remove(&channel);
         self.targets.drop_channel(channel);
         let generation = self.next_generation();
         let Some(window) = self.windows.get_mut(&channel) else {
@@ -1537,9 +1654,11 @@ impl Windows {
         // Our unsent messages stay readable and retryable, so a UI can offer their text again.
         if !window.outbox.is_empty() {
             let outbox = std::mem::take(&mut window.outbox);
+            let quiet = std::mem::take(&mut window.quiet);
             *window = Window {
                 generation,
                 outbox,
+                quiet,
                 ..Window::default()
             };
             return;
@@ -1569,6 +1688,8 @@ impl Windows {
         for channel_id in channels {
             if let Some(window) = self.windows.get_mut(&channel_id) {
                 window.stale = true;
+                // A delete may have been missed since.
+                window.sent.clear();
                 events.push(StoreEvent::MessagesStale { channel_id });
             }
         }
