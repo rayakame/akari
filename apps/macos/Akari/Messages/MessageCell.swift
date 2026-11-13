@@ -130,12 +130,18 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         }
     }
     private let stack = RowStack()
-    // Discord's flash: the color fades in for 0.2 s, holds to 2 s, then fades out for 0.2 s.
+    // Discord's flash: two layers, 0.2 s in, held to 2 s, 0.6 s out; the upper one has the bar
+    // and blinks twice in its first 0.6 s.
     private let flashView = FlashView()
+    private let flashOverlayView = FlashView()
     let flashLayer = CALayer()
+    let flashOverlay = CALayer()
+    let flashBar = CALayer()
     private static let flashKey = "flash"
-    private static let flashHold: TimeInterval = 2
-    private static let flashFade: TimeInterval = 0.2
+    static let flashHold: TimeInterval = 2
+    static let flashFadeIn: TimeInterval = 0.2
+    static let flashFadeOut: TimeInterval = 0.6
+    static let flashBlink: TimeInterval = 0.6
     private var top: NSLayoutConstraint?
     private var bottom: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -402,35 +408,64 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// the highlight; `nil` clears it.
     func flash(elapsed: TimeInterval?, reducesMotion: Bool) {
         flashLayer.removeAnimation(forKey: Self.flashKey)
-        let length = reducesMotion ? Self.flashHold : Self.flashHold + Self.flashFade
+        flashOverlay.removeAnimation(forKey: Self.flashKey)
+        let length = reducesMotion ? Self.flashHold : Self.flashHold + Self.flashFadeOut
         guard let elapsed, elapsed < length else {
             return
         }
-        let animation: CAAnimation
+        let times = { (seconds: [TimeInterval]) in seconds.map { NSNumber(value: $0 / length) } }
+        let base: CAAnimation
+        let overlay: CAAnimation
         if reducesMotion {
             let hold = CABasicAnimation(keyPath: "opacity")
             hold.fromValue = 1.0
             hold.toValue = 1.0
-            animation = hold
+            base = hold
+            overlay = hold
         } else {
+            // CSS's ease and ease-in-out.
+            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            let easeInOut = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
+            let linear = CAMediaTimingFunction(name: .linear)
             let fade = CAKeyframeAnimation(keyPath: "opacity")
             fade.values = [0.0, 1.0, 1.0, 0.0]
-            fade.keyTimes = [0, Self.flashFade / length, Self.flashHold / length, 1].map {
-                NSNumber(value: $0)
-            }
-            // CSS's ease.
-            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            fade.timingFunctions = [ease, CAMediaTimingFunction(name: .linear), ease]
-            animation = fade
+            fade.keyTimes = times([0, Self.flashFadeIn, Self.flashHold, length])
+            fade.timingFunctions = [ease, linear, ease]
+            base = fade
+            // The official client's pulse: out and in twice, at fifths of 0.6 s.
+            let blink = CAKeyframeAnimation(keyPath: "opacity")
+            let fifth = Self.flashBlink / 5
+            blink.values = [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0]
+            blink.keyTimes = times([0, fifth, 2 * fifth, 3 * fifth, 4 * fifth, Self.flashHold, length])
+            blink.timingFunctions = [easeInOut, easeInOut, easeInOut, easeInOut, linear, ease]
+            overlay = blink
         }
-        animation.duration = length
-        animation.beginTime = flashLayer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
         // A legacy scroller's gutter can change without a layout of the cell.
-        flashView.frame = box
+        placeFlash()
         effectiveAppearance.performAsCurrentDrawingAppearance {
             flashLayer.backgroundColor = Palette.messageHighlight.cgColor
+            flashOverlay.backgroundColor = Palette.messageHighlight.cgColor
+            flashBar.backgroundColor = Palette.textBrand.cgColor
         }
-        flashLayer.add(animation, forKey: Self.flashKey)
+        for (layer, animation) in [(flashLayer, base), (flashOverlay, overlay)] {
+            animation.duration = length
+            animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+            layer.add(animation, forKey: Self.flashKey)
+        }
+    }
+
+    private func placeFlash() {
+        flashView.frame = box
+        flashOverlayView.frame = box
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        flashBar.frame = NSRect(x: 0, y: 0, width: 2, height: box.height)
+        CATransaction.commit()
+    }
+
+    /// The upper layer's blink.
+    var flashOverlayAnimation: CAAnimation? {
+        flashOverlay.animation(forKey: Self.flashKey)
     }
 
     var flashAnimation: CAAnimation? {
@@ -445,7 +480,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         attachments?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         embeds?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         super.layout()
-        flashView.frame = box
+        placeFlash()
     }
 
     /// The message's own area, which hover, the mention highlight and its menu cover.
@@ -615,7 +650,13 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         flashLayer.cornerRadius = 4
         flashLayer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         flashLayer.opacity = 0
-        for view in [flashView, avatar, spine, stack, hoverTime] as [NSView] {
+        flashOverlay.cornerRadius = 4
+        flashOverlay.maskedCorners = flashLayer.maskedCorners
+        flashOverlay.opacity = 0
+        flashOverlay.addSublayer(flashBar)
+        flashOverlayView.layer = flashOverlay
+        flashOverlayView.wantsLayer = true
+        for view in [flashView, flashOverlayView, avatar, spine, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
 

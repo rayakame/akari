@@ -302,7 +302,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if previous.replyingTo != state.replyingTo {
             markReplyTarget()
         }
-        if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
+        // A table made for a list that jumped before scrolls only to a jump no table showed.
+        if let jump = state.messageJump,
+            wasFilled ? jump != previous.messageJump : jump.number > (actions?.lastShownJump() ?? .max)
+        {
+            actions?.jumpShown(jump.number)
             // Unless the line has been seen, the unread bar shows once it's out of sight.
             let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
             let target = row(atOrAfter: jump.messageId)
