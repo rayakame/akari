@@ -245,7 +245,7 @@ is the content with each line break as a space, and its `formatted` offsets are 
 text: one paragraph at most, no `Break` spans, no containers, a quote as text, a code block as
 one `Code` span, headings, subtext and list items as plain text, emoji never jumbo. A host
 shows the spans in a row and needs no rule of its own. The document is cached per target
-and parsed again when the content changes; a mentioned user's name comes from the target's
+and parsed again when the content changes, on the thread that reads the target; a mentioned user's name comes from the target's
 message while the window has it, else from the store's users. `ReplyTargetChanged { channel_id, target_id }` says the answer changed (the target
 was loaded, edited or deleted); the IDs are the target's, and every reply to it reads the same
 answer. `RepliedTo.mentions_author` is the preview's "@": akari-core's
@@ -318,7 +318,10 @@ read.
   changes (new, edited, confirmed messages) are parsed when read, on the reader's thread: a
   typical message takes microseconds. Those count as event parses; a parse on read of something
   a load had parsed is a miss and logs one debug line at `akari_ffi::content` (the channel ID
-  and the count).
+  and the count). A reply target's one-line preview has no preparer: `reply_target` and
+  `reply_targets` parse it on the reader's thread the first time and after each change of its
+  content, about a millisecond for the longest message, then read it from a cache of its own
+  (message documents, embed texts and reply previews are three caches of 4096 entries each).
 - **Swift task cancellation doesn't reach Rust** (UniFFI 0.32's Swift glue awaits without a
   cancellation handler and never cancels the Rust future). A request runs to completion; a
   send that the host stopped waiting for still resolves through the store. Waits end through
@@ -359,7 +362,22 @@ the open channel's window events and after a send.
 (`nil` by default in Swift, so calls without it stay as they are). The target is a message of
 the channel the reply goes to whose `message_actions` has `reply`; anything else is refused
 with `InvalidRequest` before a row exists. `mention` is the host's pending reply:
-`MessageActions.reply_pings` when the reply starts, off with Shift or the bar's toggle.
+`MessageActions.reply_pings` when the reply starts, off with Shift or the bar's toggle. A reply
+to the user's own message never pings, whatever `mention` says.
+
+The target must be loaded when the reply is queued, or held. `hold_reply(channel_id,
+message_id)` is the host's call when the user starts a reply: the core keeps the message's
+preview outside the window (its `reply_target` stays `Loaded`, past the bound of 100, edited
+and deleted as Discord says), so the reply can be sent after a long scroll, a jump or a reload
+took the message out of the loaded ones. One message is held per channel; another call
+replaces it, and a call for a message that takes no reply answers false and holds nothing.
+The hold ends when a reply is queued in the channel (the row names the target from then on),
+with `release_reply(channel_id)` (the user cancelled, or the host ended the reply because the
+message was deleted), when the channel goes (deleted, its server left, missing from a new
+session) and with `close`. Calls for a channel without a hold do nothing. A held message that
+is deleted reads `Deleted` and takes no reply; one whose channel no longer lets the user send
+is refused when queued, as a loaded one is. The hold lasts for the session and isn't in the
+disk cache.
 
 The pending row is a reply at once: `kind` is `Reply`, `replied_to` names the target with
 `mentions_author` true when it pings, and `reply_target` answers `Loaded` from the window's

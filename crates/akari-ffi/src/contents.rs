@@ -10,7 +10,7 @@ use akari_markdown::{Cache, Document, EmbedText};
 
 use crate::records::ContentStats;
 
-// About 1–2 MB of documents per account (D57).
+// Per cache: messages (about 1–2 MB per account, D57), embed texts and reply previews.
 const CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,7 +147,6 @@ impl Documents {
 pub(crate) struct Contents {
     documents: Mutex<Documents>,
     embed_documents: Mutex<Cache<EmbedKey>>,
-    // Reply targets' one-line previews, by the target.
     reply_documents: Mutex<Cache<MessageId>>,
     parsed: AtomicU64,
     misses: AtomicU64,
