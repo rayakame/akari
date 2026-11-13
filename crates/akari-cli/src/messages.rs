@@ -941,16 +941,16 @@ mod tests {
 
     #[test]
     fn a_reply_pings_unless_told_not_to() {
-        assert_eq!(reply_to(None, false), None);
+        assert_eq!(super::reply_to(None, false), None);
         assert_eq!(
-            reply_to(Some(7), false),
+            super::reply_to(Some(7), false),
             Some(ReplyTo {
                 message: Snowflake::new(7),
                 mention: true
             })
         );
         assert_eq!(
-            reply_to(Some(7), true),
+            super::reply_to(Some(7), true),
             Some(ReplyTo {
                 message: Snowflake::new(7),
                 mention: false
