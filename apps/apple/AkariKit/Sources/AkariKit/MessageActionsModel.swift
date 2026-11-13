@@ -47,6 +47,16 @@ public final class MessageActionsModel {
         }
     }
 
+    /// A question before something that can't be undone; `run` does it.
+    public struct Confirmation: Identifiable {
+        public let id = UUID()
+        public let title: String
+        public let message: String
+        public let confirm: String
+        public let cancel: String
+        public let run: @MainActor () -> Void
+    }
+
     enum When {
         case always
         /// The user's own message that can be edited: Reply moves into the Shift row.
@@ -104,12 +114,17 @@ public final class MessageActionsModel {
     private let viewThread: (ChannelId, ChannelId) -> Void
     private let marking: (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)?
     private let reply: (MessageListModel.Row, Bool) -> Void
+    private let reactions: ReactionsModel?
+    private let viewReactions: (MessageListModel.Row) -> Void
+    private let confirm: (Confirmation) -> Void
     private let failed: (Failure) -> Void
 
     /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
     /// the message, `viewThread` the thread and its parent; `marking` shows a mark as unread at
     /// once and returns what takes Discord's answer: whether it took the mark; `reply` starts a
-    /// reply to the row's message, with Shift as it was at the click.
+    /// reply to the row's message, with Shift as it was at the click; `reactions` is the list's
+    /// (without it nothing about reactions is offered), `viewReactions` opens the reactions
+    /// window and `confirm` asks before reactions are removed.
     public init(
         store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
@@ -117,8 +132,14 @@ public final class MessageActionsModel {
         viewThread: @escaping (ChannelId, ChannelId) -> Void,
         marking: @escaping (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)? = { _, _ in nil },
         reply: @escaping (MessageListModel.Row, Bool) -> Void = { _, _ in },
+        reactions: ReactionsModel? = nil,
+        viewReactions: @escaping (MessageListModel.Row) -> Void = { _ in },
+        confirm: @escaping (Confirmation) -> Void = { _ in },
         failed: @escaping (Failure) -> Void
     ) {
+        self.reactions = reactions
+        self.viewReactions = viewReactions
+        self.confirm = confirm
         self.store = store
         self.account = account
         self.copy = copy
@@ -149,6 +170,64 @@ public final class MessageActionsModel {
         }
     }
 
+    /// The emoji before the bar's buttons, each a reaction in one click; none with Shift held,
+    /// on a failed send, or where Add Reaction isn't offered.
+    public func quickReactions(for row: MessageListModel.Row, shift: Bool = false) -> [QuickReaction] {
+        shift ? [] : reactions?.quick(for: row) ?? []
+    }
+
+    /// What "Remove Reactions" lists: the message's emoji, each removable for everyone.
+    public func removableReactions(for row: MessageListModel.Row) -> [ReactionPill] {
+        let own = row.message
+        guard offer(for: row).has(.removeReactions) else {
+            return []
+        }
+        return ReactionPill.merged(store.reactions(channelId: own.channelId, messageId: own.id))
+    }
+
+    /// A quick reaction's click: adds the user's reaction, or takes it back.
+    public func react(
+        _ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation
+    ) async {
+        await reactions?.toggle(quick.emoji, on: row, from: location)
+    }
+
+    /// Removes everyone's reactions with `pill`'s emoji, or all of the message's without one,
+    /// after a question; Shift at the click skips it, as in the official client.
+    public func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool) {
+        let own = row.message
+        // The model may be gone when the question is answered: a host makes one per update.
+        let run = { @MainActor [account, failed] in
+            _ = Task {
+                await Self.removeReactions(
+                    of: pill?.emoji, in: own.channelId, from: own.id, account: account, failed: failed)
+            }
+        }
+        if shift {
+            run()
+            return
+        }
+        confirm(
+            Confirmation(
+                title: pill == nil ? ReactionWords.removeAllTitle : ReactionWords.removeEmojiTitle,
+                message: pill == nil ? ReactionWords.removeAllText : ReactionWords.removeEmojiText,
+                confirm: ReactionWords.yes, cancel: ReactionWords.no, run: run))
+    }
+
+    static func removeReactions(
+        of emoji: ReactionEmoji?, in channel: ChannelId, from message: MessageId, account: Account,
+        failed: (Failure) -> Void
+    ) async {
+        do {
+            try await account.removeReactions(channelId: channel, messageId: message, emoji: emoji)
+        } catch {
+            failed(
+                Failure(
+                    title: "Couldn't Remove Reactions",
+                    message: Self.text(for: error as? ReactionError ?? .Request(error: .UnexpectedResponse))))
+        }
+    }
+
     /// The menu's items in the official client's groups; a separator goes between two groups.
     public func menu(for row: MessageListModel.Row) -> [[MessageActionItem]] {
         let offer = offer(for: row)
@@ -160,7 +239,8 @@ public final class MessageActionsModel {
     }
 
     /// Does what a button or an item says. `shift` is the key at the click, for the actions
-    /// that read it. More is the host's: it opens the menu.
+    /// that read it. More is the host's: it opens the menu; so are Add Reaction and Remove
+    /// Reactions, which list emoji to choose from.
     public func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool = false) {
         let message = row.shown
         switch action {
@@ -182,8 +262,11 @@ public final class MessageActionsModel {
             }
         case .reply:
             reply(row, shift)
-        case .addReaction, .viewReactions, .edit, .pin, .unpin, .removeReactions,
-            .removeAllReactions, .copyId, .more:
+        case .viewReactions:
+            viewReactions(row)
+        case .removeAllReactions:
+            removeReactions(of: nil, on: row, shift: shift)
+        case .addReaction, .edit, .pin, .unpin, .removeReactions, .copyId, .more:
             break
         }
     }
@@ -215,6 +298,9 @@ public final class MessageActionsModel {
         var actions: MessageActions
         var failed: Bool
         var hasText: Bool
+        // "Show emoji reactions" is on and the list has its reactions model.
+        var reactions: Bool
+        var hasReactions: Bool
 
         var allowsAnything: Bool {
             MessageAction.allCases.contains { $0 != .more && $0 != .copyText && has($0) }
@@ -231,9 +317,12 @@ public final class MessageActionsModel {
             case .delete: failed && actions.delete
             case .more: true
             case .reply: actions.reply
+            case .addReaction: reactions && !failed && actions.react
+            case .viewReactions: reactions && hasReactions
+            case .removeReactions, .removeAllReactions:
+                reactions && hasReactions && actions.removeReactions
             // Their features aren't built yet.
-            case .addReaction, .viewReactions, .edit, .pin, .unpin, .removeReactions,
-                .removeAllReactions, .copyId:
+            case .edit, .pin, .unpin, .copyId:
                 false
             }
         }
@@ -242,9 +331,14 @@ public final class MessageActionsModel {
     // The core answers for a thread's starter row asked with the row's own IDs.
     private func offer(for row: MessageListModel.Row) -> Offer {
         let own = row.message
+        let shows = reactions?.shows ?? false
         return Offer(
             actions: store.messageActions(channelId: own.channelId, messageId: own.id),
-            failed: own.delivery == .failed, hasText: !row.shown.content.isEmpty)
+            failed: own.delivery == .failed, hasText: !row.shown.content.isEmpty,
+            reactions: shows,
+            hasReactions: shows
+                && !ReactionPill.merged(store.reactions(channelId: own.channelId, messageId: own.id))
+                    .isEmpty)
     }
 
     static func item(_ action: MessageAction, in surface: Surface, failed: Bool = false) -> MessageActionItem {
@@ -299,6 +393,15 @@ public final class MessageActionsModel {
             }
         return MessageActionItem(
             action: action, title: title, symbol: symbol, enabled: true, destructive: destructive)
+    }
+
+    private static func text(for error: ReactionError) -> String {
+        switch error {
+        case .Forbidden, .Blocked: text(for: RequestError.Discord(status: 403, code: 50013, message: ""))
+        case .RateLimited: text(for: RequestError.RateLimited(retryAfter: nil))
+        case .Request(let error): text(for: error)
+        case .TooMany, .UnknownEmoji: text(for: RequestError.UnexpectedResponse)
+        }
     }
 
     private static func text(for error: RequestError) -> String {
