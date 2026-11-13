@@ -27,7 +27,7 @@ use crate::state::{
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 pub use acks::MarkOutcome;
 use acks::{AckSender, Echo, Pace, Refusal};
-pub use reactions::{ReactionError, ReactionKind, ReactionLocation};
+pub use reactions::{REACTORS_PAGE, ReactionError, ReactionKind, ReactionLocation, ReactorsPage};
 
 const REFRESH_LIMIT: u8 = 100;
 // Discord's limit for a thread's name, in code points, and the archive time its client picks

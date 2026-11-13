@@ -791,6 +791,23 @@ impl Store {
             .clone()
     }
 
+    // The store's own record of each user it knows unchanged.
+    pub(crate) fn known_users(&self, users: Vec<crate::model::User>) -> Vec<Arc<User>> {
+        self.read(|inner| {
+            users
+                .into_iter()
+                .map(|user| {
+                    let user = User::from_wire(user);
+                    inner
+                        .state
+                        .user(user.id)
+                        .filter(|known| **known == user)
+                        .unwrap_or_else(|| Arc::new(user))
+                })
+                .collect()
+        })
+    }
+
     // `None` when the message's actions don't offer it.
     pub(crate) fn mark_unread(&self, channel: ChannelId, message: MessageId) -> Option<Unread> {
         let now = self.now_millis();

@@ -1120,3 +1120,81 @@ async fn what_may_not_be_moderated_is_refused_without_a_request() {
     assert!(invalid(&unknown), "a message the store doesn't have");
     assert_eq!(online.lines().await, [] as [&str; 0]);
 }
+
+fn user(id: u64, name: &str) -> Value {
+    json!({"id": id.to_string(), "username": name, "discriminator": "0", "avatar": null})
+}
+
+#[tokio::test]
+async fn reactors_come_by_page_as_the_stores_users() {
+    let online = reacting().await;
+    let ready: Value = serde_json::from_str(READY).unwrap();
+    let mira = ready["d"]["users"][0].clone();
+    Mock::given(method("GET"))
+        .and(path_regex(REACTIONS))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            mira,
+            user(100_000_000_000_000_050, "ada"),
+            user(100_000_000_000_000_051, "bo"),
+        ])))
+        .mount(&online.server)
+        .await;
+    let emoji = heart();
+    let ask = |kind, after, limit| {
+        online
+            .account
+            .reactors(general(), target(), &emoji, kind, after, limit)
+    };
+
+    let full = ask(ReactionKind::Normal, None, 3).await.unwrap();
+    let short = ask(ReactionKind::Burst, Some(Snowflake::new(MIRA)), 100)
+        .await
+        .unwrap();
+    ask(ReactionKind::Normal, None, 0).await.unwrap();
+    ask(ReactionKind::Normal, None, 200).await.unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("GET {BASE}/{HEART_PATH}?limit=3&type=0"),
+            format!("GET {BASE}/{HEART_PATH}?limit=100&after={MIRA}&type=1"),
+            format!("GET {BASE}/{HEART_PATH}?limit=1&type=0"),
+            format!("GET {BASE}/{HEART_PATH}?limit=100&type=0"),
+        ]
+    );
+    let names: Vec<&str> = full.users.iter().map(|user| &*user.username).collect();
+    assert_eq!(names, ["mira", "ada", "bo"]);
+    assert!(full.has_more, "a full page");
+    assert!(!short.has_more, "a short page is the last");
+    let known = online.account.store().user(Snowflake::new(MIRA)).unwrap();
+    assert!(
+        Arc::ptr_eq(&full.users[0], &known),
+        "the store's own record"
+    );
+}
+
+#[tokio::test]
+async fn a_starter_rows_reactors_are_those_of_the_message_it_shows() {
+    let online = with_a_starter_row().await;
+
+    let page = online
+        .account
+        .reactors(
+            Snowflake::new(THREAD),
+            Snowflake::new(STARTER_ROW),
+            &heart(),
+            ReactionKind::Normal,
+            None,
+            3,
+        )
+        .await;
+
+    assert!(
+        matches!(page, Err(RequestError::UnexpectedResponse)),
+        "204 is no page: {page:?}"
+    );
+    assert_eq!(
+        online.lines().await,
+        [format!("GET {BASE}/{HEART_PATH}?limit=3&type=0")]
+    );
+}
