@@ -1,4 +1,4 @@
-import AkariKit
+@testable import AkariKit
 import AppKit
 import SwiftUI
 import Testing
@@ -488,6 +488,25 @@ struct ReplyBarScreenTests {
         try await screens.waitUntil(host) { try screens.newestRowHidden(in: host) == hidden }
     }
 
+    // The model counts every reply started in the channel; a field made later owes none of them.
+    @Test
+    func aFieldMadeAfterAReplyStartedDoesntTakeTheFocus() async throws {
+        var text = ""
+        let field = ComposerField(
+            text: Binding(get: { text }, set: { text = $0 }), enabled: true, maxHeight: 300,
+            height: .constant(56), onSubmit: {}, onEscape: {}, autoFocus: false, focusRequests: 1)
+        let host = NSHostingView(rootView: field)
+        let window = screens.shownWindow(host)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        let composer = try #require(screens.views(ComposerTextView.self, in: host).first)
+        try #require(composer.isEditable)
+
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+
+        #expect(window.firstResponder !== composer)
+    }
+
     @Test
     func startingAReplyFocusesTheComposer() async throws {
         let session = screens.formattedSession(account)
@@ -521,13 +540,15 @@ struct ReplyBarScreenTests {
         try await screens.waitUntil(host) { bar(in: host) != nil }
 
         composer.onEscape()
-        try await screens.waitUntil(host) { bar(in: host) == nil }
-        try await Task.sleep(for: .milliseconds(50))
+        #expect(list.composer.reply == nil)
+        #expect(session.escaping == nil, "nothing is marked read later either")
         #expect(account.markedRead.withLock { $0 }.isEmpty)
         #expect(list.composer.draft == "kept")
+        try await screens.waitUntil(host) { bar(in: host) == nil }
 
         composer.onEscape()
-        try await screens.waitUntil(host) { account.markedRead.withLock { $0 } == [channel] }
+        await session.escaping?.value
+        #expect(account.markedRead.withLock { $0 } == [channel])
     }
 }
 
@@ -562,9 +583,9 @@ struct ReplyEscapeScreenTests {
         let composer = try #require(screens.views(ComposerTextView.self, in: host).first)
 
         composer.onEscape()
-        try await screens.waitUntil(host) { list.composer.reply == nil }
-        try await Task.sleep(for: .milliseconds(100))
-        host.layoutSubtreeIfNeeded()
+        #expect(list.composer.reply == nil)
+        #expect(session.escaping == nil, "no jump to the present is on its way")
+        try await screens.waitUntil(host) { screens.views(ReplyBarView.self, in: host).isEmpty }
         #expect(clip.bounds.origin == origin)
         #expect(account.markedRead.withLock { $0 }.isEmpty)
 
@@ -645,6 +666,7 @@ struct ReplyTargetTintTests {
         #expect(try highlights.matches(try highlights.pixel(cell, x: 300), [Palette.replyingBackground]))
         #expect(try highlights.matches(try highlights.pixel(cell, x: 1), [Palette.replyingBackground, Palette.brand]))
         #expect(try !highlights.matches(try highlights.pixel(cell, x: 3), [Palette.replyingBackground, Palette.brand]))
+        #expect(try highlights.matches(try highlights.pixel(cell, x: 2.5), [Palette.replyingBackground]), "the bar is 2 wide")
         #expect(try highlights.matches(try highlights.pixel(cell, x: 300, y: 15), []), "not over the group's spacing")
         #expect(try !highlights.matches(try highlights.pixel(cell, x: 300), []))
     }
