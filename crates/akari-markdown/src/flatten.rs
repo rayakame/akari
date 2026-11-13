@@ -14,6 +14,8 @@ pub(crate) fn one_line(nodes: &[Node], source: &str) -> Document {
     let mut inlines: Vec<Inline> = Vec::new();
     let mut space: Option<Inline> = None;
     let mut covered: Option<Span> = None;
+    // A code block was left out: the text around it would show its spaces side by side.
+    let mut closed_up = false;
     for block in flat.blocks {
         let Some(first) = block.inlines.first() else {
             continue;
@@ -27,12 +29,38 @@ pub(crate) fn one_line(nodes: &[Node], source: &str) -> Document {
             start: span.start.min(block.source.start),
             end: span.end.max(block.source.end),
         }));
-        for inline in block.inlines {
+        let blank = blank_code_blocks(&block.inlines, source);
+        for mut inline in block.inlines {
             if inline.kind == InlineKind::Break {
                 if !inlines.is_empty() && space.is_none() {
                     space = line_feed(&inline);
                 }
                 continue;
+            }
+            if blank.contains(&inline.source) {
+                closed_up = true;
+                continue;
+            }
+            let after_space = space.is_some()
+                || closed_up
+                    && inlines
+                        .last()
+                        .is_some_and(|last| ends_in_space(last, source));
+            closed_up = false;
+            if after_space && let InlineKind::Text(shown) = &mut inline.kind {
+                let spaces = leading_spaces(source, *shown);
+                if spaces > 0 {
+                    space = None;
+                }
+                if inlines
+                    .last()
+                    .is_some_and(|last| ends_in_space(last, source))
+                {
+                    shown.start += spaces;
+                    if shown.start == shown.end {
+                        continue;
+                    }
+                }
             }
             inlines.extend(space.take());
             inlines.push(inline);
@@ -52,6 +80,48 @@ pub(crate) fn one_line(nodes: &[Node], source: &str) -> Document {
         source: covered.unwrap_or_default(),
     };
     Document::new(vec![block], flat.links, false, flat.spoilers)
+}
+
+// The sources of fenced code blocks that hold nothing but whitespace: a line shows none of it.
+fn blank_code_blocks(inlines: &[Inline], source: &str) -> Vec<Span> {
+    let mut blank: Vec<Span> = Vec::new();
+    let mut filled: Vec<Span> = Vec::new();
+    for inline in inlines {
+        let InlineKind::Code(code) = inline.kind else {
+            continue;
+        };
+        let fenced = source
+            .get(inline.source.range())
+            .is_some_and(|text| text.starts_with("```"));
+        let empty = source
+            .get(code.range())
+            .is_some_and(|text| text.trim().is_empty());
+        if fenced && empty && !filled.contains(&inline.source) {
+            if !blank.contains(&inline.source) {
+                blank.push(inline.source);
+            }
+        } else if fenced {
+            blank.retain(|span| *span != inline.source);
+            filled.push(inline.source);
+        }
+    }
+    blank
+}
+
+fn shown_text<'s>(inline: &Inline, source: &'s str) -> Option<&'s str> {
+    match inline.kind {
+        InlineKind::Text(shown) => source.get(shown.range()),
+        _ => None,
+    }
+}
+
+fn ends_in_space(inline: &Inline, source: &str) -> bool {
+    shown_text(inline, source).is_some_and(|text| text.ends_with([' ', '\n', '\r']))
+}
+
+fn leading_spaces(source: &str, shown: Span) -> u32 {
+    let text = source.get(shown.range()).unwrap_or_default();
+    (text.len() - text.trim_start_matches(' ').len()) as u32
 }
 
 // A break covers the spaces and the carriage return before its line feed.
