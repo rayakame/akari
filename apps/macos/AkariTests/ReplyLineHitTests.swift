@@ -56,6 +56,59 @@ struct ReplyLineHitTests {
         #expect(list.actions.calls.filter { $0.hasPrefix("jump") } == ["jump to target of 5", "jump to target of 5"])
     }
 
+    // An Option-click marks unread from a reply too, its line's name included; the line's text
+    // and the spine are buttons and keep their click.
+    @Test
+    func anOptionClickMarksAReplyUnreadOutsideItsLinesButtons() throws {
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "the original message"),
+            replyRow(5, at: list.noon + 600, content: "an answer", target()),
+        ])
+        list.actions.marksUnread = [1, 5]
+        list.pointer.location = NSPoint(x: 10, y: 10)
+        let cell = try cell(5)
+        let line = cell.replyLine
+        let name = try #require(line.nameFrame)
+        func click(_ point: NSPoint, in view: NSView) throws -> Bool {
+            list.controller.optionClick(try list.click(.option, at: list.table.convert(point, from: view)))
+        }
+
+        #expect(!(try click(NSPoint(x: line.content.textFrame.midX, y: 9), in: line.content)))
+        #expect(!(try click(NSPoint(x: 6, y: 16), in: cell.spine)))
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+
+        #expect(try click(NSPoint(x: name.midX, y: name.midY), in: line))
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 5"])
+    }
+
+    // The message being answered can be marked unread: the mark leaves the row's tint.
+    @Test
+    func anOptionClickOnTheAnsweredRowMarksItUnreadAndKeepsItsTint() throws {
+        let rows = [
+            row(1, by: author(2, "Ray"), at: list.noon, content: "the original message"),
+            row(2, by: author(3, "Kim"), at: list.noon + 600, content: "another"),
+        ]
+        list.actions.marksUnread = [1, 2]
+        list.actions.bars[1] = (BarList.plain, BarList.shifted)
+        list.actions.bars[2] = (BarList.plain, BarList.shifted)
+        list.pointer.location = NSPoint(x: 10, y: 10)
+        list.controller.show(
+            MessageTableState(rows: rows, reachedOldest: true, replyingTo: MessageId(rawValue: 1)))
+        list.window.layoutIfNeeded()
+        let box = try list.box(of: 1)
+
+        #expect(list.controller.optionClick(try list.click(.option, at: NSPoint(x: box.midX, y: box.midY))))
+        list.controller.show(
+            MessageTableState(
+                rows: rows, reachedOldest: true, newMessages: MessageId(rawValue: 1),
+                replyingTo: MessageId(rawValue: 1)))
+        list.window.layoutIfNeeded()
+
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 1"])
+        #expect(try cell(1).isReplyTarget)
+        #expect(try !cell(2).isReplyTarget)
+    }
+
     @Test
     func theNameIsTheStrongTextAtTwoThirds() throws {
         list.show([replyRow(5, at: list.noon, content: "an answer", target())])
