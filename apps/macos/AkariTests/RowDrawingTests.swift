@@ -351,8 +351,11 @@ struct CellBuildingTests {
     @Test
     func aMessageCellBuildsItsRetryButtonsOnlyForAFailedMessage() {
         let cell = MessageCell()
+        // The reply line's two are every cell's, hidden without a reply.
+        let own = { buttons(in: cell).filter { !($0 is ReplyContentButton || $0 is ReplySpineView) } }
         configure(cell, .sent)
-        #expect(buttons(in: cell).isEmpty)
+        #expect(own().isEmpty)
+        #expect(buttons(in: cell).allSatisfy { $0.isHiddenOrHasHiddenAncestor })
 
         configure(cell, .failed)
         let shown = buttons(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }

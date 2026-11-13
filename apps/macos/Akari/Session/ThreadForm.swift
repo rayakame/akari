@@ -57,11 +57,12 @@ struct ThreadFormView: View {
                 if let source = form.source {
                     // A tall one scrolls, so the name and its error stay in view.
                     ScrollView(.vertical) {
-                        MessagePreview(message: source)
+                        MessagePreview(message: source, reply: form.sourceReply)
                     }
                     .frame(
                         height: min(
-                            MessagePreview.height(of: source, width: card.size.width),
+                            MessagePreview.height(
+                                of: source, reply: form.sourceReply, width: card.size.width),
                             card.size.height * ThreadFormLayout.previewShare))
                     .padding(.bottom, ThreadFormLayout.previewBottom)
                 }
@@ -580,6 +581,8 @@ final class NameTextField: NSTextField {
 /// The message a thread starts from, as the list draws it.
 struct MessagePreview: NSViewRepresentable {
     let message: Message
+    /// The line over it when it answers a message; shown, not clickable.
+    var reply: ReplyLine?
     var now = Date()
     @Environment(\.imageCache) private var images
 
@@ -589,10 +592,12 @@ struct MessagePreview: NSViewRepresentable {
 
     func updateNSView(_ view: MessagePreviewView, context: Context) {
         view.cell.images = images
-        Self.configure(view.cell, with: message, now: now)
+        Self.configure(view.cell, with: message, reply: reply, now: now)
     }
 
-    static func configure(_ cell: MessageCell, with message: Message, now: Date) {
+    static func configure(
+        _ cell: MessageCell, with message: Message, reply: ReplyLine? = nil, now: Date
+    ) {
         cell.menuItems = { MessageMenu.copyText(message) }
         let calendar = Calendar.current
         let locale = Locale.current
@@ -602,7 +607,12 @@ struct MessagePreview: NSViewRepresentable {
                 message.timestamp, now: now, calendar: calendar, locale: locale),
             shortTime: MessageFormat.shortTime(message.timestamp, calendar: calendar, locale: locale),
             fullDate: MessageFormat.fullDate(message.timestamp, calendar: calendar, locale: locale),
-            embeds: embeds(message, now: now))
+            embeds: embeds(message, now: now),
+            reply: reply.map { line in
+                let times = TimestampText(
+                    locale: locale, timeZone: calendar.timeZone, calendar: calendar)
+                return (line, ReplyLineView.text(of: line, now: now, times: times))
+            }, replyJumps: false)
     }
 
     // As the list shows them, nothing revealed.
@@ -624,14 +634,14 @@ struct MessagePreview: NSViewRepresentable {
         -> CGSize?
     {
         let width = proposal.width ?? SplitWidth.standard
-        return CGSize(width: width, height: Self.height(of: message, width: width))
+        return CGSize(width: width, height: Self.height(of: message, reply: reply, width: width))
     }
 
-    static func height(of message: Message, width: CGFloat) -> CGFloat {
+    static func height(of message: Message, reply: ReplyLine? = nil, width: CGFloat) -> CGFloat {
         let now = Date()
         return MessageCell.height(
             message, body: text(message, now: now), startsGroup: true, embeds: embeds(message, now: now),
-            width: width)
+            hasReply: reply != nil, width: width)
     }
 
     private static func text(_ message: Message, now: Date) -> NSAttributedString {
