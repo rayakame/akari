@@ -203,6 +203,26 @@ struct ReplyLineTests {
     }
 
     @Test
+    func aFailedReplyWhoseChannelIsGoneHasNoJump() async {
+        store.update { [here] state in
+            state.show(reply(9, to: 5, delivery: .failed))
+            state.windows[here] = window([], pending: [9])
+            state.replyTargets[id(5)] = nil
+            state.channels[here] = nil
+        }
+        let model = makeModel()
+        let row = model.rows.first { $0.id == id(9) }
+
+        #expect(row?.reply?.content == .placeholder(ReplyLine.notLoaded))
+        #expect(row?.reply?.jumps == false)
+        if let row {
+            await model.jumpToTarget(of: row)
+        }
+        #expect(store.log.actions.isEmpty)
+        #expect(model.messageJump == nil)
+    }
+
+    @Test
     func aWebhooksTargetIsNamedAsItPosted() {
         store.update { state in
             state.replyTargets[id(5)] = preview(by: user(9, name: "Hook"), webhook: true)
@@ -448,7 +468,10 @@ struct ReplyJumpTests {
 
     @Test
     func aTargetInAnotherChannelIsTheSessions() async {
-        store.update { $0.show(reply(7, to: 6, targetChannel: 11)) }
+        store.update { state in
+            state.channels[id(11)] = channel(11, guild: 1)
+            state.show(reply(7, to: 6, targetChannel: 11))
+        }
         let model = makeModel()
         var asked: [String] = []
         model.jumpElsewhere = { asked.append("\($0.rawValue) \($1.rawValue)") }

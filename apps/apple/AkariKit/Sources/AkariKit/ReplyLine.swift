@@ -18,11 +18,14 @@ public struct ReplyLine: Equatable, Sendable {
     public let mentionsAuthor: Bool
     /// The author's name by the rule the list names people with; `nil` unless loaded.
     public let authorName: String?
+    /// The store has the answered message's channel: a failed reply outlives a removed one.
+    public let channelKnown: Bool
 
     public init(
         channelId: ChannelId, messageId: MessageId, target: ReplyTarget, mentionsAuthor: Bool,
-        authorName: String?
+        authorName: String?, channelKnown: Bool = true
     ) {
+        self.channelKnown = channelKnown
         self.channelId = channelId
         self.messageId = messageId
         self.target = target
@@ -45,7 +48,8 @@ public struct ReplyLine: Equatable, Sendable {
         }
         return ReplyLine(
             channelId: answered.channelId, messageId: answered.messageId, target: target,
-            mentionsAuthor: answered.mentionsAuthor, authorName: authorName)
+            mentionsAuthor: answered.mentionsAuthor, authorName: authorName,
+            channelKnown: store.channel(id: answered.channelId) != nil)
     }
 
     private var preview: ReplyPreview? {
@@ -65,9 +69,10 @@ public struct ReplyLine: Equatable, Sendable {
         return (mentionsAuthor ? "@" : "") + authorName
     }
 
-    /// A click on the line goes to the message; not once it is deleted.
+    /// A click on the line goes to the message; not once it is deleted, nor into a channel that
+    /// is gone.
     public var jumps: Bool {
-        target != .deleted
+        target != .deleted && channelKnown
     }
 
     public var content: Content {
