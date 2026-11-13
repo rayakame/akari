@@ -233,7 +233,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         let base = channelId.rawValue * 1000
         return MessageWindow(
             messageIds: (1...count).map { MessageId(rawValue: base + $0) }, pendingIds: [],
-            latest: true, oldest: true, stale: false)
+            latest: !away.withLock { $0 }, oldest: true, stale: false)
     }
 
     // Every so many messages formatted, the rest one plain line.
@@ -272,6 +272,9 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         }
     }
 
+    /// Set: newer messages than the window's exist, so its lists are away from the present.
+    let away = OSAllocatedUnfairLock(initialState: false)
+
     /// Set: the message with the key's number answers the one with the value's, in every channel.
     let replies = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
@@ -309,7 +312,12 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
             reply: answerable.withLock { $0 })
     }
 
-    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
+    /// Set: a thread can be started from every message.
+    let startsThreads = OSAllocatedUnfairLock(initialState: false)
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
+        startsThreads.withLock { $0 }
+    }
     override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
 
     override func slowmode(channelId: ChannelId) -> Slowmode? {

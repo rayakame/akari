@@ -529,6 +529,70 @@ struct ReplyBarScreenTests {
     }
 }
 
+// Escape over a list scrolled up: cancelling the reply leaves it where it is read.
+@MainActor
+struct ReplyEscapeScreenTests {
+    let screens = SessionScreenTests()
+    let account = FormattedAccount(contents: ["test"], thread: true)
+    let channel = FormattedStore.channelIds[0]
+
+    init() {
+        account.formattedStore.answerable.withLock { $0 = true }
+    }
+
+    @Test
+    func escapeCancelsTheReplyWithoutScrollingThenGoesToThePresent() async throws {
+        let session = screens.formattedSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = screens.shownWindow(host)
+        defer { window.orderOut(nil) }
+        let table = try await screens.shown(account.formattedStore.newest(of: channel), in: host)
+        let controller = try #require(table.delegate as? MessageTableController)
+        let list = try #require(session.messages)
+        let clip = try #require(table.enclosingScrollView?.contentView)
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 5).minY))
+        table.enclosingScrollView?.reflectScrolledClipView(clip)
+        host.layoutSubtreeIfNeeded()
+        try #require(!controller.isPinnedToBottom)
+        let origin = clip.bounds.origin
+        list.composer.startReply(to: try #require(list.rows.dropLast().last), shift: false)
+        try await screens.waitUntil(host) { !screens.views(ReplyBarView.self, in: host).isEmpty }
+        let composer = try #require(screens.views(ComposerTextView.self, in: host).first)
+
+        composer.onEscape()
+        try await screens.waitUntil(host) { list.composer.reply == nil }
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        #expect(clip.bounds.origin == origin)
+        #expect(account.markedRead.withLock { $0 }.isEmpty)
+
+        composer.onEscape()
+        try await screens.waitUntil(host) {
+            controller.isPinnedToBottom && account.markedRead.withLock { $0 } == [channel]
+        }
+    }
+}
+
+// What the bridge tells a table made later about the jumps tables have shown.
+@MainActor
+struct ReplyBridgeTests {
+    @Test
+    func theLastShownJumpOnlyGrows() async throws {
+        let account = FormattedAccount(contents: ["test"])
+        let session = SessionScreenTests().formattedSession(account)
+        let messages = try #require(session.messages)
+        let bridge = MessageListBridge(
+            messages: messages, link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in }, markServerRead: {})
+
+        #expect(bridge.lastShownJump() == 0)
+        bridge.jumpShown(3)
+        #expect(bridge.lastShownJump() == 3 && messages.shownJump == 3)
+        bridge.jumpShown(2)
+        #expect(bridge.lastShownJump() == 3)
+    }
+}
+
 // Escape in a list of its own (no session behind it): the same order.
 @MainActor
 struct ReplyEscapeBridgeTests {
