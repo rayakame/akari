@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 
 use super::{Account, Shared};
 use crate::RequestError;
-use crate::model::{ChannelId, MessageId};
+use crate::model::{ChannelId, MessageId, UserId};
 use crate::state::ReactionEmoji;
 
 const TOO_MANY_REACTIONS: u32 = 30010;
@@ -312,5 +312,96 @@ impl Account {
         self.shared
             .wish(channel, message, emoji, false, location)
             .await
+    }
+}
+
+/// Which of an emoji's two counts: plain reactions or super reactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionKind {
+    Normal,
+    Burst,
+}
+
+impl Shared {
+    async fn moderate(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+        emoji: Option<&ReactionEmoji>,
+        whose: Option<(UserId, ReactionKind)>,
+    ) -> Result<(), ReactionError> {
+        self.rest.usable()?;
+        if !self.store.message_actions(channel, row).remove_reactions {
+            return Err(RequestError::InvalidRequest.into());
+        }
+        let (shown, message) = self
+            .store
+            .shown_message(channel, row)
+            .ok_or(RequestError::InvalidRequest)?;
+        let emoji = emoji.map(|emoji| self.store.reaction_emoji(channel, row, emoji));
+        let removed = async {
+            self.unarchive_for_reaction(shown).await?;
+            match (&emoji, whose) {
+                (Some(emoji), Some((user, kind))) => {
+                    self.rest
+                        .remove_reaction(
+                            shown,
+                            message,
+                            emoji,
+                            kind == ReactionKind::Burst,
+                            Some(user),
+                            ReactionLocation::Message.query(),
+                        )
+                        .await
+                }
+                _ => {
+                    self.rest
+                        .remove_reactions(shown, message, emoji.as_ref())
+                        .await
+                }
+            }
+        }
+        .await;
+        if let Err(err) = &removed {
+            self.failed(err);
+        }
+        Ok(removed?)
+    }
+}
+
+impl Account {
+    /// Removes `user`'s reaction with `emoji`, from the reactions window. The store changes
+    /// when the gateway says so. The user's own goes as [`Account::unreact`] does; anyone
+    /// else's needs [`MessageActions::remove_reactions`](crate::state::MessageActions), else
+    /// `InvalidRequest` without a request.
+    pub async fn remove_reaction(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        kind: ReactionKind,
+        user: UserId,
+    ) -> Result<(), ReactionError> {
+        if self.shared.store.current_user().map(|me| me.user.id) == Some(user) {
+            return self
+                .shared
+                .wish(channel, message, emoji, false, ReactionLocation::Message)
+                .await;
+        }
+        self.shared
+            .moderate(channel, message, Some(emoji), Some((user, kind)))
+            .await
+    }
+
+    /// Removes every reaction of the message, or every one with `emoji`. The store changes
+    /// when the gateway says so. `InvalidRequest`, without a request, without
+    /// [`MessageActions::remove_reactions`](crate::state::MessageActions).
+    pub async fn remove_reactions(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: Option<&ReactionEmoji>,
+    ) -> Result<(), ReactionError> {
+        self.shared.moderate(channel, message, emoji, None).await
     }
 }

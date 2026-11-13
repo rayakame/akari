@@ -3,10 +3,11 @@ use wiremock::{Mock, MockServer, Request as Received, Respond, ResponseTemplate}
 
 use super::*;
 use crate::state::ReactionEmoji;
-use crate::{ReactionError, ReactionLocation};
+use crate::{ReactionError, ReactionKind, ReactionLocation};
 
 const TARGET: u64 = 400_000_000_000_000_003;
 const MIRA: u64 = 100_000_000_000_000_002;
+const TOM: u64 = 100_000_000_000_000_003;
 const DM: u64 = 300_000_000_000_000_010;
 const THREAD: u64 = 300_000_000_000_000_020;
 const STARTER_ROW: u64 = 400_000_000_000_000_031;
@@ -969,4 +970,153 @@ async fn a_closed_account_refuses_reactions() {
     );
     assert_eq!(online.lines().await, [] as [&str; 0]);
     assert_eq!(online.shown(), []);
+}
+
+#[tokio::test]
+async fn moderating_waits_for_the_gateway_to_change_the_store() {
+    let mut online = reacting().await;
+    online.added_by(MIRA, HEART).await;
+    online.added_by(TOM, UP).await;
+    online.answer(204).await;
+    let mira = Snowflake::new(MIRA);
+    let wave = ReactionEmoji::custom(Snowflake::new(7), Some("wave"), false);
+
+    online
+        .account
+        .remove_reaction(general(), target(), &heart(), ReactionKind::Normal, mira)
+        .await
+        .unwrap();
+    online
+        .account
+        .remove_reaction(general(), target(), &wave, ReactionKind::Burst, mira)
+        .await
+        .unwrap();
+    online
+        .account
+        .remove_reactions(general(), target(), Some(&heart()))
+        .await
+        .unwrap();
+    online
+        .account
+        .remove_reactions(general(), target(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("DELETE {BASE}/{HEART_PATH}/0/{MIRA}?location=Message&burst=false"),
+            format!("DELETE {BASE}/wave:7/1/{MIRA}?location=Message&burst=true"),
+            format!("DELETE {BASE}/{HEART_PATH}"),
+            format!("DELETE {BASE}"),
+        ]
+    );
+    assert_eq!(online.events().await, [] as [&str; 0]);
+    assert_eq!(
+        online.shown(),
+        [one(HEART, 1, false), one(UP, 1, false)].concat(),
+        "until the gateway says so"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_moderation_says_why() {
+    let online = reacting().await;
+    online.answer_with(refusal(403, 50013)).await;
+
+    let outcome = online
+        .account
+        .remove_reactions(general(), target(), None)
+        .await;
+
+    assert!(
+        matches!(outcome, Err(ReactionError::Forbidden)),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn removing_ones_own_reaction_in_the_window_goes_as_taking_it_back() {
+    let mut online = reacting().await;
+    online.added_by(ME_ID, HEART).await;
+    online.answer(204).await;
+
+    online
+        .account
+        .remove_reaction(
+            general(),
+            target(),
+            &heart(),
+            ReactionKind::Normal,
+            Snowflake::new(ME_ID),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [format!(
+            "DELETE {BASE}/{HEART_PATH}/0/@me?location=Message&burst=false"
+        )]
+    );
+    assert_eq!(online.shown(), [], "at once");
+}
+
+#[tokio::test]
+async fn moderation_goes_to_the_message_a_row_shows_and_opens_an_archived_thread() {
+    let online = with_a_starter_row().await;
+    let (thread, row) = (Snowflake::new(THREAD), Snowflake::new(STARTER_ROW));
+    online
+        .account
+        .remove_reactions(thread, row, None)
+        .await
+        .unwrap();
+    assert_eq!(online.lines().await, [format!("DELETE {BASE}")]);
+
+    let mut online = reacting().await;
+    online.answer(204).await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&online.server)
+        .await;
+    archive_the_thread(&mut online).await;
+    online
+        .account
+        .remove_reactions(thread, Snowflake::new(TARGET + 1), Some(&heart()))
+        .await
+        .unwrap();
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("PATCH /api/v9/channels/{THREAD}"),
+            format!(
+                "DELETE /api/v9/channels/{THREAD}/messages/{}/reactions/{HEART_PATH}",
+                TARGET + 1
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn what_may_not_be_moderated_is_refused_without_a_request() {
+    let online = in_a_dm().await;
+    let (dm, id) = (Snowflake::new(DM), Snowflake::new(TARGET + 1));
+    let mira = Snowflake::new(MIRA);
+
+    let all = online.account.remove_reactions(dm, id, None).await;
+    let others = online
+        .account
+        .remove_reaction(dm, id, &heart(), ReactionKind::Normal, mira)
+        .await;
+    let unknown = online
+        .account
+        .remove_reactions(general(), Snowflake::new(TARGET + 50), None)
+        .await;
+
+    assert!(
+        invalid(&all) && invalid(&others),
+        "nothing to moderate in a DM"
+    );
+    assert!(invalid(&unknown), "a message the store doesn't have");
+    assert_eq!(online.lines().await, [] as [&str; 0]);
 }

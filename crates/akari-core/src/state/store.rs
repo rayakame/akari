@@ -777,6 +777,20 @@ impl Store {
         });
     }
 
+    // The emoji as the message the row shows has it, which knows a custom emoji's name.
+    pub(crate) fn reaction_emoji(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+        emoji: &ReactionEmoji,
+    ) -> ReactionEmoji {
+        self.reactions(channel, row)
+            .iter()
+            .find(|known| known.emoji.same(emoji))
+            .map_or(emoji, |known| &known.emoji)
+            .clone()
+    }
+
     // `None` when the message's actions don't offer it.
     pub(crate) fn mark_unread(&self, channel: ChannelId, message: MessageId) -> Option<Unread> {
         let now = self.now_millis();
