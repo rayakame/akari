@@ -518,6 +518,56 @@ struct ReplyHoldTests {
         #expect(model.composer.reply?.authorName == "someone")
     }
 
+    // Pending row 900 answers 58, which was deleted after the send failed.
+    func failedReply(with error: RequestError) async throws -> MessageListModel {
+        let model = makeModel()
+        try answer(58, in: model)
+        store.update { [here] state in
+            state.show(reply(900, to: 58, delivery: .failed))
+            state.windows[here] = window([57, 58, 59, 60], pending: [900])
+        }
+        account.sendError.withLock { $0 = error }
+        model.composer.draft = "hi"
+        await model.composer.submit()
+        store.update { $0.replyTargets[id(58)] = .deleted }
+        model.apply(
+            EventBatch([
+                .messageInserted(channelId: here, messageId: id(900)),
+                .replyTargetChanged(channelId: here, targetId: id(58)),
+            ]))
+        return model
+    }
+
+    func refused(_ model: MessageListModel) -> Bool? {
+        model.rows.first { $0.id == id(900) }?.replyRefused
+    }
+
+    @Test
+    func aReplyThatFailedForAnotherReasonIsNotRefusedForItsDeletedMessage() async throws {
+        let model = try await failedReply(with: .Network(kind: .timeout))
+
+        #expect(model.rows.first { $0.id == id(900) }?.reply?.target == .deleted)
+        #expect(refused(model) == false)
+    }
+
+    @Test
+    func aReplyDiscordRefusedForItsDeletedMessageSaysSoUntilItIsRetried() async throws {
+        let model = try await failedReply(with: .ReplyTargetDeleted)
+        #expect(refused(model) == true)
+        #expect(makeModel().rows.first { $0.id == id(900) }?.replyRefused == true, "kept for the session")
+
+        account.sendError.withLock { $0 = .Network(kind: .timeout) }
+        await model.composer.retry(id(900))
+        #expect(refused(model) == false)
+
+        account.sendError.withLock { $0 = .ReplyTargetDeleted }
+        await model.composer.retry(id(900))
+        #expect(refused(model) == true)
+
+        model.composer.discard(id(900))
+        #expect(makeModel().rows.first { $0.id == id(900) }?.replyRefused == false)
+    }
+
     @Test
     func aMessageThatIsNeitherLoadedNorHeldIsStillRefused() async throws {
         let model = makeModel()

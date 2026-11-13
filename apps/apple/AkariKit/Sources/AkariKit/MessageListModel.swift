@@ -88,12 +88,15 @@ public final class MessageListModel {
         public let threadBox: ThreadBox?
         /// The line over `shown` when it answers a message.
         public let reply: ReplyLine?
+        /// A failed reply that Discord refused because the message it answers was deleted.
+        public let replyRefused: Bool
 
         public init(
             id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
             noticeContext: Message.NoticeContext = .init(), authorName: String? = nil,
-            threadBox: ThreadBox? = nil, reply: ReplyLine? = nil
+            threadBox: ThreadBox? = nil, reply: ReplyLine? = nil, replyRefused: Bool = false
         ) {
+            self.replyRefused = replyRefused
             self.id = id
             self.message = message
             self.starter = starter
@@ -320,6 +323,9 @@ public final class MessageListModel {
         }
         composer.onSend = { [weak self] in
             self?.endNewMessagesLine()
+        }
+        composer.onRefusalChanged = { [weak self] pending in
+            self?.reread([pending])
         }
     }
 
@@ -1039,14 +1045,15 @@ public final class MessageListModel {
             noticeContext: noticeContext(for: shown),
             authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author),
             threadBox: ThreadBox.of(message, in: store, name: name(of:)),
-            reply: ReplyLine.of(shown, in: store))
+            reply: ReplyLine.of(shown, in: store),
+            replyRefused: composer.replyWasRefused(message.id))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
         Row(
             id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
             noticeContext: held.noticeContext, authorName: held.authorName,
-            threadBox: held.threadBox, reply: held.reply)
+            threadBox: held.threadBox, reply: held.reply, replyRefused: held.replyRefused)
     }
 
     // One rule for headers and system lines; server nicknames come with the member milestone.
