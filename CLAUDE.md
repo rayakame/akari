@@ -63,7 +63,9 @@ are new in the open forum's opened posts (op 28, each post once per connection) 
 counts with messages and acks, says what the user may post in a forum (the tags they may apply, a
 required tag) and creates posts with the forum's slowmode, the user's own post read for its forum;
 it keeps each message's reactions, counted live by the reaction dispatches on every copy of the
-message, with an event and a read of their own; the messages replies answer in a store of their
+message, with an event and a read of their own, adds and takes back the user's own (shown at
+once, one request per message and emoji for the latest wish, a refusal undone, Discord's refusals
+told apart), removes others' for moderators and lists who reacted, page by page; the messages replies answer in a store of their
 own (loaded, deleted or not loaded, bounded per channel, kept current by edits and deletes);
 whether a channel has pins the user hasn't seen (the pins dot); and says what the user may do
 with a message (`MessageActions`: reply, edit, delete, pin, react, mark unread, copy its link,
@@ -74,7 +76,7 @@ without the token on a client of their own (eight at a time, newest first, one p
 many ask), signed attachment links renewed in batches, each account's images on disk with LRU
 eviction, Discord's placeholder decoder and media layout from sizes alone; the store reads the
 display settings (`text_and_images`: spoilers, inline media, GIF autoplay, emoji and sticker
-animation, explicit content) with their event, keeps "0", "0000" and legacy discriminators
+animation, whether reactions show, explicit content) with their event, keeps "0", "0000" and legacy discriminators
 apart, and gives every user an avatar key (the avatar, else Discord's default avatar by the
 client's index rule) and guilds and group DMs their icon's; it keeps which server each of the
 user's custom emoji is from and asks Discord where other emoji and stickers are from (their
@@ -87,7 +89,8 @@ under its one image, and the same covers, a spoilered link covering them all), a
 channel waits behind the age gate, with the user's agreement per server in the cache, and whether
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
-answers a message) and tail messages with their reactions and what a reply answers, show where a channel's unread state,
+answers a message) and tail messages with their reactions and what a reply answers, react, take a
+reaction back and list who reacted, show where a channel's unread state,
 mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
@@ -95,7 +98,7 @@ emoji span's key, the display settings, attachments with their kind, size, place
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), a message's reactions, what a reply answers (its preview on one line, formatted), sending a
+message's thumbnail), a message's reactions, reacting, a moderator's removals and who reacted, what a reply answers (its preview on one line, formatted), sending a
 reply, the pins dot, what the user may do with a message and marking unread from one, through
 UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
@@ -105,7 +108,10 @@ deletion), what the line over a reply shows and the jump to the message it answe
 back, the media viewer, the
 forum page and its form for a new post, and what a message's hover bar and menu list: the
 official client's order for the plain and the Shift-held bar and the menu's groups as values,
-later features' places included, with Mark Unread moving the new messages line), the message
+later features' places included, with Mark Unread moving the new messages line; a message's
+reactions as pills (plain and super reactions counted together), a click that adds or takes back,
+the quick reactions, a pill's tooltip names, the reactions window's emoji and users, the removals'
+question, and a forum card's and post bar's reactions), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -146,7 +152,14 @@ view of the list's controller over the rows, counted as its row where it overhan
 SF Symbols, the longer row while Shift is held, Retry and Delete on a failed send, More opening
 the message's menu, the row lit while its menu is open), the message's menu has Create or View
 Thread, Copy Text, Mark Unread and Copy Message Link in the official order, and an Option-click
-on a message marks unread from it; Reply in the bar and the menu starts a reply (Shift at the
+on a message marks unread from it; a message's reactions stand under it as pills (the count
+rolling in the key window, the user's own in the brand's colors, an add button at the end,
+changed in place without rebuilding the row), a click adds or takes back, the hover bar has three
+quick reactions, Add Reaction lists them as a menu until there is an emoji picker, the menu has
+View Reactions (a window with the emoji by count and who reacted, a hundred at a time, with a ✕
+where allowed) and, for moderators, Remove Reactions and Remove All Reactions after a question,
+"Show emoji reactions" off hides all of it, and forum cards and a post's bar show the post's
+reactions and the forum's default one; Reply in the bar and the menu starts a reply (Shift at the
 click without the ping), with the reply bar in the composer's card ("Replying to Name", the "@"
 switch, ✕), the answered row tinted and Escape cancelling it before anything is marked read; a
 reply has the line about the message it answers over its header (the small avatar and the name,
