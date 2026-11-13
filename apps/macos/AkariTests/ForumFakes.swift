@@ -148,6 +148,8 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
     }
 
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
     override func connection() -> ConnectionState { .online }
     override func currentUser() -> User? { forumUser(ForumFakes.me, name: "rayakame") }
