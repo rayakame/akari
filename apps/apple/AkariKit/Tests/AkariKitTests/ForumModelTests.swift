@@ -384,6 +384,109 @@ final class ForumModelTests {
         session.close()
     }
 
+    // MARK: A card's reaction
+
+    func reacted(_ reactions: Reaction..., on raw: UInt64 = 41, actions: MessageActions = reacting()) {
+        store.update { state in
+            state.postPreviews[id(raw)] = .loaded(message: message(raw, in: raw))
+            state.reactions[id(raw)] = reactions
+            state.allow(actions, message: raw, in: raw)
+        }
+    }
+
+    func offer(_ emoji: TagEmoji?) {
+        store.update { $0.channels[id(13)]?.forum?.defaultReaction = emoji }
+    }
+
+    @Test
+    func aCardShowsTheReactionWithTheMostUsers() throws {
+        reacted(reaction("👍", 2), reaction("🎉", 2, burst: 3, meBurst: true), reaction("👀", 4))
+        list([41, 42])
+        let session = inForum()
+
+        let cards = try forum(session).posts
+
+        #expect(
+            cards.first?.reaction
+                == .init(emoji: .unicode("🎉"), count: 5, mine: true, toggles: true))
+        #expect(cards.last?.reaction == nil)
+        session.close()
+    }
+
+    @Test
+    func aCardWithoutReactionsOffersTheForumsDefault() throws {
+        offer(.unicode(emoji: "🔥"))
+        reacted()
+        reacted(on: 42, actions: reacting(react: false))
+        list([41, 42, 43])
+        let session = inForum()
+
+        let cards = try forum(session).posts
+
+        #expect(
+            cards.map(\.reaction) == [
+                .init(emoji: .unicode("🔥"), count: 0, mine: false, toggles: true), nil, nil,
+            ])
+        session.close()
+    }
+
+    @Test
+    func aCardsReactionFollowsItsFirstMessage() throws {
+        reacted(reaction("👍", 1))
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+
+        store.update { $0.reactions[id(41)] = [reaction("👍", 2, me: true)] }
+        session.apply(EventBatch([.postPreviewChanged(postId: id(41))]))
+
+        #expect(forum.posts.first?.reaction?.count == 2)
+        #expect(forum.posts.first?.reaction?.mine == true)
+        session.close()
+    }
+
+    @Test
+    func cardsShowNoReactionWithTheSettingOff() throws {
+        offer(.unicode(emoji: "🔥"))
+        reacted(reaction("👍", 1))
+        reacted(on: 42)
+        store.update { $0.displaySettings.renderReactions = false }
+        list([41, 42])
+        let session = inForum()
+
+        #expect(try forum(session).posts.map(\.reaction) == [nil, nil])
+        session.close()
+    }
+
+    @Test
+    func aClickOnACardsReactionReactsFromTheForumsToolbar() async throws {
+        offer(.unicode(emoji: "🔥"))
+        reacted()
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+        let offered = try #require(forum.posts.first?.reaction)
+
+        await forum.react(offered, on: id(41))
+        #expect(account.log.actions.contains(.react(id(41), id(41), "🔥", .forumToolbar)))
+
+        session.apply(EventBatch([.postPreviewChanged(postId: id(41))]))
+        let mine = try #require(forum.posts.first?.reaction)
+        #expect(mine.mine)
+        await forum.react(mine, on: id(41))
+        #expect(account.log.actions.contains(.unreact(id(41), id(41), "🔥", .forumToolbar)))
+        session.close()
+    }
+
+    @Test
+    func aCustomDefaultReactionComesWithoutItsName() {
+        let key = ImageKey.emoji(emojiId: id(9), animated: false)
+
+        #expect(
+            ReactionEmoji(.custom(id: id(9), key: key))
+                == ReactionEmoji(id: id(9), name: nil, animated: false, key: key))
+    }
+
     // A card still without its message asks again as the forum changes; the core spaces the
     // requests out.
     @Test
