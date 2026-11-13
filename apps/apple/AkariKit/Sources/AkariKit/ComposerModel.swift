@@ -5,7 +5,7 @@ import Observation
 public struct PendingReply: Equatable, Sendable {
     public let messageId: MessageId
     /// The name the message's header shows for its author.
-    public let authorName: String
+    public var authorName: String
     /// The reply pings the message's author.
     public var mention: Bool
     /// The bar has the switch for the ping: not in DMs, not for the user's own message.
@@ -211,6 +211,13 @@ public final class ComposerModel {
             problem = .failed(error as? RequestError ?? .UnexpectedResponse)
         }
         slowmode = store.slowmode(channelId: channelId)
+    }
+
+    // The list names people; the bar follows it.
+    func nameReplyAuthor(_ name: String) {
+        if let reply, reply.authorName != name {
+            self.reply?.authorName = name
+        }
     }
 
     /// Reply in a message's bar or menu: the next send answers `row`'s message. Shift at the click

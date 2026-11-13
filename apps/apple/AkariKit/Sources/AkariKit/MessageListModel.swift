@@ -716,6 +716,12 @@ public final class MessageListModel {
             fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
+        if let target = composer.reply?.messageId,
+            everyRow || updated.contains(target)
+                || batch.replyTargetsChanged[channelId]?.contains(target) == true
+        {
+            nameReplyAuthor(of: target)
+        }
         if !placed, let channel = store.channel(id: channelId) {
             place = Self.place(of: channel, in: store)
             placed = true
@@ -763,6 +769,18 @@ public final class MessageListModel {
             isMedia: forum?.kind == .guildMedia)
         if start != postStart {
             postStart = start
+        }
+    }
+
+    // The message may have left the loaded ones; the core keeps its preview for the reply.
+    private func nameReplyAuthor(of target: MessageId) {
+        if let row = rows.first(where: { $0.message.id == target }) {
+            composer.nameReplyAuthor(row.authorName)
+        } else if case .loaded(let preview) = store.replyTarget(
+            channelId: channelId, targetId: target)
+        {
+            composer.nameReplyAuthor(
+                preview.fromWebhook ? preview.author.displayName : name(of: preview.author))
         }
     }
 
