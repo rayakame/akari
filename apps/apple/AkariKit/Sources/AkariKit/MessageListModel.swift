@@ -417,6 +417,10 @@ public final class MessageListModel {
     /// it. Scrolling is the view's part.
     public func jump(to messageId: MessageId) async {
         endReplyReturn()
+        await land(on: messageId)
+    }
+
+    private func land(on messageId: MessageId) async {
         let placing = activeLoads[lastPlacing]
         // The running load jumps once its messages are in.
         if placing == .aroundMessage, jumpingTo == messageId {
@@ -462,7 +466,12 @@ public final class MessageListModel {
         guard let reply = replyReturn else {
             return
         }
-        await jump(to: reply)
+        let jumps = messageJumps
+        await land(on: reply)
+        // A load that failed leaves the way back to try again.
+        if messageJumps > jumps, messageJump?.messageId == reply, replyReturn == reply {
+            endReplyReturn()
+        }
     }
 
     private func endReplyReturn() {

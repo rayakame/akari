@@ -364,6 +364,24 @@ struct ReplyJumpTests {
     }
 
     @Test
+    func aWayBackWhoseLoadFailsStays() async {
+        let model = makeModel()
+        await model.jumpToTarget(of: row(8, in: model))
+        account.loadError.withLock { $0 = .Network(kind: .timeout) }
+
+        await model.returnToReply()
+
+        #expect(model.replyReturn == id(8))
+        #expect(model.messageJump == .init(messageId: id(2), number: 1))
+
+        account.loadError.withLock { $0 = nil }
+        await model.returnToReply()
+
+        #expect(model.messageJump == .init(messageId: id(8), number: 2))
+        #expect(model.replyReturn == nil)
+    }
+
+    @Test
     func aChannelOpenedForAJumpThatFailsShowsThePresent() async {
         store.update { [here] in $0.windows[here] = nil }
         account.holdLoads.withLock { $0 = true }
