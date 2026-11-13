@@ -150,6 +150,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     /// The hovered message's buttons: one bar for the list, over the rows.
     let hoverBar = MessageHoverBar()
     private weak var hoveredBarButton: HoverBarButton?
+    private weak var hoveredQuick: QuickReactionButton?
+    private weak var hoveredPill: ReactionPillButton?
+    private weak var hoveredAdd: ReactionAddButton?
     // The row and Shift state the bar's buttons were read for.
     private var barShown: (row: MessageTimeline.ItemId, shift: Bool)?
     // A row's content changed: its bar is read again.
@@ -725,6 +728,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for index in changes.reloaded {
             rowHeights[next.items[index].id] = nil
         }
+        for index in changes.reacted {
+            rowHeights[next.items[index].id] = nil
+        }
         timeline = next
         barStale = true
         Signposts.interval("row heights") {
@@ -740,6 +746,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
                 noteHeights(of: changes.reloaded)
             }
+            showReactions(of: changes.reacted)
         }
         if firstFill {
             filled = true
@@ -763,6 +770,47 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.layoutSubtreeIfNeeded()
         logFills(fills, changes: changes)
         updatePointer()
+    }
+
+    // Rows whose reactions alone changed keep their cells: the pills change in place, a count
+    // rolls, and the row's height follows its lines of pills.
+    private func showReactions(of rows: IndexSet) {
+        guard !rows.isEmpty else {
+            return
+        }
+        for index in rows {
+            guard case .message(let row, _) = timeline.items[index] else {
+                continue
+            }
+            let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+            (cell as? MessageCell)?.showReactions(row.reactions, animated: true)
+            (cell as? NoticeCell)?.showReactions(row.reactions, animated: true)
+        }
+        noteHeights(of: rows)
+    }
+
+    // A count rolls only where it can be seen moving: in the key window, with motion allowed.
+    private func reactionsRoll() -> Bool {
+        tableView.window?.isKeyWindow == true && !reducesMotion()
+    }
+
+    /// The names of a message's reactions arrived: its pills' tooltips read them.
+    func reactionNamesArrived(for message: MessageId) {
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard timeline.items.indices.contains(index) else {
+                return
+            }
+            let cell = rowView.view(atColumn: 0)
+            switch timeline.items[index] {
+            case .message(let row, _) where row.shown.id == message:
+                (cell as? MessageCell)?.reactions?.refreshTooltips()
+                (cell as? NoticeCell)?.reactions?.refreshTooltips()
+            case .postBar(let bar, _) where bar.post == message:
+                (cell as? PostBarCell)?.reactions.refreshTooltips()
+            default:
+                break
+            }
+        }
     }
 
     // For height changes outside a timeline update: the reader's place stays, or the bottom.
@@ -1078,12 +1126,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
                     message, notice: notice, time: time, followsDay: followsDay,
-                    followsLine: followsLine, hasBox: hasBox, width: width)
+                    followsLine: followsLine, hasBox: hasBox, reactions: row.reactions, width: width)
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
                 followsLine: followsLine, hasBox: hasBox, embeds: embeds(row),
-                hasReply: row.reply != nil, width: width)
+                hasReply: row.reply != nil, reactions: row.reactions, width: width)
         }
     }
 
@@ -1120,6 +1168,30 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = reuse(PostBarCell.identifier) as? PostBarCell ?? PostBarCell()
             cell.onFollow = { [weak self] in self?.actions?.followPost($0) }
             cell.onCopy = { [weak self] in self?.actions?.copyPostLink() }
+            let post = MessageTimeline.ItemId.message(bar.post)
+            cell.images = state.images.cache
+            cell.onReaction = { [weak self] emoji in
+                if let self, let row = self.row(post) {
+                    actions?.toggleReaction(emoji, of: row, from: .forumToolbar)
+                }
+            }
+            cell.onAddReaction = { [weak self] button in
+                if let self, let row = self.row(post) {
+                    openReactionMenu(of: row, under: button, from: .forumToolbar)
+                }
+            }
+            cell.onMoreReactions = { [weak self] in
+                if let self, let row = self.row(post) {
+                    actions?.viewReactions(of: row)
+                }
+            }
+            cell.reactionTooltip = { [weak self] pill in
+                guard let self, let row = self.row(post) else {
+                    return nil
+                }
+                return actions?.reactionTooltip(of: pill, on: row)
+            }
+            cell.reactionsRoll = { [weak self] in self?.reactionsRoll() ?? false }
             cell.show(bar, hasReplies: hasReplies)
             return cell
         case .message(let row, let startsGroup):
@@ -1141,10 +1213,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
                 cell.animatesEmoji = emojiPlays(
                     at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
+                cell.onReaction = { [weak self] pill in self?.toggle(pill, in: item.id, else: row) }
+                cell.onAddReaction = { [weak self] button in
+                    self?.openReactionMenu(of: self?.row(item.id) ?? row, under: button, from: .inlineButton)
+                }
+                cell.reactionTooltip = { [weak self] pill in
+                    self?.actions?.reactionTooltip(of: pill, on: self?.row(item.id) ?? row)
+                }
+                cell.reactionsRoll = { [weak self] in self?.reactionsRoll() ?? false }
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate,
-                    reader: row.noticeContext.currentUserId, threadBox: boxParts(row))
+                    reader: row.noticeContext.currentUserId, threadBox: boxParts(row),
+                    reactions: row.reactions)
                 return cell
             }
             let cell =
@@ -1182,13 +1263,22 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 actions?.jumpToTarget(of: self.row(item.id) ?? row)
             }
             cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
+            cell.onReaction = { [weak self] pill in self?.toggle(pill, in: item.id, else: row) }
+            cell.onAddReaction = { [weak self] button in
+                self?.openReactionMenu(of: self?.row(item.id) ?? row, under: button, from: .inlineButton)
+            }
+            cell.reactionTooltip = { [weak self] pill in
+                self?.actions?.reactionTooltip(of: pill, on: self?.row(item.id) ?? row)
+            }
+            cell.reactionsRoll = { [weak self] in self?.reactionsRoll() ?? false }
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
-                embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused)
+                embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused,
+                reactions: row.reactions)
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
@@ -1362,7 +1452,24 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return []
         }
         let id = MessageTimeline.ItemId.message(row.id)
-        let items = MessageMenu.items(actions.messageMenu(for: row)) { [weak self] action in
+        let choices = { [weak self] (action: MessageAction) -> [NSMenuItem]? in
+            switch action {
+            case .addReaction:
+                self?.reactionItems(for: row, from: .contextMenu)
+            case .removeReactions:
+                MessageMenu.removals(actions.removableReactions(for: row)) { pill in
+                    guard let self else {
+                        return
+                    }
+                    actions.removeReactions(
+                        of: pill, on: self.row(id) ?? row, shift: self.modifiers().contains(.shift))
+                }
+            default:
+                nil
+            }
+        }
+        let items = MessageMenu.items(actions.messageMenu(for: row), choices: choices) {
+            [weak self] action in
             self?.perform(action, on: id, else: row)
         }
         for item in items {
@@ -1384,7 +1491,47 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             return
         }
+        if action == .addReaction {
+            if let button {
+                openReactionMenu(of: row, under: button, from: .picker)
+            }
+            return
+        }
         actions?.perform(action, on: row, shift: modifiers().contains(.shift))
+    }
+
+    // A click on a pill: the row as it is now says whether the reaction is the user's.
+    private func toggle(
+        _ pill: ReactionPill, in id: MessageTimeline.ItemId, else row: MessageListModel.Row
+    ) {
+        actions?.toggleReaction(pill.emoji, of: self.row(id) ?? row, from: .inlineButton)
+    }
+
+    private func reactionItems(
+        for row: MessageListModel.Row, from location: ReactionLocation
+    ) -> [NSMenuItem] {
+        guard let actions else {
+            return []
+        }
+        let id = MessageTimeline.ItemId.message(row.id)
+        return MessageMenu.reactions(actions.quickReactions(for: row, shift: false)) {
+            [weak self] quick in
+            actions.react(quick, on: self?.row(id) ?? row, from: location)
+        }
+    }
+
+    // Add Reaction's emoji as a menu under its button, until Akari has its emoji picker.
+    private func openReactionMenu(
+        of row: MessageListModel.Row, under button: NSView, from location: ReactionLocation
+    ) {
+        let items = reactionItems(for: row, from: location)
+        for item in items {
+            (item.representedObject as? MenuAction)?.row = RowMenu(list: self, row: .message(row.id))
+        }
+        guard let menu = MessageMenu.menu(items) else {
+            return
+        }
+        popUp(menu, NSPoint(x: 0, y: button.isFlipped ? button.bounds.maxY + 4 : -4), button)
     }
 
     private func row(_ id: MessageTimeline.ItemId) -> MessageListModel.Row? {
@@ -1667,6 +1814,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             perform(action, on: row, from: button)
         }
+        hoverBar.onQuick = { [weak self] quick in
+            guard let self, let id = barShown?.row, let row = row(id) else {
+                return
+            }
+            actions?.react(quick, on: row, from: .hoverBar)
+        }
         let monitoredEvents: NSEvent.EventTypeMask = [
             .flagsChanged, .leftMouseDown, .leftMouseDragged, .leftMouseUp,
         ]
@@ -1928,6 +2081,30 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         barButton?.isHovered = true
         hoveredBarButton = barButton
+        let quick = target?.view as? QuickReactionButton
+        if hoveredQuick !== quick {
+            hoveredQuick?.isHovered = false
+        }
+        quick?.isHovered = true
+        hoveredQuick = quick
+        let add = target?.view as? ReactionAddButton
+        if hoveredAdd !== add {
+            hoveredAdd?.isHovered = false
+        }
+        add?.isHovered = true
+        hoveredAdd = add
+        let pill = target?.view as? ReactionPillButton
+        if hoveredPill !== pill {
+            hoveredPill?.isHovered = false
+        }
+        pill?.isHovered = true
+        hoveredPill = pill
+        // The pointer resting on a pill asks for the names its tooltip shows.
+        if let pill, let shown = pill.pill, let row = reactionRow(of: pill) {
+            actions?.reactionHovered(shown, on: row)
+        } else {
+            actions?.reactionHovered(nil, on: nil)
+        }
         let file = enclosing(FileRowView.self, around: hit)
         if hoveredFile !== file {
             hoveredFile?.isHovered = false
@@ -1958,6 +2135,26 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         hoverCard.hover(
             expressionPopout.windows.panel == nil ? location.flatMap { hoverItem(at: $0, over: target?.view) } : nil,
             in: tableView.window)
+    }
+
+    // The row whose message a pill's reactions are on: its own, or a post bar's first message.
+    private func reactionRow(of pill: NSView) -> MessageListModel.Row? {
+        var view: NSView? = pill
+        while let current = view, !(current is NSTableCellView) {
+            view = current.superview
+        }
+        guard let cell = view else {
+            return nil
+        }
+        let index = tableView.row(for: cell)
+        guard timeline.items.indices.contains(index) else {
+            return nil
+        }
+        switch timeline.items[index] {
+        case .message(let row, _): return row
+        case .postBar(let bar, _): return row(.message(bar.post))
+        default: return nil
+        }
     }
 
     // The emoji or sticker under the pointer, with the part of its box the list shows, in
@@ -2024,6 +2221,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         while let current = view, current !== tableView {
             if let text = current as? MessageTextView {
                 return (text, text.cursor(at: text.convert(location, from: nil)))
+            }
+            // A reaction that only shows: the official client's not-allowed cursor.
+            if let pill = current as? ReactionPillButton, !pill.isEnabled {
+                return (pill, .operationNotAllowed)
             }
             if let button = current as? NSButton, button.isEnabled {
                 return (button, .pointingHand)
@@ -2092,12 +2293,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         if barStale || barShown?.row != hovered || barShown?.shift != shift {
-            hoverBar.show(actions.messageBar(for: row, shift: shift))
+            hoverBar.show(
+                actions.messageBar(for: row, shift: shift),
+                quick: actions.quickReactions(for: row, shift: shift))
             barShown = (hovered, shift)
             barStale = false
             // Rows with the same buttons keep the bar's views: the lit one would stay lit.
             hoveredBarButton?.isHovered = false
             hoveredBarButton = nil
+            hoveredQuick?.isHovered = false
+            hoveredQuick = nil
             hoverBar.button(.more)?.isSelected = moreSelected
         }
         placeBar()
@@ -2127,7 +2332,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let top = rect.minY + cell.bounds.height - box.height
         let header = startsGroup && !(cell is NoticeCell) && row.shown.kind != .reply
         let overhang = header ? MessageHoverBar.headerOverhang : MessageHoverBar.overhang
-        let width = MessageHoverBar.width(buttons: hoverBar.items.count)
+        let width = hoverBar.fittingWidth
         let frame = NSRect(
             x: rect.minX + box.maxX - MessageHoverBar.trailing - width,
             y: max(top - overhang, tableView.visibleRect.minY + 4), width: width,

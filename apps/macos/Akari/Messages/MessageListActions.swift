@@ -47,6 +47,20 @@ protocol MessageListActions: AnyObject {
     func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool)
     // An Option-click on a message.
     func markUnread(from row: MessageListModel.Row)
+    // The emoji before the bar's buttons and in Add Reaction's menu.
+    func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction]
+    func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation)
+    // A click on a pill under a message or in a post's bar, and on a forum's default reaction.
+    func toggleReaction(
+        _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation)
+    // What "Remove Reactions" lists, and a choice from it or "Remove All Reactions" (`nil`).
+    func removableReactions(for row: MessageListModel.Row) -> [ReactionPill]
+    func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool)
+    // A pill's tooltip as it reads now; the pointer resting on a pill asks for its names.
+    func reactionTooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String?
+    func reactionHovered(_ pill: ReactionPill?, on row: MessageListModel.Row?)
+    // A post bar's "+N": the reactions window.
+    func viewReactions(of row: MessageListModel.Row)
     // A clicked emoji's or sticker's popout; nil where there's none to show.
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel?
     // A file's name, or media the viewer can't show: the original in the browser.
@@ -76,6 +90,16 @@ extension MessageListActions {
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] { [] }
     func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}
     func markUnread(from row: MessageListModel.Row) {}
+    func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] { [] }
+    func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {}
+    func toggleReaction(
+        _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation
+    ) {}
+    func removableReactions(for row: MessageListModel.Row) -> [ReactionPill] { [] }
+    func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool) {}
+    func reactionTooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String? { nil }
+    func reactionHovered(_ pill: ReactionPill?, on row: MessageListModel.Row?) {}
+    func viewReactions(of row: MessageListModel.Row) {}
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? { nil }
     func openMedia(_ key: ImageKey) {}
     func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {

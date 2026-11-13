@@ -1305,6 +1305,56 @@ struct MessageTableTests {
             calls.append("mark unread \(row.message.id.rawValue)")
         }
 
+        /// The quick reactions each message's bar and Add Reaction offer.
+        var quick: [UInt64: [QuickReaction]] = [:]
+        var removable: [UInt64: [ReactionPill]] = [:]
+        /// A pill's tooltip by its emoji's name, as if its names had arrived.
+        var names: [String: String] = [:]
+        var rested: [String] = []
+
+        func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] {
+            if let model {
+                return model.quickReactions(for: row, shift: shift)
+            }
+            return shift ? [] : quick[row.id.rawValue] ?? []
+        }
+
+        func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {
+            calls.append("react \(quick.name) on \(row.message.id.rawValue) from \(location)")
+        }
+
+        func toggleReaction(
+            _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation
+        ) {
+            performed.append(row)
+            calls.append(
+                "toggle \(ReactionPill.name(of: emoji)) on \(row.message.id.rawValue) from \(location)")
+        }
+
+        func removableReactions(for row: MessageListModel.Row) -> [ReactionPill] {
+            removable[row.id.rawValue] ?? []
+        }
+
+        func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool) {
+            calls.append(
+                "remove \(pill?.name ?? "all") from \(row.message.id.rawValue)\(shift ? " shift" : "")")
+        }
+
+        func reactionTooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String? {
+            names[pill.name] ?? ReactionWords.tooltip(emoji: pill.name, names: [], count: pill.count)
+        }
+
+        func reactionHovered(_ pill: ReactionPill?, on row: MessageListModel.Row?) {
+            let now = pill.map { "\($0.name) of \(row?.message.id.rawValue ?? 0)" } ?? "none"
+            if rested.last != now {
+                rested.append(now)
+            }
+        }
+
+        func viewReactions(of row: MessageListModel.Row) {
+            calls.append("view reactions of \(row.message.id.rawValue)")
+        }
+
         var popouts: [ExpressionTarget] = []
 
         func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? {
