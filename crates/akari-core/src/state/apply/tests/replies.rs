@@ -1358,6 +1358,36 @@ fn a_queued_reply_is_a_reply_row_and_loads_its_target() {
 }
 
 #[test]
+fn a_queued_replys_new_target_keeps_the_bound() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    let replies: Vec<Value> = (0..150_u64)
+        .map(|index| {
+            let target = 1000 + index;
+            reply_to(
+                2000 + index,
+                GENERAL,
+                target,
+                Some(message(target, GENERAL)),
+            )
+        })
+        .collect();
+    load(&mut state, GENERAL, LoadKind::Latest, &replies);
+    let around = LoadKind::Around(Snowflake::new(5000));
+    load(&mut state, GENERAL, around, &[message(5000, GENERAL)]);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, 5000), "not loaded");
+
+    assert!(queue_reply(&mut state, 9000, 5000, true).0);
+
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert!(matches!(
+        state.reply_target(general, Snowflake::new(5000)),
+        ReplyTarget::Loaded(_)
+    ));
+}
+
+#[test]
 fn a_pending_replys_target_and_ping_choice_outlast_its_window() {
     let mut state = viewing(GENERAL);
     let general = Snowflake::new(GENERAL);
