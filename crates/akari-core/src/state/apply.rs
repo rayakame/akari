@@ -385,6 +385,10 @@ pub(crate) struct State {
     thread_cooldowns: Cooldowns,
     // The channels the user is reading: a channel and the thread beside it.
     reading: Vec<reading::Reading>,
+    // The channels whose lists the host shows.
+    open: Vec<ChannelId>,
+    // Marked unread while open: not read again until the user leaves or marks them read.
+    held: Vec<ChannelId>,
     // Their local acks from the latest write, for the account to send.
     due: Vec<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
@@ -449,6 +453,8 @@ impl State {
             cooldowns: Cooldowns::default(),
             thread_cooldowns: Cooldowns::default(),
             reading: Vec::new(),
+            open: Vec::new(),
+            held: Vec::new(),
             due: Vec::new(),
             stale_cursors: HashSet::new(),
             journal: None,
@@ -1318,6 +1324,7 @@ impl State {
         self.older.remove(&removed.id);
         self.forum_pages.retain(|key, _| key.forum != removed.id);
         self.entities.read_states.forget(removed.id);
+        self.release(removed.id);
         self.dirty.channel(removed.id);
         // Gone from the store, a post no longer leads the badges to its forum.
         if let Some(parent) = removed.parent_id {
@@ -1341,6 +1348,7 @@ impl State {
             self.forget_first_message(thread);
             self.forget_post_count(thread);
             self.entities.read_states.forget(thread);
+            self.release(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
                 channel_id: thread,
@@ -1400,6 +1408,7 @@ impl State {
                     self.entities.channels.remove(id);
                     self.threads.remove(channel);
                     self.entities.read_states.forget(*id);
+                    self.held.retain(|held| held != id);
                     self.windows.drop_channel(*id);
                     self.latest.remove(id);
                     self.unconfirmed.remove(id);
@@ -1455,6 +1464,7 @@ impl State {
                 .collect();
             for channel in channels {
                 self.entities.read_states.forget(channel);
+                self.release(channel);
             }
             self.outage_members
                 .retain(|_, (guild, _)| *guild != delete.id);
@@ -2258,6 +2268,7 @@ mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
+pub(crate) use reading::{Unread, UnreadNeeds};
 
 #[cfg(test)]
 pub(crate) mod tests;

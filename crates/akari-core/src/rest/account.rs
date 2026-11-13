@@ -446,6 +446,23 @@ impl AccountRest {
         Ok(())
     }
 
+    pub(crate) async fn unarchive_thread(&self, thread: ChannelId) -> Result<(), RequestError> {
+        #[derive(Serialize)]
+        struct Body {
+            archived: bool,
+        }
+        let path = format!("channels/{}", thread.get());
+        let route = RouteKey::new(Method::Patch, CHANNEL, thread.get());
+        self.send(route, Waiting::Allowed, || {
+            Ok(self
+                .request(HttpMethod::PATCH, &path)?
+                .json(&Body { archived: false }))
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
+    }
+
     pub(crate) async fn create_thread(
         &self,
         parent: ChannelId,
@@ -602,6 +619,31 @@ impl AccountRest {
                 flags: Some(IS_THREAD),
             },
         };
+        self.send(route, Waiting::Never, || {
+            Ok(self.request(HttpMethod::POST, &path)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    // Mark Unread: the position goes back to `message`, with the mentions past it.
+    pub(crate) async fn ack_manual(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        mention_count: u32,
+    ) -> Result<(), Failure> {
+        #[derive(Serialize)]
+        struct Body {
+            manual: bool,
+            mention_count: u32,
+        }
+        let body = Body {
+            manual: true,
+            mention_count,
+        };
+        let path = format!("channels/{}/messages/{}/ack", channel.get(), message.get());
+        let route = RouteKey::new(Method::Post, ACK, channel.get());
         self.send(route, Waiting::Never, || {
             Ok(self.request(HttpMethod::POST, &path)?.json(&body))
         })

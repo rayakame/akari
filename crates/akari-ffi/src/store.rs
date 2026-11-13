@@ -343,8 +343,16 @@ impl Store {
     /// or the user's permissions change.
     /// A viewed thread's starter row (the thread's ID and the row's) answers for the message it
     /// shows, in the parent channel: requests take the IDs of `starter_message`'s message.
+    /// Its `mark_unread` alone is the thread's, and `Account.mark_unread` takes the row's IDs.
     pub fn message_actions(&self, channel_id: ChannelId, message_id: MessageId) -> MessageActions {
         self.core.message_actions(channel_id, message_id).into()
+    }
+
+    /// What Copy Message Link copies for a row: `https://discord.com/channels/{guild}/{channel}/
+    /// {message}`, `@me` outside a guild. A viewed thread's starter row gives the link of the
+    /// message it shows, in the parent channel, and its own while that message isn't loaded.
+    pub fn message_link(&self, channel_id: ChannelId, message_id: MessageId) -> String {
+        self.core.message_link(channel_id, message_id)
     }
 
     /// The parent's slowmode for creating threads, apart from sending: each created thread

@@ -145,6 +145,18 @@ Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
 decides when the user is reading; the core never infers it
 ([read-states.md](../../docs/protocol/read-states.md#how-akari-acks)).
 
+`mark_unread(channel_id, message_id)` (async) marks a channel unread from a message on, where
+`MessageActions.mark_unread` allows it (`InvalidRequest` otherwise, before asking). The badge
+and the read position move at once (`BadgeChanged`), and the call resolves on Discord's answer,
+which can take as long as Discord is unreachable: a host doesn't wait on it. An error means the
+read state already went back. `MarkOutcome.Replaced` instead of `Marked` means something later
+took the mark's place (an ack, another mark, another device, a READY): the store shows that,
+nothing failed, and the host takes back what it showed for the mark without an alert. `set_open_channels(channel_ids)` names the channels whose lists
+the host shows (the open channel and the thread beside it, read or not): a channel marked
+unread while it is open isn't read again, whatever `set_reading` names, until it leaves them,
+the user marks it read or writes there, or it is read on another device. Name every open list
+on each call, and none once the last one closes.
+
 ## Formatted messages
 
 `Message.formatted` is the content as Discord formats it (`FormattedText`), flat so it maps
@@ -246,16 +258,24 @@ and `view_thread`, all false for a message the store doesn't have. The rules are
 ([message-actions.md](../../docs/ui/message-actions.md)); a host asks when its bar or menu
 opens and decides nothing itself. No event reports a change: the answer moves with the
 message, its channel, the user's roles and the end of a timeout.
+`Store.message_link(channel_id, message_id)` is the link Copy Message Link copies
+(`https://discord.com/channels/{guild}/{channel}/{message}`, `@me` outside a guild), asked with
+the row's own IDs like the actions. A thread's starter row gives the link of the message it
+shows, in the parent channel, and the row's own, in the thread, while `starter_message` isn't
+`Loaded` (loading, gone or failed).
 
 A thread's starter row is asked about with the thread's ID and the row's, for `reactions` and
 for `message_actions` alike, and both answer for the message the row shows once
 `starter_message(thread_id)` is `Loaded`: that message's type, flags and author, and the
 permissions of the parent channel it is in, whatever the thread's archived or locked state
 (`view_thread` is false there, the row being in that thread). Until then both answer for the
-row itself. Requests (a reaction, a reply, a pin, a delete) never take the row's IDs: they go
-to the shown message, the `channel_id` and `id` of `starter_message`'s message. akari-core
-resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross
-yet.
+row itself. `mark_unread` alone is always the thread's: `Account.mark_unread` takes the
+thread's ID and the row's and marks the thread from its start. Requests for the shown message
+(a reaction, a reply, a pin, a delete) never take the row's IDs: they go to the `channel_id`
+and `id` of `starter_message`'s message, which a link to it names too. akari-core resolves any row
+the same way with `Store::shown_message(channel, row)`, which doesn't cross: AkariKit's rows
+hold their `starter_message`
+([message-actions.md](../../docs/ui/message-actions.md#a-threads-starter-row)).
 
 ## Events
 
@@ -281,8 +301,8 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel`, `set_reading`, `set_browsing`, `mark_read` and `mark_guilds_read` only
-  signal.
+  `view_channel`, `set_open_channels`, `set_reading`, `set_browsing`, `mark_read` and
+  `mark_guilds_read` only signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as

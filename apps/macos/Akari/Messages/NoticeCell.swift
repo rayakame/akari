@@ -26,8 +26,8 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     }
     var onLink: (URL) -> Void = { _ in }
     var onOpenThread: () -> Void = {}
-    // As a message's: asked when the menu opens, nil leaves "Create Thread" out.
-    var threadAction: () -> (() -> Void)? = { nil }
+    /// The message's menu, asked when it opens.
+    var menuItems: () -> [NSMenuItem] = { [] }
     private var message: Message?
     private var textBottom: NSLayoutConstraint?
     private var textAboveBox: NSLayoutConstraint?
@@ -124,14 +124,10 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     }
 
     func messageMenu(for event: NSEvent) -> NSMenu? {
-        guard box.contains(convert(event.locationInWindow, from: nil)) else {
+        guard message != nil, box.contains(convert(event.locationInWindow, from: nil)) else {
             return nil
         }
         return MessageMenu.menu(menuItems())
-    }
-
-    private func menuItems() -> [NSMenuItem] {
-        message.map { MessageMenu.items(for: $0, createThread: threadAction()) } ?? []
     }
 
     // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.

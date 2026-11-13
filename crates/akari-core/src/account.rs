@@ -9,7 +9,7 @@ use crate::error::TransportErrorKind;
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
-    MemberLists, PresenceStatus, SendError,
+    MemberLists, MessageAck, PresenceStatus, SendError,
 };
 use crate::media::{ImageError, ImageFile, ImageKey, ImageRequest, Images};
 use crate::model::{
@@ -24,7 +24,8 @@ use crate::state::{
     PageKey, StarterFetch, Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
-use acks::{AckSender, Pace, Refusal};
+pub use acks::MarkOutcome;
+use acks::{AckSender, Echo, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
 // Discord's limit for a thread's name, in code points, and the archive time its client picks
@@ -100,6 +101,9 @@ impl ThreadLocation {
         }
     }
 }
+
+// The official client's `location` when Mark Unread joins a thread.
+const MARK_UNREAD_LOCATION: &str = "Mark%20Unread";
 
 // The official client turns a name's line breaks into spaces as it is typed.
 fn one_line(name: &str) -> String {
@@ -642,13 +646,48 @@ impl Shared {
         }
     }
 
-    // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
+    fn shows(&self, ack: &MessageAck) -> bool {
+        let stored = self.store.read_state(ack.channel_id);
+        stored.and_then(|state| state.acked) == Some(ack.message_id.cast())
+    }
+
+    // Without the gate but for an ack: the pump forgets and swaps itself, so its own acks
+    // can't come between.
     fn dispatched(self: &Arc<Self>, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
-        if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
-            && ack.manual
-            && ack.ack_type == 0
-        {
-            self.acks.forget(ack.channel_id);
+        let ack = match &event {
+            ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) if ack.ack_type == 0 => {
+                Some(ack)
+            }
+            _ => None,
+        };
+        // So a local ack or a Mark Unread can't come between the check and the write.
+        let _gate = ack.map(|_| self.acks.gate());
+        if let Some(ack) = ack {
+            if ack.manual {
+                let echo = self.acks.echo(ack.channel_id, ack.message_id.cast());
+                // The store took the mark when it was made: written again, the echo would undo a
+                // later local ack or a mention counted since.
+                if let Echo::Own { superseded } = echo
+                    && (superseded || self.shows(ack))
+                {
+                    tracing::debug!(
+                        target: "akari_core::acks",
+                        channel_id = ack.channel_id.get(),
+                        superseded,
+                        "the mark's own echo left out"
+                    );
+                    return;
+                }
+            } else if self.acks.marking(ack.channel_id) {
+                // The echo of an ack sent before the mark would show the channel read until
+                // the mark's own echo.
+                tracing::debug!(
+                    target: "akari_core::acks",
+                    channel_id = ack.channel_id.get(),
+                    "ack from Discord left out: the channel is being marked unread"
+                );
+                return;
+            }
         }
         let starter = match &event {
             ConnectionEvent::Dispatch(DispatchEvent::MessageCreate(message))
@@ -934,6 +973,58 @@ impl Shared {
             .map_or_else(|| self.store.now(), Timestamp::from_unix_millis);
         self.store.set_own_membership(thread, join.then_some(now));
         Ok(())
+    }
+
+    async fn mark_unread(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<MarkOutcome, RequestError> {
+        self.rest.usable()?;
+        let needs = self
+            .store
+            .unread_needs(channel, message)
+            .ok_or(RequestError::InvalidRequest)?;
+        if needs.unarchive {
+            let opened = self.rest.unarchive_thread(channel).await;
+            if let Err(err) = &opened {
+                self.failed(err);
+            }
+            opened?;
+        }
+        if needs.join {
+            let joined = self
+                .rest
+                .thread_member(channel, true, MARK_UNREAD_LOCATION)
+                .await;
+            if let Err(err) = &joined {
+                self.failed(err);
+            }
+            joined?;
+            let now = self
+                .rest
+                .server_now_millis()
+                .map_or_else(|| self.store.now(), Timestamp::from_unix_millis);
+            self.store.set_own_membership(channel, Some(now));
+        }
+        let marked = {
+            let _gate = self.acks.gate();
+            let unread = self
+                .store
+                .mark_unread(channel, message)
+                .ok_or(RequestError::InvalidRequest)?;
+            tracing::debug!(
+                target: "akari_core::acks",
+                channel_id = channel.get(),
+                message_id = unread.position.get(),
+                mentions = unread.mentions,
+                "marked unread"
+            );
+            self.acks.want_unread(channel, unread)
+        };
+        let outcome = marked.await.unwrap_or(Err(RequestError::Closed));
+        // A 401 closes the queue, which only says it closed.
+        outcome.map_err(|err| self.rest.usable().err().unwrap_or(err))
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {
@@ -1433,6 +1524,14 @@ impl Account {
         self.shared.store.agree_to_age_restricted(guild);
     }
 
+    /// The channels whose message lists the host shows: the open channel and the thread beside
+    /// it, whether or not the user reads them right now. A channel marked unread while it is
+    /// open stays unread until it leaves these ([`Account::mark_unread`]); one that leaves also
+    /// stops being read. Name every open list on each call; an empty slice when none shows.
+    pub fn set_open_channels(&self, channels: &[ChannelId]) {
+        self.shared.store.set_open_channels(channels);
+    }
+
     /// The channels the user is reading at their newest messages, at most two (a channel and
     /// the thread beside it); further ones are ignored, and an empty slice reads none. Each is
     /// acked up to the newest message its list shows at the present, and again as that list
@@ -1452,6 +1551,22 @@ impl Account {
         if let Some(ack) = self.shared.store.mark_read(channel) {
             self.shared.acks.want(ack, Pace::Explicit);
         }
+    }
+
+    /// Marks the channel unread from `message` on, as the official client's Mark Unread; the
+    /// store has it at once. An open channel ([`Account::set_open_channels`]) isn't read again
+    /// until the user leaves it, marks it read or sends a message there. An archived
+    /// thread is opened and an unjoined one joined first. Resolves when Discord took the mark,
+    /// retried like every ack, or when something later replaced it
+    /// ([`MarkOutcome::Replaced`]: the store no longer shows the mark, and nothing failed); a
+    /// refusal puts the read state back and is the error. `InvalidRequest`, without a request,
+    /// where [`MessageActions::mark_unread`](crate::state::MessageActions) is false.
+    pub async fn mark_unread(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<MarkOutcome, RequestError> {
+        self.shared.mark_unread(channel, message).await
     }
 
     /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
@@ -2014,6 +2129,7 @@ impl Drop for Finish {
             .store
             .set_connection(ConnectionState::Closed { error });
         self.shared.store.stop_reading();
+        self.shared.store.set_open_channels(&[]);
         // close() does nothing once the gateway has ended, so it runs on every path. After the
         // state, so it sees why the session ended.
         self.shared.close();

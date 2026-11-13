@@ -32,7 +32,9 @@ app can mirror it and Discord users can switch with zero relearning.
 - [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
   system messages, loading history, the channel's start, jump to present, edits and deletes
 - [message-actions.md](message-actions.md): what the user may do with a message: reply, edit,
-  delete, pin, react, mark unread, copy its link, create or view its thread, and by which rule
+  delete, pin, react, mark unread, copy its link, create or view its thread, and by which rule;
+  the hover bar (size, place, buttons in order, with Shift), the message menu's groups, Mark
+  Unread and Option-click
 - [markdown.md](markdown.md): message formatting: Discord's markdown, mentions and tokens, and
   the cases still to observe
 - [images.md](images.md): avatars, icons and the other pictures: sizes per place, sharpness,

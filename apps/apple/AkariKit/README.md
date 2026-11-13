@@ -149,6 +149,31 @@ changes, `placeholder(for:)` what an empty newest message shows. `membershipItem
 thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
 waits in `membershipError`, in Discord's words, until `dismissMembershipError()`.
+`messageActions(for:copy:)` gives a list its `MessageActionsModel`: what a message's hover bar
+(`bar(for:shift:)`, the longer row with Shift held) and menu (`menu(for:)`, in groups) list, as
+`MessageActionItem`s (the action, the official client's words, an SF Symbol, enabled, destructive)
+in the official client's order, and `perform(_:on:shift:)` for a click. The orders are three
+tables in the model (`barOrder`, `shiftBarOrder`, `menuOrder`) that name every action, also
+those whose feature isn't built; one switch (`Offer.has`) says which show, from `Store.messageActions`, asked
+every time since nothing announces a change. Today: Copy Text, Copy Message Link (the link is
+the core's, `Store.messageLink`), Mark Unread, Create Thread, View Thread, and Retry and Delete
+for a failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
+new messages line over the message at once, asks `Account.markUnread`, and on a refusal puts the
+line back and leaves one `messageActionFailure` on the session, in Akari's words, until
+`dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
+ack, another mark, another device or a READY took its place) puts the line back without an
+alert, unless a later mark has the line by then. The line goes back to where Discord has it: the
+newest mark it took (`MarkOutcome.marked`), else the position from before the unanswered marks,
+whatever order the answers come in.
+A thread's starter row acts on the parent's message, but marks the thread unread.
+The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
+channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
+every way a list goes says so: a channel marked unread stays unread until its list goes, whatever
+`reading` does meanwhile (scrolling, the window losing key, a reconnect). A navigation that
+changes the lists in steps (another channel or place, a thread from beside a forum to full view,
+a restore, a batch that closes a channel) names them once, when it is done, and the lists being
+read after them: a list that stays open through it is never left out on the way, so it keeps its
+mark. `close()` names none.
 `threadsButtonParent` is the channel the header's Threads button browses (a text or
 announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
 its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or

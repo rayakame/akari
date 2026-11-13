@@ -66,6 +66,187 @@ struct NewMessagesLineTests {
         #expect(timeline(model).shape == ["day", "+1", "2", "new", "3", "4"])
     }
 
+    // Mark Unread: the line stands over the chosen message at once, the user's own too.
+    @Test
+    func aMarkPutsTheLineOverTheChosenMessage() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        #expect(model.newMessagesLine == nil)
+
+        _ = model.markUnread(from: id(2))
+        #expect(model.newMessagesLine == id(2))
+        #expect(timeline(model).shape == ["day", "+1", "new", "2", "+3", "+4"])
+
+        _ = model.markUnread(from: id(3))
+        #expect(model.newMessagesLine == id(3))
+
+        model.endNewMessagesLine()
+        #expect(model.newMessagesLine == nil)
+    }
+
+    @Test
+    func aRefusedMarkPutsTheLineBack() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        #expect(model.newMessagesLine == id(3))
+
+        let answer = model.markUnread(from: id(1))
+        #expect(model.newMessagesLine == id(1))
+        answer(false)
+        #expect(model.newMessagesLine == id(3))
+
+        // A second mark since isn't undone by the first one's refusal.
+        let first = model.markUnread(from: id(1))
+        _ = model.markUnread(from: id(4))
+        first(false)
+        #expect(model.newMessagesLine == id(4))
+    }
+
+    @Test
+    func aMarkDiscordTookKeepsItsLine() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        model.markUnread(from: id(1))(true)
+
+        #expect(model.newMessagesLine == id(1))
+    }
+
+    @Test
+    func aRefusalAfterMarkingReadChangesNothing() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        let answer = model.markUnread(from: id(1))
+        model.endNewMessagesLine()
+        answer(false)
+
+        #expect(model.newMessagesLine == nil)
+    }
+
+    @Test
+    func anAnswerAfterMarkingReadChangesNothing() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        let first = model.markUnread(from: id(1))
+        let second = model.markUnread(from: id(2))
+        second(false)
+        model.endNewMessagesLine()
+        first(true)
+
+        #expect(model.newMessagesLine == nil)
+    }
+
+    // The first mark stood over the user's own message, where no line starts by itself.
+    @Test
+    func aRefusedSecondMarkGoesBackToTheFirstOverAnOwnMessage() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        model.markUnread(from: id(3))(true)
+
+        model.markUnread(from: id(2))(false)
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    // Discord never had the first mark: the line it has is the one from before both.
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aRefusedSecondMarkGoesBackToBeforeAFirstDiscordDidntTake(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(2))]
+        #expect(model.newMessagesLine == id(2))
+
+        for mark in order {
+            answers[mark]?(false)
+        }
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aRefusedSecondMarkGoesBackToAFirstDiscordTook(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(2))]
+
+        for mark in order {
+            answers[mark]?(mark == 1)
+        }
+
+        #expect(model.newMessagesLine == id(1))
+    }
+
+    @Test(arguments: [[1, 2], [2, 1]])
+    func aSecondMarkDiscordTookKeepsItsLineWhateverTheFirstsAnswer(order: [Int]) {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        let answers = [1: model.markUnread(from: id(1)), 2: model.markUnread(from: id(4))]
+
+        for mark in order {
+            answers[mark]?(true)
+        }
+
+        #expect(model.newMessagesLine == id(4))
+    }
+
+    // Three marks: the third's refusal goes back to the second, the newest Discord took.
+    @Test
+    func aRefusalGoesBackToTheNewestMarkDiscordTook() {
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        let first = model.markUnread(from: id(1))
+        let second = model.markUnread(from: id(2))
+        let third = model.markUnread(from: id(3))
+
+        second(true)
+        first(true)
+        third(false)
+
+        #expect(model.newMessagesLine == id(2))
+    }
+
+    @Test
+    func aMarkAfterARefusedOneIsTakenBackToBeforeBoth() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        model.markUnread(from: id(1))(false)
+
+        model.markUnread(from: id(2))(false)
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    // Read on another device up to the marked message: the next line isn't over an own message.
+    @Test
+    func afterAMarkTheLineStillSkipsOtherOwnMessages() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        _ = model.markUnread(from: id(2))
+
+        store.update { [here] in $0.readStates[here] = readState(2) }
+        model.newSession()
+
+        #expect(model.newMessagesLine == id(4))
+    }
+
+    // The list opened before the store had a read state; the cache brings one after the mark.
+    @Test
+    func aRestoredBatchAfterAMarkKeepsTheLine() {
+        store.update { [here] in $0.windows[here] = window([1, 2, 3, 4]) }
+        let model = makeModel()
+        _ = model.markUnread(from: id(2))
+
+        store.update { [here] in $0.readStates[here] = readState(4) }
+        model.apply(EventBatch([.restored, .messagesRefreshed(channelId: here)]))
+
+        #expect(model.newMessagesLine == id(2))
+    }
+
     @Test
     func theLineUsesTheReadPositionFromBeforeTheAck() async {
         shown([1, 2, 3, 4], readUpTo: 2)

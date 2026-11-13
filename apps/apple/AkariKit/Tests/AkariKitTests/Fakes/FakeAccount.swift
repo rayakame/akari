@@ -119,11 +119,27 @@ final class FakeAccount: Account, @unchecked Sendable {
         return link
     }
 
+    let openCalls = Locked<[[ChannelId]]>([])
+    // Like akari-core: a channel marked unread while its list is open is held, and reading
+    // doesn't read it, until it leaves the open ones or is marked read.
+    let held = Locked<Set<ChannelId>>([])
+
+    // "open" and "reading", in the order the session told them.
+    let listCalls = Locked<[String]>([])
+
+    override func setOpenChannels(channelIds: [ChannelId]) {
+        listCalls.withLock { $0.append("open") }
+        openCalls.withLock { $0.append(channelIds) }
+        held.withLock { $0.formIntersection(channelIds) }
+    }
+
     override func setReading(channelIds: [ChannelId]) {
+        listCalls.withLock { $0.append("reading") }
         readingCalls.withLock { $0.append(channelIds) }
         if let state = readStateAfterReading.current {
+            let held = held.current
             fakeStore.update { store in
-                for channelId in channelIds {
+                for channelId in channelIds where !held.contains(channelId) {
                     store.readStates[channelId] = state
                 }
             }
@@ -132,9 +148,35 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
+        held.withLock { _ = $0.remove(channelId) }
         if let state = readStateAfterMarkRead.current {
             fakeStore.update { $0.readStates[channelId] = state }
         }
+    }
+
+    let markUnreadError = Locked<RequestError?>(nil)
+    let markUnreadOutcome = Locked(MarkOutcome.marked)
+
+    private let heldMarks = Locked<[MessageId: AsyncQueue<Result<MarkOutcome, RequestError>>]>([:])
+
+    // A mark from `message` waits for what is sent here.
+    func holdMark(from message: MessageId) -> AsyncQueue<Result<MarkOutcome, RequestError>> {
+        let answers = AsyncQueue<Result<MarkOutcome, RequestError>>()
+        heldMarks.withLock { $0[message] = answers }
+        return answers
+    }
+
+    override func markUnread(channelId: ChannelId, messageId: MessageId) async throws -> MarkOutcome {
+        log.append(.markUnread(channelId, messageId))
+        let answer = await heldMarks.current[messageId]?.next()
+        if let error = markUnreadError.current, answer == nil {
+            throw error
+        }
+        let outcome = try answer?.get() ?? markUnreadOutcome.current
+        if outcome == .marked, openCalls.current.last?.contains(channelId) == true {
+            held.withLock { _ = $0.insert(channelId) }
+        }
+        return outcome
     }
 
     override func markGuildsRead(guildIds: [GuildId]) {

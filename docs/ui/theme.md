@@ -32,6 +32,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `interactiveText` | icons and buttons at rest | `#abacb2` | `#595a63` |
 | `interactiveTextActive` | hovered and selected names | `#fbfbfb` | `#28282d` |
 | `hoverBackground` | hovered rows and messages, the background of server initials | `#97979f` at 12% | `#97979f` at 12% |
+| `interactiveBackgroundActive` | a pressed button of the hover bar | `#97979f` at 16% | `#97979f` at 16% |
 | `selectedBackground` | the selected row | `#97979f` at 20% | `#97979f` at 24% |
 | `inputBackground` | text fields | `#000000` at 12% | `#000000` at 2% |
 | `danger` | error messages, e.g. above the login button | `#f23f43` | `#da373c` |

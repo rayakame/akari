@@ -7,7 +7,7 @@ use crate::contents::Contents;
 use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::{
-    EmojiSource, ForumView, LoadReport, SourceGuild, StickerDetails, StickerPack,
+    EmojiSource, ForumView, LoadReport, MarkOutcome, SourceGuild, StickerDetails, StickerPack,
 };
 use crate::runtime::run;
 use crate::store::Store;
@@ -108,6 +108,13 @@ impl Account {
         self.core.view_channel(channel_id);
     }
 
+    /// The channels whose message lists the host shows (the open channel and the thread beside
+    /// it), read or not; an empty list when none shows. A channel marked unread while it is open
+    /// stays unread until it leaves these, and one that leaves stops being read.
+    pub fn set_open_channels(&self, channel_ids: Vec<ChannelId>) {
+        self.core.set_open_channels(&channel_ids);
+    }
+
     /// The channels the user is reading at their newest messages, at most two (a channel and
     /// the thread beside it); further ones are ignored, and an empty list reads none. Each is
     /// acked up to the newest message its list shows at the present, and again as that list
@@ -122,6 +129,24 @@ impl Account {
     /// Marks the channel read now (Escape, the context menu).
     pub fn mark_read(&self, channel_id: ChannelId) {
         self.core.mark_read(channel_id);
+    }
+
+    /// Marks the channel unread from the message on (a message's Mark Unread, Option-click): the
+    /// badge changes at once, and an error means it already went back. `Replaced` when something
+    /// later took the mark's place before it counted: the store shows that instead, and nothing
+    /// failed. `InvalidRequest`, before asking, where `MessageActions.mark_unread` is false.
+    pub async fn mark_unread(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+    ) -> Result<MarkOutcome, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.mark_unread(channel_id, message_id).await
+        })
+        .await
+        .map(Into::into)
+        .map_err(Into::into)
     }
 
     /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's

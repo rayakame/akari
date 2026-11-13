@@ -58,9 +58,8 @@ struct MessageArea: View {
     // A thread and the channel whose line names it.
     let openThread: (ChannelId, ChannelId) -> Void
     var openThreads: (ChannelId) -> Void = { _ in }
-    // A message of this list that can start a thread, and its "Create Thread".
-    var canStartThread: (MessageId) -> Bool = { _ in false }
-    var createThread: (MessageId) -> Void = { _ in }
+    // What this list's messages offer in their hover bars and menus.
+    var messageActions: MessageActionsModel?
     // A clicked emoji's or sticker's popout.
     var expressions: (ExpressionTarget) -> ExpressionPopoutModel? = { _ in nil }
     // A forum post's Follow or Following.
@@ -98,8 +97,8 @@ struct MessageArea: View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
             openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
-            escapeAll: escape, canStartThread: canStartThread, startThread: createThread,
-            expressions: expressions, followPost: followPost)
+            escapeAll: escape, messageActions: messageActions, expressions: expressions,
+            followPost: followPost)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -180,8 +179,7 @@ final class MessageListBridge: MessageListActions {
     let guild: (GuildId) -> Void
     let serverRead: () -> Void
     let escapeAll: (() -> Void)?
-    let canStartThread: (MessageId) -> Bool
-    let startThread: (MessageId) -> Void
+    let messageActions: MessageActionsModel?
     let expressions: (ExpressionTarget) -> ExpressionPopoutModel?
     let follow: (Bool) -> Void
 
@@ -193,8 +191,7 @@ final class MessageListBridge: MessageListActions {
         openGuild: @escaping (GuildId) -> Void = { _ in },
         markServerRead: @escaping () -> Void,
         escapeAll: (() -> Void)? = nil,
-        canStartThread: @escaping (MessageId) -> Bool = { _ in false },
-        startThread: @escaping (MessageId) -> Void = { _ in },
+        messageActions: MessageActionsModel? = nil,
         expressions: @escaping (ExpressionTarget) -> ExpressionPopoutModel? = { _ in nil },
         followPost: @escaping (Bool) -> Void = { _ in }
     ) {
@@ -207,8 +204,7 @@ final class MessageListBridge: MessageListActions {
         guild = openGuild
         serverRead = markServerRead
         self.escapeAll = escapeAll
-        self.canStartThread = canStartThread
-        self.startThread = startThread
+        self.messageActions = messageActions
         self.expressions = expressions
         follow = followPost
     }
@@ -351,11 +347,19 @@ final class MessageListBridge: MessageListActions {
         links.follow(url, masked: masked)
     }
 
-    func canCreateThread(from message: MessageId) -> Bool {
-        canStartThread(message)
+    func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] {
+        messageActions?.bar(for: row, shift: shift) ?? []
     }
 
-    func createThread(from message: MessageId) {
-        startThread(message)
+    func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] {
+        messageActions?.menu(for: row) ?? []
+    }
+
+    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
+        messageActions?.perform(action, on: row, shift: shift)
+    }
+
+    func markUnread(from row: MessageListModel.Row) {
+        Task { [messageActions] in await messageActions?.markUnread(from: row) }
     }
 }

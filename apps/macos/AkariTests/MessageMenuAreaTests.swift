@@ -355,7 +355,8 @@ extension SessionScreenTests {
             for point in [avatarCenter, header, blank] {
                 let menu = try MessageMenuAreaTests.menu(
                     click, at: cell.convert(point, to: nil), in: window)
-                #expect(menu?.items.map(\.title).contains("Copy Text") == true, "at \(point)")
+                let titles = menu?.items.map(\.title) ?? []
+                #expect(titles.suffix(3) == ["Copy Text", "Mark Unread", "Copy Message Link"], "at \(point)")
             }
         }
     }

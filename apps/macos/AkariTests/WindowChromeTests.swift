@@ -99,6 +99,9 @@ nonisolated private final class EmptyAccount: Account, @unchecked Sendable {
     }
 
     override func setReading(channelIds: [ChannelId]) {}
+
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {}
     override func markGuildsRead(guildIds: [GuildId]) {}
 }
@@ -120,6 +123,10 @@ nonisolated private final class EmptyStore: Store, @unchecked Sendable {
     // Nothing to create here.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }

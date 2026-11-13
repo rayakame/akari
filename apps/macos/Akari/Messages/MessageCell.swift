@@ -85,8 +85,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
-    // What "Create Thread" does for this message, asked when the menu opens; nil leaves it out.
-    var threadAction: () -> (() -> Void)? = { nil }
+    /// The message's menu, asked when it opens.
+    var menuItems: () -> [NSMenuItem] = { [] }
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
@@ -179,10 +179,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     }
 
     func messageMenu(for event: NSEvent) -> NSMenu? {
-        guard let message, box.contains(convert(event.locationInWindow, from: nil)) else {
+        guard message != nil, box.contains(convert(event.locationInWindow, from: nil)) else {
             return nil
         }
-        return MessageMenu.menu(MessageMenu.items(for: message, createThread: threadAction()))
+        return MessageMenu.menu(menuItems())
     }
 
     // The sizing cell measures the body instead of laying it out in its text view.
@@ -548,12 +548,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         content.onLink = { [weak self] url in self?.onLink(url) }
         content.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
         content.detectsExpressions = expressionsEnabled
-        content.messageMenu = { [weak self] in
-            guard let self, let message else {
-                return []
-            }
-            return MessageMenu.items(for: message, createThread: threadAction())
-        }
+        content.messageMenu = { [weak self] in self?.menuItems() ?? [] }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         avatar.placeholder = .disc
         avatar.cornerRadius = Self.avatarSize / 2

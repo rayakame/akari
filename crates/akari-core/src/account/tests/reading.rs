@@ -286,6 +286,21 @@ async fn switching_channels_stops_the_old_one() {
     );
 }
 
+// The host can name what it reads before it names its lists: only an open list can be left.
+#[tokio::test]
+async fn naming_the_open_lists_keeps_reading_a_channel_that_was_never_open() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    online.account.set_reading(&[general()]);
+
+    online.account.set_open_channels(&[id(THREAD)]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+}
+
 const THREAD_MESSAGES: &str = "/api/v9/channels/300000000000000020/messages";
 
 fn thread_message(seq: u64, message_id: u64) -> Value {
@@ -394,12 +409,13 @@ async fn pacing_stays_per_channel() {
 }
 
 // The thread scrolled away and back: the channel was read all along, so marking it unread on
-// another device meanwhile stands until it grows.
+// another device meanwhile stands, also when it grows, until the user leaves it.
 #[tokio::test]
 async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
     showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_open_channels(&[general(), id(THREAD)]);
     online.account.set_reading(&[general(), id(THREAD)]);
     online
         .connection
@@ -420,6 +436,11 @@ async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
     assert!(badge(&online.account, GENERAL).unread);
     online.connection.send(message(4, NEWEST + 1)).await;
     sync(&mut online.connection, &online.subscription, 5).await;
+    assert_eq!(handed(&online.account), []);
+
+    online.account.set_open_channels(&[id(THREAD)]);
+    online.account.set_open_channels(&[general(), id(THREAD)]);
+    online.account.set_reading(&[general(), id(THREAD)]);
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
 }
 
@@ -1308,3 +1329,5 @@ async fn the_started_a_thread_line_is_read_and_acked_like_a_message() {
     );
     assert!(ack_body(&online).await.get("flags").is_none());
 }
+
+mod mark_unread;

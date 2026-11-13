@@ -277,6 +277,23 @@ final class ExpressionTests {
         try await eventually { self.list.controller.hoverCard.shown?.title == ":grinning:" }
     }
 
+    // The pointer rests on the emoji while the message's menu opens over it.
+    @Test
+    func theMessagesMenuOpeningHidesTheCard() async throws {
+        show("hi <:wave:5> there")
+        let view = try text()
+        list.pointer.location = try point(at: 3, in: view)
+        list.controller.pointerMoved()
+        try await eventually { self.list.controller.hoverCard.shown != nil }
+        let menu = try #require(try list.cell(of: 1).menu(for: try list.rightClick(on: 1)))
+
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+
+        #expect(list.controller.hoverCard.shown == nil)
+        #expect(list.controller.hoverCard.panel?.isVisible != true)
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+    }
+
     // A click opens the popout beside the item and hides the card; the server row of a server
     // the user is in opens it; Escape closes the popout.
     @Test

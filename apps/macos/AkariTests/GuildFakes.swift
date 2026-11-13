@@ -41,6 +41,8 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
 
+    override func setOpenChannels(channelIds: [ChannelId]) {}
+
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
     }
@@ -73,6 +75,10 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
     // Nothing to create here.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
