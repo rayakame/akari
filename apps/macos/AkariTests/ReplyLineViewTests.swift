@@ -171,6 +171,26 @@ struct ReplyLineViewTests {
         #expect(cell.replyLine.content.isEnabled && cell.spine.isEnabled)
     }
 
+    // A failed reply outlives its channel; its line has nowhere to go.
+    @Test
+    func aFailedReplyWhoseChannelIsGoneHasItsWordsAndNoJump() throws {
+        let list = list { list in
+            let failed = replyRow(5, at: list.noon, .notLoaded, delivery: .failed)
+            let line = ReplyLine(
+                channelId: failed.message.channelId, messageId: MessageId(rawValue: 1),
+                target: .notLoaded, mentionsAuthor: false, authorName: nil, channelKnown: false)
+            return [
+                MessageListModel.Row(
+                    id: failed.id, message: failed.message, authorName: failed.authorName,
+                    reply: line)
+            ]
+        }
+        let cell = try cell(5, in: list)
+
+        #expect(cell.replyLine.content.shownText.string == "Message could not be loaded")
+        #expect(!cell.replyLine.content.isEnabled && !cell.spine.isEnabled)
+    }
+
     @Test
     func aLongTextIsCutOnOneLineAndKeepsItsSymbol() throws {
         let long = String(repeating: "a long original message ", count: 12)
