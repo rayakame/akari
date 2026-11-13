@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use super::{Account, Shared};
 use crate::RequestError;
 use crate::model::{ChannelId, MessageId, UserId};
-use crate::state::ReactionEmoji;
+use crate::state::{ReactionEmoji, User};
 
 const TOO_MANY_REACTIONS: u32 = 30010;
 const REACTION_BLOCKED: u32 = 90001;
@@ -403,5 +403,54 @@ impl Account {
         emoji: Option<&ReactionEmoji>,
     ) -> Result<(), ReactionError> {
         self.shared.moderate(channel, message, emoji, None).await
+    }
+}
+
+/// Discord's page of a reaction's users, and the most a request may ask for.
+pub const REACTORS_PAGE: u8 = 100;
+
+/// A page of the users who reacted with an emoji, in Discord's order.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ReactorsPage {
+    pub users: Vec<Arc<User>>,
+    /// Discord filled the page: ask on with the last user's ID as `after`.
+    pub has_more: bool,
+}
+
+impl Account {
+    /// The users who reacted with `emoji`, up to `limit` (1 to [`REACTORS_PAGE`]; the official
+    /// client asks 100 for its list and 3 for a reaction's tooltip), those after the user
+    /// `after`. Nothing is kept: each call asks Discord.
+    pub async fn reactors(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        kind: ReactionKind,
+        after: Option<UserId>,
+        limit: u8,
+    ) -> Result<ReactorsPage, RequestError> {
+        let shared = &self.shared;
+        shared.rest.usable()?;
+        let limit = limit.clamp(1, REACTORS_PAGE);
+        let named = shared.store.reaction_emoji(channel, message, emoji);
+        let (channel, message) = shared
+            .store
+            .shown_message(channel, message)
+            .unwrap_or((channel, message));
+        let burst = kind == ReactionKind::Burst;
+        let page = shared
+            .rest
+            .reactors(channel, message, &named, burst, after, limit)
+            .await;
+        if let Err(err) = &page {
+            shared.failed(err);
+        }
+        let page = page?;
+        Ok(ReactorsPage {
+            has_more: page.received >= usize::from(limit),
+            users: shared.store.known_users(page.users),
+        })
     }
 }
