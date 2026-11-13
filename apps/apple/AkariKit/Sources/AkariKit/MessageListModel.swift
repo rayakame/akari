@@ -330,6 +330,10 @@ public final class MessageListModel {
             jumpOnOpen = nil
             account.viewChannel(channelId: channelId)
             await jump(to: target)
+            // A jump that didn't land leaves a list without rows nothing else would fill.
+            if !hasMessages, !retired, activeLoads[lastPlacing] == nil {
+                await load(.latest)
+            }
         } else if hasMessages && !isStale {
             account.supersedeAroundLoads(channelId: channelId)
             account.viewChannel(channelId: channelId)
