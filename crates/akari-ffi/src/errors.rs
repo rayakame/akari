@@ -328,6 +328,51 @@ impl From<akari_core::CreateThreadError> for CreateThreadError {
     }
 }
 
+/// Why a reaction wasn't added or removed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum ReactionError {
+    /// The message has as many different reactions as it may: the official client's "We
+    /// appreciate the enthusiasm but..." alert.
+    #[error("the message has too many reactions")]
+    TooMany,
+    /// The message's author blocked the user; the official client shakes its window.
+    #[error("the message's author blocked the user")]
+    Blocked,
+    /// Discord refused for a missing permission or access, or a timeout.
+    #[error("reacting isn't allowed here")]
+    Forbidden,
+    /// Discord doesn't know the emoji, or the user may not use it.
+    #[error("Discord doesn't know the emoji")]
+    UnknownEmoji,
+    /// Still rate limited after the one retry.
+    #[error("rate limited by Discord")]
+    RateLimited { retry_after: Option<Duration> },
+    /// Anything else, also a refusal before asking (`InvalidRequest`).
+    #[error("{error}")]
+    Request { error: RequestError },
+}
+
+impl From<akari_core::ReactionError> for ReactionError {
+    fn from(err: akari_core::ReactionError) -> Self {
+        use akari_core::ReactionError as E;
+
+        match err {
+            E::TooMany => Self::TooMany,
+            E::Blocked => Self::Blocked,
+            E::Forbidden => Self::Forbidden,
+            E::UnknownEmoji => Self::UnknownEmoji,
+            E::RateLimited { retry_after } => Self::RateLimited { retry_after },
+            E::Request(error) => Self::Request {
+                error: error.into(),
+            },
+            _ => Self::Request {
+                error: RequestError::UnexpectedResponse,
+            },
+        }
+    }
+}
+
 /// A request on behalf of an account that Discord didn't fulfil.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 #[uniffi::export(Display)]
