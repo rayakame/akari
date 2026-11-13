@@ -62,7 +62,7 @@ struct ReactionLayoutTests {
 
     @Test
     func aPillWiderThanTheColumnHasALineOfItsOwn() {
-        let frames = ReactionRowView.frames([52, 88, 52], width: 60)
+        let frames = ReactionRowView.frames([52, 88, 52], width: 40)
 
         #expect(frames.map(\.minY) == [1, 35, 69])
         #expect(frames.map(\.minX) == [0, 0, 0])

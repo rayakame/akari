@@ -69,6 +69,25 @@ struct ReactionListTests {
     }
 
     @Test
+    func underAStickerTheReactionsStandTwoLower() throws {
+        let sticker = row(2, by: ray, at: list.noon + 10, content: "second", stickers: ["wave"])
+        list.show([row(1, by: ray, at: list.noon, content: "first"), sticker])
+        let plain = rowHeight(2)
+
+        list.show([
+            row(1, by: ray, at: list.noon, content: "first"), sticker.reacting(reactions(pill("👍"))),
+        ])
+
+        // The stack's 2, the 2 that make Discord's 4 between accessories, and the row's 33.
+        #expect(rowHeight(2) == plain + 37)
+        let cell = try cell(2)
+        let first = try pills(2).pills[0]
+        let frame = cell.convert(first.bounds, from: first)
+        let top = cell.isFlipped ? frame.maxY : cell.bounds.height - frame.minY
+        #expect(cell.bounds.height - top == 3)
+    }
+
+    @Test
     func aMessageWithoutReactionsHasNoRow() throws {
         list.show(rows(nil))
 
@@ -355,6 +374,7 @@ struct ReactionListTests {
         let cell = try #require(try list.cell(of: 5) as? NoticeCell)
         #expect(cell === before)
         #expect(rowHeight(5) == plain + 35)
+        #expect(abs(cell.fittingSize.height - rowHeight(5)) < 0.5, "the pills stack under the line")
         let shown = try #require(cell.reactions)
         shown.layoutSubtreeIfNeeded()
         #expect(shown.pills.map(\.countText) == ["4"])
@@ -472,8 +492,9 @@ struct ReactionBarTests {
         #expect(list.hovered == [2])
         #expect(list.controller.cursor(at: try #require(list.pointer.location)) == .pointingHand)
 
-        try list.hover(1)
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: list.bar.quickButtons[1]))
         #expect(!button.isHovered)
+        #expect(list.bar.quickButtons[1].isHovered)
     }
 
     @Test
