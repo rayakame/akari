@@ -485,6 +485,9 @@ kept change is put only over the pages whose load was running when it came, so t
 overlap never apply it twice. A reaction to the message a thread started from, while the thread's page
 loads, isn't replayed onto the copy that page brings.
 
+The user's own click changes the store through these same rules before Discord is asked, and a
+refusal undoes it ([reactions.md](reactions.md#the-users-own-reaction)).
+
 `akari-cli read` and `tail` print each message's reactions under it (emoji, count, `*` for
 the user's own, the super reactions among them) and what a reply answers, and `tail` prints
 every `MessageReactionsChanged` and `ReplyTargetChanged` of its channel as a line of its own.

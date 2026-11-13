@@ -403,7 +403,7 @@ emoji itself, exactly as picked (`❤️` with its variation selector is another
 Discord (`ReactionLocation`: `InlineButton` for a pill or the row's add button, `HoverBar`,
 `ContextMenu`, `Picker`, `ForumToolbar`, `Message`).
 
-Both are optimistic. The store has the change before the call returns to the runtime, on
+Both are optimistic. The store has the change at once, before Discord is asked, on
 every copy of the message, with `MessageReactionsChanged` (and `PostPreviewChanged` for a
 post's first message); Discord's echo changes nothing. A refusal puts back what Discord had
 and is the error, so a host shows its alert and reads nothing again by hand. The calls can
@@ -439,7 +439,7 @@ and `has_more` when Discord filled the page; the next page is asked with the las
 tooltip. Nothing is cached in the core and no event keeps a page current: a host that keeps
 the tooltip's three names drops them on `MessageReactionsChanged` for that message. A member's
 nickname isn't in the answer; names are found as for a message's author
-([messages.md](../../docs/protocol/messages.md#reactions)).
+([reactions.md](../../docs/protocol/reactions.md)).
 
 ## Jumps
 
