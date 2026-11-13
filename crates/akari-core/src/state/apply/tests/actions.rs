@@ -449,6 +449,31 @@ fn a_held_reply_is_sent_by_the_channels_permissions_as_they_are() {
 }
 
 #[test]
+fn replying_in_an_archived_thread_follows_what_a_send_there_would_do() {
+    let cases: Vec<(&str, State, bool)> = vec![
+        ("archived", member(MEMBER, archived(false)), true),
+        (
+            "archived, no send in threads",
+            member(MEMBER & !IN_THREADS, archived(false)),
+            false,
+        ),
+        ("archived and locked", member(MEMBER, archived(true)), false),
+        (
+            "archived and locked, moderator",
+            member(MEMBER | MANAGE_THREADS, archived(true)),
+            true,
+        ),
+    ];
+    for (name, state, expected) in cases {
+        assert_eq!(
+            actions(state, sent(THREAD, MIRA, 0)).reply,
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn only_discords_replyable_types_take_a_reply() {
     for kind in 0..=70 {
         assert_eq!(
