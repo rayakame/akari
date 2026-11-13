@@ -1340,6 +1340,7 @@ pub(super) struct DisplayRow {
     inline_embed_media: bool,
     gif_auto_play: bool,
     render_embeds: bool,
+    render_reactions: bool,
     animate_emoji: bool,
     animate_stickers: u8,
     explicit_content_filter: u8,
@@ -1390,6 +1391,7 @@ impl From<&DisplaySettings> for DisplayRow {
             inline_embed_media: display.inline_embed_media,
             gif_auto_play: display.gif_auto_play,
             render_embeds: display.render_embeds,
+            render_reactions: display.render_reactions,
             animate_emoji: display.animate_emoji,
             animate_stickers: match display.animate_stickers {
                 StickerAnimation::OnInteraction => 1,
@@ -1421,6 +1423,7 @@ impl From<DisplayRow> for DisplaySettings {
             inline_embed_media: row.inline_embed_media,
             gif_auto_play: row.gif_auto_play,
             render_embeds: row.render_embeds,
+            render_reactions: row.render_reactions,
             animate_emoji: row.animate_emoji,
             animate_stickers: match row.animate_stickers {
                 1 => StickerAnimation::OnInteraction,
