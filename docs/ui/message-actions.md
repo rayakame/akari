@@ -114,6 +114,11 @@ item, so a mark from it marks the thread unread from its start, and the thread s
 may be marked (not an archived, locked one); the original's channel isn't touched. What the
 official client marks from this row wasn't read.*
 
+*Akari: the row offers no Reply. A reply written in the thread can't name a message of the
+parent channel (the composer only builds references into its own channel), so `reply`,
+`reply_pings` and `mention_toggle` are false on the row whatever the original allows. What the
+official client's Reply does on this row wasn't read.*
+
 Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
 gives the channel and ID of the message a row shows: the original's for such a starter row,
 the row's own for every other; a reaction, a pin or a delete from the row goes there, and Copy
