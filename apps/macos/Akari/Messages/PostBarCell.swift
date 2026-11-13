@@ -29,11 +29,31 @@ final class PostBarCell: NSTableCellView {
 
     var onFollow: ((_ follows: Bool) -> Void)?
     var onCopy: (() -> Void)?
+    /// A click on a pill or on the forum's default reaction.
+    var onReaction: (ReactionEmoji) -> Void = { _ in }
+    /// "React to Post", with the button.
+    var onAddReaction: (NSView) -> Void = { _ in }
+    /// "+N": all of the post's reactions.
+    var onMoreReactions: () -> Void = {}
+    var reactionTooltip: (ReactionPill) -> String? = { _ in nil }
+    var reactionsRoll: () -> Bool = { false }
+    var images: ImageCache? {
+        get { reactions.images }
+        set { reactions.images = newValue }
+    }
     // Injectable, so tests don't wait two seconds.
     var wait: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     let follow = PostBarButton()
     let copy = PostBarButton()
+    /// The first message's reactions at the bar's left, as many as fit.
+    let reactions = ReactionRowView()
+    /// "React to Post" while the post has no reactions, the symbol alone after.
+    let react = PostBarButton()
+    // The official client's button is 24 high in a bar of 32.
+    private static let reactHeight: CGFloat = 24
+    private static let reactGap: CGFloat = 4
+    private var pillsShown = 0
     private let inviteSymbol = NSImageView()
     private let inviteTitle = NSTextField(labelWithString: PostBar.inviteTitle)
     private let inviteText = NSTextField(labelWithString: PostBar.inviteText)
@@ -49,6 +69,14 @@ final class PostBarCell: NSTableCellView {
         follow.toolTip = PostBar.followTip
         copy.target = self
         copy.action = #selector(copyClicked)
+        react.target = self
+        react.action = #selector(reactClicked)
+        reactions.translatesAutoresizingMaskIntoConstraints = true
+        reactions.onPill = { [weak self] pill in self?.onReaction(pill.emoji) }
+        reactions.onOffer = { [weak self] emoji in self?.onReaction(emoji) }
+        reactions.onMore = { [weak self] in self?.onMoreReactions() }
+        reactions.tooltip = { [weak self] pill in self?.reactionTooltip(pill) }
+        reactions.rolls = { [weak self] in self?.reactionsRoll() ?? false }
         inviteSymbol.image = NSImage(
             systemSymbolName: "bubble.left.and.text.bubble.right.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 26, weight: .regular))
@@ -57,7 +85,7 @@ final class PostBarCell: NSTableCellView {
         inviteTitle.textColor = Palette.textStrong
         inviteText.font = TypeScale.postInviteText.nsFont
         inviteText.textColor = Palette.textDefault
-        for view in [follow, copy, inviteSymbol, inviteTitle, inviteText] as [NSView] {
+        for view in [reactions, react, follow, copy, inviteSymbol, inviteTitle, inviteText] as [NSView] {
             addSubview(view)
         }
         showCopy(copied: false)
@@ -86,7 +114,15 @@ final class PostBarCell: NSTableCellView {
             copied?.cancel()
             showCopy(copied: false)
         }
+        let samePost = bar.post == self.bar?.post
         self.bar = bar
+        showReactions(animated: samePost)
+        react.isHidden = !bar.reacts
+        react.show(
+            symbol: "face.smiling", title: bar.reactions.isEmpty ? ReactionWords.reactToPost : nil)
+        react.toolTip = bar.reactions.isEmpty ? nil : ReactionWords.add
+        react.setAccessibilityLabel(
+            bar.reactions.isEmpty ? ReactionWords.reactToPost : ReactionWords.add)
         under = Self.under(bar, hasReplies: hasReplies)
         follow.show(
             symbol: bar.following ? "checkmark" : "bell.fill",
@@ -104,6 +140,23 @@ final class PostBarCell: NSTableCellView {
         copy.toolTip = copied ? nil : PostBar.copyLink
         copy.setAccessibilityLabel(copied ? PostBar.copied : PostBar.copyLink)
         needsLayout = true
+    }
+
+    // As many pills as the official client's bar shows at this width, the rest behind "+N".
+    private func showReactions(animated: Bool) {
+        guard let bar else {
+            return
+        }
+        pillsShown = min(bar.reactions.count, PostBar.pillsShown(width: Double(bounds.width)))
+        let shown = Array(bar.reactions.prefix(pillsShown))
+        reactions.configure(
+            shown.isEmpty ? nil : ReactionRow(pills: shown, adds: false, toggles: bar.toggles),
+            offer: bar.reactions.isEmpty ? bar.defaultReaction : nil,
+            more: bar.reactions.count - shown.count, animated: animated)
+    }
+
+    @objc private func reactClicked() {
+        onAddReaction(react)
     }
 
     @objc private func followClicked() {
@@ -136,6 +189,20 @@ final class PostBarCell: NSTableCellView {
             button.frame = NSRect(x: x, y: y, width: width, height: PostBarButton.height)
             x -= Self.gap
         }
+        if let bar, pillsShown != min(bar.reactions.count, PostBar.pillsShown(width: Double(bounds.width))) {
+            showReactions(animated: false)
+        }
+        let left = Self.side + Self.buttonInset
+        let pills = reactions.contentWidth
+        reactions.frame = NSRect(
+            x: left,
+            y: y + (PostBarButton.height - ReactionRowView.pillHeight) / 2 - ReactionRowView.above,
+            width: pills + 1, height: ReactionRowView.above + ReactionRowView.pillHeight)
+        let width = react.attributedTitle.string.isEmpty ? PostBarButton.height : react.fittingWidth
+        react.frame = NSRect(
+            x: left + pills + (pills > 0 ? Self.reactGap : 0),
+            y: y + (PostBarButton.height - Self.reactHeight) / 2, width: width,
+            height: Self.reactHeight)
         let box = inviteBox
         inviteSymbol.frame = NSRect(
             x: box.minX + Self.invitePadding, y: box.minY + Self.invitePadding,
