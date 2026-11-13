@@ -364,6 +364,51 @@ struct ReplyJumpTests {
     }
 
     @Test
+    func aChannelOpenedForAJumpThatFailsShowsThePresent() async {
+        store.update { [here] in $0.windows[here] = nil }
+        account.holdLoads.withLock { $0 = true }
+        let model = makeModel()
+        model.jumpOnOpen = id(2)
+
+        let opening = Task { await model.open() }
+        account.loadReplies.send(.Network(kind: .timeout))
+        account.loadReplies.send(nil)
+        await opening.value
+
+        #expect(
+            loads == [
+                .load(here, .around(messageId: id(2), limit: 50)), .load(here, .latest(limit: 50)),
+            ])
+        #expect(model.rows.map(\.id) == [7, 8, 9, 10].map { id($0) })
+        #expect(model.messageJump == nil)
+        #expect(model.failedLoads.isEmpty)
+    }
+
+    @Test
+    func aChannelOpenedForAJumpThatLandsLoadsNothingMore() async {
+        store.update { [here] in $0.windows[here] = nil }
+        let model = makeModel()
+        model.jumpOnOpen = id(5)
+
+        await model.open()
+
+        #expect(loads == [.load(here, .around(messageId: id(5), limit: 50))])
+        #expect(model.messageJump == .init(messageId: id(5), number: 1))
+    }
+
+    @Test
+    func aChannelWithRowsOpenedForAJumpThatFailsKeepsThem() async {
+        account.loadError.withLock { $0 = .Network(kind: .timeout) }
+        let model = makeModel()
+        model.jumpOnOpen = id(2)
+
+        await model.open()
+
+        #expect(loads == [.load(here, .around(messageId: id(2), limit: 50))])
+        #expect(model.rows.map(\.id) == [5, 6, 7, 8].map { id($0) })
+    }
+
+    @Test
     func aDeletedTargetIsNotJumpedTo() async {
         store.update { $0.replyTargets[id(6)] = .deleted }
         let model = makeModel()
