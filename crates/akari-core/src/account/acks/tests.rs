@@ -2139,6 +2139,57 @@ async fn a_refused_mark_doesnt_answer_the_mark_after_it() {
     assert_eq!(request.manual, Some(1));
 }
 
+// The second mark is taken over what the first left in the store.
+fn first_mark(wants: &Wants) -> Marked {
+    wants.want_manual(channel(1), message(4), 2, read_at(9, 0), read_at(4, 2))
+}
+
+fn second_mark(wants: &Wants) -> Marked {
+    wants.want_manual(channel(1), message(6), 1, read_at(4, 2), read_at(6, 1))
+}
+
+fn second_refused_back_to(undo: Option<ReadState>) -> [Refusal; 1] {
+    [refusal(channel(1), undo, read_at(6, 1), message(6))]
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_second_mark_goes_back_to_before_an_unsent_first() {
+    let wants = Wants::default();
+    let mut first = first_mark(&wants);
+    let _second = second_mark(&wants);
+    assert!(matches!(first.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
+
+    wants.next().await.unwrap();
+
+    assert_eq!(wants.refuse().0, second_refused_back_to(read_at(9, 0)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_second_mark_goes_back_to_before_a_refused_first() {
+    let wants = Wants::default();
+    let _first = first_mark(&wants);
+    wants.next().await.unwrap();
+    let _second = second_mark(&wants);
+    assert_eq!(wants.refuse().0, []);
+
+    wants.next().await.unwrap();
+
+    assert_eq!(wants.refuse().0, second_refused_back_to(read_at(9, 0)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_second_mark_goes_back_to_a_first_discord_took() {
+    let wants = Wants::default();
+    let _first = first_mark(&wants);
+    wants.next().await.unwrap();
+    let _second = second_mark(&wants);
+    wants.confirmed();
+
+    wants.next().await.unwrap();
+
+    assert_eq!(wants.refuse().0, second_refused_back_to(read_at(4, 2)));
+}
+
 #[tokio::test(start_paused = true)]
 async fn discords_answer_to_the_first_mark_isnt_the_second_ones() {
     let wants = Wants::default();

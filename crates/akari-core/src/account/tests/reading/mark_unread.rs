@@ -1075,6 +1075,39 @@ async fn a_second_mark_replaces_the_first() {
     assert_eq!(read_state(account, GENERAL), Some((FIRST, 2)));
 }
 
+// Discord never had the first mark: the second one's refusal goes back to before both.
+#[tokio::test]
+async fn a_refused_second_mark_goes_back_to_before_an_unsent_first() {
+    let online = acking(|ready| {
+        general_read(ready);
+        thread_unread(ready);
+    })
+    .await;
+    showing(&online, &[FIRST, FIRST + 1, NEWEST]).await;
+    let (on_arrival, release) = hold_next_ack(&online.server, 200).await;
+    answer_acks_once(&online.server, missing_access()).await;
+    online.account.mark_read(id(THREAD));
+    wait_for(on_arrival, "the ack never arrived").await;
+    let account = &online.account;
+
+    let (first, second, ()) = tokio::join!(
+        account.mark_unread(general(), msg(NEWEST)),
+        account.mark_unread(general(), msg(FIRST + 1)),
+        async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            release.send(()).unwrap();
+        }
+    );
+
+    assert_eq!(first.ok(), Some(MarkOutcome::Replaced));
+    assert!(
+        matches!(second, Err(RequestError::Discord { status: 403, .. })),
+        "{second:?}"
+    );
+    assert_eq!(read_state(account, GENERAL), Some((NEWEST, 0)));
+    assert_eq!(badge(account, GENERAL), Badge::default());
+}
+
 #[tokio::test]
 async fn a_message_the_store_doesnt_have_is_refused_without_a_request() {
     let online = read_general().await;
