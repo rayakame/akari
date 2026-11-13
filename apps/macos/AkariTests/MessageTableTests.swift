@@ -1272,12 +1272,13 @@ struct MessageTableTests {
             return groups + (copies.isEmpty ? [] : [copies])
         }
 
+        /// The rows the actions were asked to act on, as they were handed over.
+        var performed: [MessageListModel.Row] = []
+
         func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
-            if action == .createThread {
-                calls.append("create thread from \(row.message.id.rawValue)")
-            } else {
-                calls.append("\(action) \(row.message.id.rawValue)\(shift ? " shift" : "")")
-            }
+            performed.append(row)
+            let name = action == .createThread ? "create thread from" : "\(action)"
+            calls.append("\(name) \(row.message.id.rawValue)\(shift ? " shift" : "")")
         }
 
         func markUnread(from row: MessageListModel.Row) {

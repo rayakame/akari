@@ -38,6 +38,7 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     }
 
     override func connect() throws {}
+    override func close() {}
 
     override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
         async throws -> LoadReport?
