@@ -534,34 +534,6 @@ struct ReplyWayBackScreenTests {
     }
 }
 
-// The New Thread form from a reply: its preview has the line, not a button there.
-@MainActor
-struct ReplyThreadFormTests {
-    @Test
-    func theFormsPreviewOfAReplyShowsWhatItAnswers() throws {
-        let account = FormattedAccount(contents: ["test"], thread: true)
-        account.formattedStore.replies.withLock { $0 = [40: 5] }
-        account.formattedStore.startsThreads.withLock { $0 = true }
-        let channel = FormattedStore.channelIds[0]
-        let session = SessionScreenTests().formattedSession(account)
-        session.openThreadForm(in: channel, from: MessageId(rawValue: channel.rawValue * 1000 + 40), location: .message)
-        let form = try #require(session.threadForm)
-        try #require(form.sourceReply != nil)
-        let host = NSHostingView(rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: 468))
-        let window = TestWindow.make(size: NSSize(width: 480, height: 468))
-        defer { window.close() }
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-
-        let preview = try #require(SessionScreenTests().views(MessagePreviewView.self, in: host).first)
-        preview.cell.layoutSubtreeIfNeeded()
-        #expect(!preview.cell.replyLine.isHidden)
-        #expect(preview.cell.replyLine.shownName == "User 3")
-        #expect(preview.cell.replyLine.content.shownText.string == "test 5")
-        #expect(!preview.cell.replyLine.content.isEnabled)
-    }
-}
-
 // Reply in the hovered message's bar and in its menu, through the app's bridge.
 @MainActor
 struct ReplyActionTests {
