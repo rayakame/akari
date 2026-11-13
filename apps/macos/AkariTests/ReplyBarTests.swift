@@ -329,6 +329,7 @@ struct ReplyBarScreenTests {
         list.composer.startReply(to: try row(38, in: list), shift: false)
         try await screens.waitUntil(host) { bar(in: host) != nil }
         host.layoutSubtreeIfNeeded()
+        #expect(account.heldReplies.withLock { $0[channel] } == (try row(38, in: list)).message.id)
 
         let band = place(of: try #require(bar(in: host)))
         let after = place(of: field)
@@ -346,6 +347,7 @@ struct ReplyBarScreenTests {
         list.composer.cancelReply()
         try await screens.waitUntil(host) { bar(in: host) == nil }
         #expect(place(of: try #require(table.enclosingScrollView)) == tableBefore)
+        #expect(account.heldReplies.withLock { $0.isEmpty })
     }
 
     @Test
