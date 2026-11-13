@@ -75,6 +75,13 @@ public final class ForumModel {
             /// A click reacts with it, or takes the user's reaction back.
             public let toggles: Bool
 
+            public init(emoji: ReactionEmoji, count: UInt32, mine: Bool, toggles: Bool) {
+                self.emoji = emoji
+                self.count = count
+                self.mine = mine
+                self.toggles = toggles
+            }
+
             public var name: String { ReactionPill.name(of: emoji) }
         }
 

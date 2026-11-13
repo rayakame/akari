@@ -64,6 +64,7 @@ struct ForumListCard: View {
     let filter: Set<TagId>
     var opened = false
     var now: Date?
+    var react: (ForumModel.Card.Reaction) -> Void = { _ in }
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.placeholders) private var placeholders
@@ -101,6 +102,14 @@ struct ForumListCard: View {
         .environment(\.rowHovered, hovered)
         .background(CursorArea(.pointingHand))
         .accessibilityLabel(ForumListCard.label(card))
+        // Over the card, not in its label: a button inside a button gets no clicks.
+        .overlay(alignment: .bottomLeading) {
+            if let reaction = card.reaction {
+                ForumCardReaction(reaction: reaction) { react(reaction) }
+                    .padding(.leading, 10)
+                    .padding(.bottom, ForumMeasures.cardPadding)
+            }
+        }
     }
 
     // Discord's title: the pill in the text after it, and at its right once the two lines are
@@ -442,6 +451,61 @@ struct ForumCardMessage: View {
     }
 }
 
+/// A card's one reaction: the first message's most used, or the forum's default without a
+/// number. A click reacts or takes the user's reaction back, where the user may.
+struct ForumCardReaction: View {
+    static let height: CGFloat = 20
+
+    let reaction: ForumModel.Card.Reaction
+    var react: () -> Void = {}
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: react) {
+            HStack(spacing: 4) {
+                ReactionEmojiView(emoji: reaction.emoji, side: 14, hovered: hovered)
+                if reaction.count > 0 {
+                    Text(reaction.count.formatted())
+                        .font(TypeScale.forumFooter.font)
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            Color(nsColor: reaction.mine ? Palette.reactionMineText : Palette.textDefault))
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Self.height)
+            .background(
+                Color(nsColor: reaction.mine ? Palette.reactionMine : fill),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay {
+                if reaction.mine {
+                    RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: Palette.brand), lineWidth: 1)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .disabled(!reaction.toggles)
+        .onHover { hovered = $0 }
+        .background(CursorArea(reaction.toggles ? .pointingHand : .operationNotAllowed))
+        .help(reaction.name)
+        .accessibilityLabel(label)
+    }
+
+    private var fill: NSColor {
+        hovered && reaction.toggles ? Palette.interactiveBackgroundActive : Palette.hoverBackground
+    }
+
+    private var label: String {
+        if reaction.count == 0 {
+            return "\(reaction.name), press to react"
+        }
+        let reactions = reaction.count == 1 ? "1 reaction" : "\(reaction.count) reactions"
+        return "\(reaction.name), \(reactions)"
+    }
+}
+
 /// The message count, "•" and the time; its tooltip says when the post was made.
 struct ForumCardFooter: View {
     let card: ForumModel.Card
@@ -449,6 +513,10 @@ struct ForumCardFooter: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Its place; the chip that takes clicks lies over the card.
+            if let reaction = card.reaction {
+                ForumCardReaction(reaction: reaction).hidden()
+            }
             ForumCardCount(count: card.count, size: 14, newCount: card.newCount)
             Text("\u{2022}")
                 .foregroundStyle(Color(nsColor: Palette.borderSubtle))
@@ -618,6 +686,7 @@ struct ForumGalleryCard: View {
     /// A media channel's card: each image whole over its own blurred cover.
     var contained = false
     var now: Date?
+    var react: (ForumModel.Card.Reaction) -> Void = { _ in }
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.placeholders) private var placeholders
@@ -653,6 +722,14 @@ struct ForumGalleryCard: View {
         .onHover { hovered = $0 }
         .background(CursorArea(.pointingHand))
         .accessibilityLabel(ForumListCard.label(card))
+        // After the count, at the footer's right; over the card, as the list's.
+        .overlay(alignment: .bottomTrailing) {
+            if let reaction = card.reaction {
+                ForumCardReaction(reaction: reaction) { react(reaction) }
+                    .padding(.trailing, 12)
+                    .padding(.bottom, (Self.footer - ForumCardReaction.height) / 2)
+            }
+        }
     }
 
     private var header: some View {
