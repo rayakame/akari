@@ -53,6 +53,27 @@ final class ReplyActionTests {
         #expect(bar(own, shift: true) == [.copyLink, .markUnread, .reply, .createThread, .more])
     }
 
+    // The core's edit flag alone places Reply; what else the row allows moves nothing.
+    @Test(arguments: [false, true], [false, true])
+    func replyStandsWhereTheCoresEditFlagSays(edit: Bool, delete: Bool) {
+        let message = row(100, allowed(reply: true, edit: edit, delete: delete, createThread: true))
+
+        #expect(bar(message) == (edit ? [.createThread, .more] : [.reply, .createThread, .more]))
+        #expect(bar(message, shift: true) == [.copyLink, .markUnread, .reply, .createThread, .more])
+    }
+
+    @Test
+    func replyIsOnceInEitherBarWhateverTheRules() {
+        typealias When = MessageActionsModel.When
+        for (editable, deletable) in [(false, false), (true, false), (false, true), (true, true)] {
+            func replies(_ slots: [MessageActionsModel.Slot]) -> Int {
+                slots.count { $0.action == .reply && $0.when.fits(editable: editable, deletable: deletable) }
+            }
+            #expect(replies(MessageActionsModel.barOrder) == (editable ? 0 : 1))
+            #expect(replies(MessageActionsModel.shiftBarOrder) == 1)
+        }
+    }
+
     @Test
     func aMessageThatCantBeAnsweredHasNoReply() {
         let message = row(100, allowed())

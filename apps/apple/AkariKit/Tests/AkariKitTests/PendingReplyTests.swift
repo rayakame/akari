@@ -358,6 +358,92 @@ final class ReplyEscapeTests {
         session.close()
     }
 
+    // Message 1 is being answered when the channel is marked unread from message 2.
+    func replyingAndMarkedUnread(_ session: SessionModel) async throws -> MessageListModel {
+        store.update { $0.allow(replying(), message: 2, in: 11) }
+        let list = try #require(session.messages)
+        try reply(in: list)
+        let second = try #require(list.rows.first { $0.id == id(2) })
+        await session.messageActions(for: list) { _ in }.markUnread(from: second)
+        return list
+    }
+
+    @Test
+    func aMarkUnreadOnAnotherMessageLeavesTheReply() async throws {
+        let session = session()
+
+        let list = try await replyingAndMarkedUnread(session)
+
+        #expect(list.composer.reply?.messageId == id(1))
+        #expect(list.replyingTo == id(1))
+        #expect(list.newMessagesLine == id(2))
+        #expect(account.held.current == [id(11)])
+        session.close()
+    }
+
+    @Test
+    func aReplyStartedAfterAMarkUnreadLeavesTheLine() async throws {
+        let session = session()
+        store.update { $0.allow(replying(), message: 2, in: 11) }
+        let list = try #require(session.messages)
+        let actions = session.messageActions(for: list) { _ in }
+        await actions.markUnread(from: try #require(list.rows.first { $0.id == id(2) }))
+
+        actions.perform(.reply, on: try #require(list.rows.first), shift: false)
+
+        #expect(list.composer.reply?.messageId == id(1))
+        #expect(list.newMessagesLine == id(2))
+        #expect(account.held.current == [id(11)])
+        session.close()
+    }
+
+    // The first Escape is the reply's: the channel stays unread and held until the second.
+    @Test
+    func escapeCancelsTheReplyAndLeavesTheChannelMarkedUnread() async throws {
+        let session = session()
+        let list = try await replyingAndMarkedUnread(session)
+        let told = account.openCalls.current.count
+
+        #expect(!session.escape(from: id(11)))
+        await finished(session.escaping)
+
+        #expect(list.composer.reply == nil)
+        #expect(list.newMessagesLine == id(2))
+        #expect(account.held.current == [id(11)])
+        #expect(account.markedRead.current.isEmpty)
+
+        #expect(session.escape(from: id(11)))
+        await finished(session.escaping)
+
+        #expect(account.markedRead.current == [id(11)])
+        #expect(account.held.current.isEmpty)
+        #expect(list.newMessagesLine == nil)
+        #expect(account.openCalls.current.count == told, "the lists stay")
+        session.close()
+    }
+
+    // An answer that comes after the reply was cancelled still moves only the line.
+    @Test
+    func aRefusedMarkTakesItsLineBackAndLeavesTheReply() async throws {
+        let session = session()
+        store.update { $0.allow(replying(), message: 2, in: 11) }
+        let list = try #require(session.messages)
+        try reply(in: list)
+        let answers = account.holdMark(from: id(2))
+        let second = try #require(list.rows.first { $0.id == id(2) })
+        let mark = Task { await session.messageActions(for: list) { _ in }.markUnread(from: second) }
+        await answers.pulled(1)
+        #expect(list.newMessagesLine == id(2))
+
+        answers.send(.success(.replaced))
+        await finished(mark)
+
+        #expect(list.newMessagesLine != id(2))
+        #expect(list.composer.reply?.messageId == id(1))
+        #expect(session.messageActionFailure == nil)
+        session.close()
+    }
+
     @Test
     func aListsOwnEscapeCancelsItsReplyFirst() async throws {
         let session = session()
