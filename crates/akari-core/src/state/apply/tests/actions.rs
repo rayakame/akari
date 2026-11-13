@@ -1383,3 +1383,41 @@ fn a_starter_row_without_its_message_answers_for_itself() {
     assert_eq!(state.shown_message(row.0, row.1), Some(row));
     assert_eq!(state.shown_message(row.0, Snowflake::new(M)), None);
 }
+
+fn clicked(state: &mut State, emoji: &str, want: bool) -> bool {
+    let now = state.now_millis();
+    state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(M),
+            &crate::state::ReactionEmoji::unicode(emoji),
+            want,
+            now,
+            &mut Vec::new(),
+        )
+        .is_some()
+}
+
+#[test]
+fn a_click_on_a_reaction_follows_the_messages_actions() {
+    let reacted = with(sent(GENERAL, MIRA, 0), |message| {
+        message["reactions"] = json!([
+            {"emoji": {"id": null, "name": "👍"}, "count": 1, "me": false},
+            {"emoji": {"id": null, "name": "🎉"}, "count": 1, "me": true},
+        ]);
+    });
+
+    let mut without = load(
+        member(MEMBER & !ADD_REACTIONS, plain),
+        GENERAL,
+        std::slice::from_ref(&reacted),
+    );
+    assert!(!clicked(&mut without, "🔥", true), "a new emoji");
+    assert!(clicked(&mut without, "👍", true), "one already there");
+    assert!(clicked(&mut without, "🎉", false), "taking one's own back");
+
+    let mut silenced = load(member(MEMBER, timeout), GENERAL, &[reacted]);
+    assert!(!clicked(&mut silenced, "👍", true));
+    assert!(!clicked(&mut silenced, "🎉", false));
+    assert!(!clicked(&mut silenced, "🔥", true));
+}
