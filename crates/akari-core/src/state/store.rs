@@ -865,6 +865,25 @@ impl Store {
         queued
     }
 
+    pub(crate) fn hold_reply(&self, channel: ChannelId, target: MessageId) -> bool {
+        let now = self.now_millis();
+        self.write("reply", |inner, events| {
+            inner.state.hold_reply(channel, target, now, events)
+        })
+    }
+
+    pub(crate) fn release_reply(&self, channel: ChannelId) {
+        self.write("reply", |inner, _| inner.state.release_reply(channel));
+    }
+
+    pub(crate) fn release_replies(&self) {
+        self.write("reply", |inner, _| inner.state.release_replies());
+    }
+
+    pub(crate) fn held_reply(&self, channel: ChannelId) -> Option<MessageId> {
+        self.read(|inner| inner.state.held_reply(channel))
+    }
+
     pub(crate) fn reply_target_gone(&self, channel: ChannelId, target: MessageId) {
         self.write("send", |inner, events| {
             inner.state.target_gone(channel, target, events);

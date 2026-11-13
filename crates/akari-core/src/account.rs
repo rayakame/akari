@@ -1210,8 +1210,12 @@ impl Shared {
         }
         let detached = match self.store.messages(channel) {
             Some(window) => !window.latest,
-            // A channel that was never viewed has no message to answer.
-            None if reply.is_some() => return Err(RequestError::InvalidRequest),
+            // A channel without a window has no message to answer but a held one.
+            None if reply
+                .is_some_and(|reply| self.store.held_reply(channel) != Some(reply.message)) =>
+            {
+                return Err(RequestError::InvalidRequest);
+            }
             None => {
                 self.view(channel);
                 false
@@ -1352,6 +1356,7 @@ impl Shared {
     fn close(&self) {
         self.gateway.close();
         self.rest.close();
+        self.store.release_replies();
         self.acks.close();
         self.previews.close();
         if let Some(flusher) = &self.flusher {
@@ -2002,13 +2007,30 @@ impl Account {
         self.shared.store.supersede_around(channel);
     }
 
+    /// Keeps `message` answerable for the reply the user is writing in `channel`, also once it
+    /// leaves the loaded messages: [`Account::send_message`] and [`Account::queue_message`]
+    /// take a reply to it until [`Account::release_reply`], and its
+    /// [`Store::reply_target`] stays loaded. One message per channel: another call replaces
+    /// it. Queueing a reply in the channel releases it, as do the channel's removal and
+    /// [`Account::close`]. False, with nothing held for the channel, where
+    /// [`Store::message_actions`] allows no reply to the message.
+    pub fn hold_reply(&self, channel: ChannelId, message: MessageId) -> bool {
+        self.shared.store.hold_reply(channel, message)
+    }
+
+    /// Ends [`Account::hold_reply`] for the channel: the user cancelled the reply.
+    pub fn release_reply(&self, channel: ChannelId) {
+        self.shared.store.release_reply(channel);
+    }
+
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an
     /// error the pending message is marked failed and stays until retried or discarded.
     ///
     /// With `reply` it answers that message of the channel, shown as a reply with its preview
-    /// at once. A message [`Store::message_actions`] allows no reply to, or one of another
-    /// channel, is refused with [`RequestError::InvalidRequest`]; a target Discord says is
-    /// gone fails the reply with [`RequestError::ReplyTargetDeleted`].
+    /// at once. A message [`Store::message_actions`] allows no reply to, one of another
+    /// channel, or one that is neither loaded nor held by [`Account::hold_reply`] is refused
+    /// with [`RequestError::InvalidRequest`]; a target Discord says is gone fails the reply
+    /// with [`RequestError::ReplyTargetDeleted`].
     pub async fn send_message(
         &self,
         channel: ChannelId,

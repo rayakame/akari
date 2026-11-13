@@ -389,6 +389,64 @@ fn replying_follows_discords_rule() {
     }
 }
 
+// A reply to `M` of GENERAL, held and then left behind by a jump: (queued, the row pings).
+fn held_reply_after(change: impl FnOnce(&mut State)) -> (bool, bool) {
+    let mut state = load(member(MEMBER, plain), GENERAL, &[sent(GENERAL, MIRA, 0)]);
+    let general = Snowflake::new(GENERAL);
+    let now = state.now_millis();
+    let mut events = Vec::new();
+    assert!(state.hold_reply(general, Snowflake::new(M), now, &mut events));
+    let ticket = state
+        .begin_load(general, LoadKind::Around(Snowflake::new(9)), 2, &mut events)
+        .unwrap();
+    let far = serde_json::from_str(&message(9, GENERAL).to_string()).unwrap();
+    state.finish_load(ticket, vec![far], false, &mut events);
+    assert!(state.message(general, Snowflake::new(M)).is_none());
+    change(&mut state);
+    let me = state.current_user().unwrap();
+    let pending = Message::pending(
+        Snowflake::new(M + 1),
+        general,
+        Arc::new(me.user.clone()),
+        "an answer".to_owned(),
+        0,
+    );
+    let reply = Some(crate::state::ReplyTo {
+        message: Snowflake::new(M),
+        mention: true,
+    });
+    let queued = state.queue(general, pending, reply, now, &mut events);
+    let pings = state
+        .pending(general, Snowflake::new(M + 1))
+        .is_some_and(|outgoing| outgoing.mention);
+    (queued, pings)
+}
+
+fn role_allows(state: &mut State, allow: u64) {
+    apply(
+        state,
+        "GUILD_ROLE_UPDATE",
+        json!({"guild_id": G1.to_string(), "role": {
+            "id": ROLE.to_string(), "name": "r", "permissions": allow.to_string(), "position": 2
+        }}),
+    );
+}
+
+#[test]
+fn a_held_reply_is_sent_by_the_channels_permissions_as_they_are() {
+    assert_eq!(held_reply_after(|_| {}), (true, true));
+    assert_eq!(
+        held_reply_after(|state| role_allows(state, MEMBER | MANAGE_MESSAGES)),
+        (true, true)
+    );
+    for lost in [SEND, HISTORY, VIEW] {
+        assert_eq!(
+            held_reply_after(|state| role_allows(state, MEMBER & !lost)),
+            (false, false),
+            "{lost}"
+        );
+    }
+}
 #[test]
 fn only_discords_replyable_types_take_a_reply() {
     for kind in 0..=70 {

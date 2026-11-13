@@ -1425,3 +1425,5 @@ fn a_pending_replys_target_and_ping_choice_outlast_its_window() {
     assert_eq!(state.windows.targets_len(general), 100);
     assert_eq!(target(&state, GENERAL, TARGET), "not loaded");
 }
+
+mod holds;

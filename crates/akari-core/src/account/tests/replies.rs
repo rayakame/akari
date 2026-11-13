@@ -562,3 +562,115 @@ async fn a_target_deleted_while_the_reply_is_refused_leaves_a_failed_reply() {
     account.discard_message(general(), failed.id);
     assert!(outbox(&account).is_empty());
 }
+
+// TARGET is held for a reply, then a jump leaves it behind.
+async fn held_out_of_sight(
+    fake: &mut FakeGateway,
+    server: &MockServer,
+) -> (Account, Subscription, FakeConnection) {
+    mock_page(server, ("around", "20"), page(&[19, 20, 21])).await;
+    mock_page(server, ("limit", "50"), page(&[30])).await;
+    let (account, subscription, connection) = replying(fake, server).await;
+    assert!(account.hold_reply(general(), target()));
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(ids(&account), [19, 20, 21]);
+    (account, subscription, connection)
+}
+
+#[tokio::test]
+async fn a_reply_to_a_held_message_that_left_the_window_is_sent() {
+    for mention in [true, false] {
+        let mut fake = FakeGateway::start().await;
+        let server = MockServer::start().await;
+        let sends = Sends::new(&[200]);
+        sends.mount(&server).await;
+        let (account, _subscription, _connection) = held_out_of_sight(&mut fake, &server).await;
+
+        let pending = account
+            .queue_message(general(), "hello", reply(mention))
+            .unwrap();
+
+        let row = pending_row(&account, general());
+        assert_eq!(row.kind, MessageType::Reply);
+        assert_eq!(row.replied_to(), Some((general(), target())));
+        assert_eq!(row.mentions.len(), usize::from(mention));
+        let ReplyTarget::Loaded(preview) = account.store().reply_target(general(), target()) else {
+            panic!("the target isn't loaded");
+        };
+        assert_eq!(&*preview.content, "hi");
+        assert_eq!(account.store().held_reply(general()), None);
+
+        let sent = account.deliver_message(general(), pending).await.unwrap();
+
+        let bodies = sends.bodies();
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0]["message_reference"],
+            json!({
+                "guild_id": GUILD,
+                "channel_id": GENERAL.to_string(),
+                "message_id": TARGET.to_string(),
+            })
+        );
+        assert_eq!(bodies[0].get("allowed_mentions").is_some(), !mention);
+        assert_eq!(ids(&account), [30, sent.get()]);
+    }
+}
+
+#[tokio::test]
+async fn a_released_message_that_left_the_window_is_refused() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = held_out_of_sight(&mut fake, &server).await;
+
+    account.release_reply(general());
+
+    assert!(matches!(
+        account.queue_message(general(), "hello", reply(true)),
+        Err(RequestError::InvalidRequest)
+    ));
+    assert!(sends.bodies().is_empty());
+}
+
+#[tokio::test]
+async fn a_held_reply_is_queued_where_the_window_was_evicted() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let (account, _subscription, _connection) = replying(&mut fake, &server).await;
+    assert!(account.hold_reply(general(), target()));
+    for other in 1..=10_u64 {
+        account.view_channel(Snowflake::new(900 + other));
+    }
+    assert!(account.store().messages(general()).is_none());
+
+    account
+        .queue_message(general(), "hello", reply(true))
+        .unwrap();
+
+    let row = pending_row(&account, general());
+    assert_eq!(row.replied_to(), Some((general(), target())));
+}
+
+#[tokio::test]
+async fn closing_the_account_ends_its_holds() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let (account, _subscription, _connection) = replying(&mut fake, &server).await;
+    assert!(account.hold_reply(general(), target()));
+    assert_eq!(account.store().held_reply(general()), Some(target()));
+
+    account.close();
+
+    assert_eq!(account.store().held_reply(general()), None);
+}

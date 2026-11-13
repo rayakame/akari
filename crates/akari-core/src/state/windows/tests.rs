@@ -1651,17 +1651,24 @@ fn held_messages_dropped_within_the_page_keep_the_rows() {
 fn a_reply_without_the_ping_stays_one_when_its_channel_goes() {
     let mut harness = Harness::viewing(LOADS);
     let target = stored(1);
+    let answered = |mention| {
+        Some(Answered {
+            target: target.id,
+            preview: Arc::new(ReplyPreview::of(&target)),
+            mention,
+        })
+    };
     let mut events = Vec::new();
     harness.windows.queue(
         channel(CH),
         pending(500, "quiet"),
-        Some((&target, false)),
+        answered(false),
         &mut events,
     );
     harness.windows.queue(
         channel(CH),
         pending(501, "loud"),
-        Some((&target, true)),
+        answered(true),
         &mut events,
     );
 

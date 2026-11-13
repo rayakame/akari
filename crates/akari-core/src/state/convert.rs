@@ -592,24 +592,21 @@ impl Message {
         }
     }
 
-    // The official client's optimistic reply: type 19, its reference, and the target's author
-    // among the mentions when the reply pings.
+    // Shaped as the official client's optimistic reply; `pinged` is the target's author.
     pub(crate) fn answering(
         mut self,
-        target: &Message,
+        target: MessageId,
+        pinged: Option<Arc<User>>,
         guild: Option<model::GuildId>,
-        mention: bool,
     ) -> Self {
         self.kind = model::MessageType::Reply;
         self.reference = Some(Box::new(MessageReference {
             kind: model::MessageReferenceType::Default,
-            message_id: Some(target.id),
-            channel_id: Some(target.channel_id),
+            message_id: Some(target),
+            channel_id: Some(self.channel_id),
             guild_id: guild,
         }));
-        if mention {
-            self.mentions = Box::new([target.author.clone()]);
-        }
+        self.mentions = pinged.into_iter().collect();
         self
     }
 

@@ -141,10 +141,15 @@ enum Missed {
     Reacted(MessageId, ReactionChange),
 }
 
-// A queued message as its request needs it.
 pub(crate) struct Outgoing {
     pub(crate) message: Arc<Message>,
-    // A reply pings its target's author.
+    pub(crate) mention: bool,
+}
+
+pub(crate) struct Answered {
+    pub(crate) target: MessageId,
+    pub(crate) preview: Arc<ReplyPreview>,
+    // Kept beside the outbox for a retry.
     pub(crate) mention: bool,
 }
 
@@ -446,6 +451,8 @@ pub(crate) struct Windows {
     // Sent along with the thread's first message, or what the fetch found.
     starters: HashMap<ChannelId, Starter>,
     targets: ReplyTargets,
+    // The message each channel's pending reply answers: its target stays without the window.
+    holds: HashMap<ChannelId, MessageId>,
 }
 
 // `Some(None)`: Discord sent it along as deleted.
@@ -480,6 +487,7 @@ impl Windows {
             generations: 0,
             starters: HashMap::new(),
             targets: ReplyTargets::default(),
+            holds: HashMap::new(),
         }
     }
 
@@ -931,7 +939,6 @@ impl Windows {
         self.targets.set(channel, id, target, events);
     }
 
-    // Discord refused a reply because its target is gone.
     pub(crate) fn target_gone(
         &mut self,
         channel: ChannelId,
@@ -966,7 +973,56 @@ impl Windows {
             .filter_map(|message| message.replied_to())
             .filter(|(named, _)| *named == channel)
             .map(|(_, id)| id)
+            .chain(self.holds.get(&channel).copied())
             .collect()
+    }
+
+    pub(crate) fn hold_reply(&mut self, target: &Message, events: &mut Vec<StoreEvent>) {
+        let channel = target.channel_id;
+        let preview = Arc::new(ReplyPreview::of(target));
+        self.targets
+            .set(channel, target.id, ReplyTarget::Loaded(preview), events);
+        self.holds.insert(channel, target.id);
+        self.loosen_targets(channel);
+    }
+
+    pub(crate) fn release_reply(&mut self, channel: ChannelId) {
+        if self.holds.remove(&channel).is_some() {
+            self.loosen_targets(channel);
+        }
+    }
+
+    pub(crate) fn release_replies(&mut self) {
+        let channels: Vec<ChannelId> = self.holds.drain().map(|(channel, _)| channel).collect();
+        for channel in channels {
+            self.loosen_targets(channel);
+        }
+    }
+
+    pub(crate) fn held_reply(&self, channel: ChannelId) -> Option<MessageId> {
+        self.holds.get(&channel).copied()
+    }
+
+    pub(crate) fn held_preview(
+        &self,
+        channel: ChannelId,
+        target: MessageId,
+    ) -> Option<Arc<ReplyPreview>> {
+        if self.held_reply(channel) != Some(target) {
+            return None;
+        }
+        match self.targets.get(channel, target) {
+            ReplyTarget::Loaded(preview) => Some(preview),
+            ReplyTarget::Deleted | ReplyTarget::NotLoaded => None,
+        }
+    }
+
+    fn loosen_targets(&mut self, channel: ChannelId) {
+        if self.windows.contains_key(&channel) {
+            self.trim_targets(channel);
+        } else {
+            self.prune_targets(channel);
+        }
     }
 
     fn trim_targets(&mut self, channel: ChannelId) {
@@ -991,36 +1047,31 @@ impl Windows {
         self.targets.prune(channel, |id| named.contains(&id));
     }
 
-    // `answers`: the message a reply answers and whether it pings, which a retry keeps.
     pub(crate) fn queue(
         &mut self,
         channel: ChannelId,
         message: Arc<Message>,
-        answers: Option<(&Message, bool)>,
+        answers: Option<Answered>,
         events: &mut Vec<StoreEvent>,
     ) {
-        if !self.windows.contains_key(&channel) {
+        let Some(window) = self.windows.get_mut(&channel) else {
             return;
-        }
-        if let Some((target, _)) = answers {
-            let preview = Arc::new(ReplyPreview::of(target));
-            self.targets.set(
-                target.channel_id,
-                target.id,
-                ReplyTarget::Loaded(preview),
-                events,
-            );
-        }
-        if let Some(window) = self.windows.get_mut(&channel) {
-            if matches!(answers, Some((_, false))) {
-                window.quiet.push(message.id);
-            }
+        };
+        let Some(answered) = answers else {
             window.outbox.push(message.clone());
             events.push(StoreEvent::MessageInserted(message));
+            return;
+        };
+        if !answered.mention {
+            window.quiet.push(message.id);
         }
-        if let Some((target, _)) = answers {
-            self.trim_targets(target.channel_id);
-        }
+        window.outbox.push(message.clone());
+        let target = ReplyTarget::Loaded(answered.preview);
+        self.targets.set(channel, answered.target, target, events);
+        events.push(StoreEvent::MessageInserted(message));
+        // The row names the target from here on.
+        self.holds.remove(&channel);
+        self.trim_targets(channel);
     }
 
     fn set_delivery(
@@ -1580,6 +1631,7 @@ impl Windows {
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
         self.drop_starter(channel);
+        self.holds.remove(&channel);
         self.targets.drop_channel(channel);
         let generation = self.next_generation();
         let Some(window) = self.windows.get_mut(&channel) else {
