@@ -567,7 +567,7 @@ final class ReactionAddButton: NSButton {
         title = ""
         refusesFirstResponder = true
         image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
         imagePosition = .imageOnly
         imageScaling = .scaleNone
         (cell as? NSButtonCell)?.highlightsBy = []
