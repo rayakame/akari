@@ -122,6 +122,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // A thread box's newest message as the box shows it, and when the box's time changes.
     private var boxContents: [MessageId: (message: Message, text: NSAttributedString)] = [:]
     private var boxTimes: [MessageId: Date] = [:]
+    // A reply line's text, built once per change of the line.
+    private var replyTexts: [MessageId: (line: ReplyLine, text: NSAttributedString)] = [:]
     nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
@@ -143,6 +145,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredFileName: FileNameButton?
     private weak var hoveredFile: FileRowView?
     private weak var hoveredAction: HoverActionButton?
+    private weak var hoveredReply: MessageCell?
     /// The hovered message's buttons: one bar for the list, over the rows.
     let hoverBar = MessageHoverBar()
     private weak var hoveredBarButton: HoverBarButton?
@@ -455,6 +458,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         texts.removeAll()
         embedTexts.removeAll()
         boxContents.removeAll()
+        replyTexts.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -709,6 +713,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 embedTexts[row.id] = nil
                 boxContents[row.id] = nil
                 boxTimes[row.id] = nil
+                replyTexts[row.id] = nil
             }
         }
         for index in changes.reloaded {
@@ -1071,7 +1076,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row), width: width)
+                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row),
+                hasReply: row.reply != nil, width: width)
         }
     }
 
@@ -1163,6 +1169,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
+            cell.onReplyJump = { [weak self] in
+                guard let self else {
+                    return
+                }
+                actions?.jumpToTarget(of: self.row(item.id) ?? row)
+            }
             cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
@@ -1170,7 +1182,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
-                embeds: embeds(row))
+                embeds: embeds(row), reply: replyParts(row))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
@@ -1439,6 +1451,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         boxTimes[row.id] = time?.nextChange
         return (box, content, time?.text)
+    }
+
+    private func replyParts(_ row: MessageListModel.Row) -> (line: ReplyLine, text: NSAttributedString)? {
+        guard let line = row.reply else {
+            replyTexts[row.id] = nil
+            return nil
+        }
+        if let cached = replyTexts[row.id], cached.line == line {
+            return cached
+        }
+        let parts = (line, ReplyLineView.text(of: line, now: now(), times: times))
+        replyTexts[row.id] = parts
+        return parts
     }
 
     // The row the pending reply answers has the official client's tint while the bar is up.
@@ -1874,6 +1899,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         action?.isHovered = true
         hoveredAction = action
+        let reply =
+            target?.view is ReplyContentButton || target?.view is ReplySpineView
+            ? enclosing(MessageCell.self, around: target?.view) : nil
+        if hoveredReply !== reply {
+            hoveredReply?.replyHovered = false
+        }
+        reply?.replyHovered = true
+        hoveredReply = reply
         let barButton = target?.view as? HoverBarButton
         if hoveredBarButton !== barButton {
             hoveredBarButton?.isHovered = false
