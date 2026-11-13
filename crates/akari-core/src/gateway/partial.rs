@@ -90,6 +90,8 @@ pub struct ChannelUpdate {
     pub default_auto_archive_duration: Option<u32>,
     #[serde(default, deserialize_with = "double_option")]
     pub last_message_id: Option<Option<Snowflake<GenericMarker>>>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub last_pin_timestamp: Option<Option<Timestamp>>,
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
     #[serde(default, deserialize_with = "skip_invalid_option")]
     pub recipients: Option<Vec<User>>,

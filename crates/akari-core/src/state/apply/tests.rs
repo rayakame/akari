@@ -111,6 +111,25 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::PostCountsChanged { forum_id } => {
             format!("PostCountsChanged({})", forum_id.get())
         }
+        StoreEvent::MessageReactionsChanged {
+            channel_id,
+            message_id,
+        } => format!(
+            "MessageReactionsChanged({}, {})",
+            channel_id.get(),
+            message_id.get()
+        ),
+        StoreEvent::ReplyTargetChanged {
+            channel_id,
+            target_id,
+        } => format!(
+            "ReplyTargetChanged({}, {})",
+            channel_id.get(),
+            target_id.get()
+        ),
+        StoreEvent::PinsUnreadChanged { channel_id } => {
+            format!("PinsUnreadChanged({})", channel_id.get())
+        }
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1128,12 +1147,16 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 }
 
 mod acks;
+mod actions;
 mod badges;
 mod embeds;
 mod expressions;
 mod forum;
 mod media;
+mod pins;
+mod reactions;
 mod read_states;
+mod replies;
 mod thread_boxes;
 mod thread_browser;
 mod thread_create;

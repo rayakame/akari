@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use super::reactions::Reaction;
 use super::settings::NotificationLevel;
 use crate::media::ImageKey;
 use crate::model::{
@@ -211,6 +212,8 @@ pub struct Channel {
     /// The newest message. Forum and media channels keep their newest post's thread ID here,
     /// so it isn't a `MessageId`. It may be deleted already, and it never moves back.
     pub last_message_id: Option<Snowflake<GenericMarker>>,
+    /// When a message was last pinned here; see [`Store::pins_unread`](super::Store::pins_unread).
+    pub last_pin_timestamp: Option<Timestamp>,
     pub permission_overwrites: Box<[PermissionOverwrite]>,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipients: Box<[UserId]>,
@@ -382,6 +385,37 @@ pub struct ThreadCreation {
     pub private: bool,
 }
 
+/// What the user may do with a message: see
+/// [`Store::message_actions`](super::Store::message_actions). Every flag is false for a message
+/// that is still sending and for an ephemeral one; a failed send has only `delete`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct MessageActions {
+    pub reply: bool,
+    /// The reply pings the message's author unless the user turns that off: never for their own.
+    pub reply_pings: bool,
+    /// The reply bar has the switch for the ping: not in DMs, not for the user's own message.
+    pub mention_toggle: bool,
+    pub edit: bool,
+    /// Without a request for a failed send.
+    pub delete: bool,
+    /// The message isn't pinned and the user may pin it.
+    pub pin: bool,
+    /// The message is pinned and the user may unpin it.
+    pub unpin: bool,
+    /// With an emoji the message doesn't have yet.
+    pub react: bool,
+    /// Adding and removing the user's own reaction with an emoji the message already has.
+    pub toggle_reaction: bool,
+    /// Removing others' reactions: one user's, an emoji's, all of them.
+    pub remove_reactions: bool,
+    pub mark_unread: bool,
+    pub copy_link: bool,
+    pub create_thread: bool,
+    /// The thread started from the message is known and the user may view it.
+    pub view_thread: bool,
+}
+
 // A forum post pinned to the top of its forum.
 const PINNED: u64 = 1 << 1;
 const REQUIRE_TAG: u64 = 1 << 4;
@@ -544,11 +578,11 @@ pub struct Message {
     pub attachments: Box<[Attachment]>,
     pub embeds: Box<[Embed]>,
     pub stickers: Box<[Sticker]>,
-    /// The source of a reply, pin, crosspost, thread starter or forward.
+    /// `None` for a message without reactions; read them with [`Message::reactions`].
+    pub reactions: Option<Arc<[Reaction]>>,
+    /// The source of a reply, pin, crosspost, thread starter or forward. What a reply answers
+    /// is read by [`Message::replied_to`] from [`Store::reply_target`](super::Store::reply_target).
     pub reference: Option<Box<MessageReference>>,
-    /// The referenced message as Discord sent it along; if it is loaded, `Store::message`
-    /// has a fresher copy.
-    pub referenced_message: ReferencedMessage,
     /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
     pub delivery: Delivery,
     /// What a system message's line names beyond its author and content; `None` for most.
@@ -600,6 +634,8 @@ impl Message {
     pub const IS_COMPONENTS_V2: u64 = 1 << 15;
     /// Discord's `HAS_THREAD` message flag.
     pub const HAS_THREAD: u64 = 1 << 5;
+    /// Discord's `IS_VOICE_MESSAGE` message flag.
+    pub const IS_VOICE_MESSAGE: u64 = 1 << 13;
 
     /// A thread was started from this message, or it is the line about a thread started without
     /// one; either way the thread has this message's ID.
@@ -633,15 +669,6 @@ pub enum Delivery {
     Pending,
     /// Discord didn't take it; retry or discard it.
     Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ReferencedMessage {
-    /// Not a reply, or Discord didn't include it.
-    NotIncluded,
-    Deleted,
-    Message(Arc<Message>),
 }
 
 /// A thread's first message when it started from a message in its parent channel.
@@ -1187,6 +1214,7 @@ mod tests {
             rate_limit_per_user: 0,
             default_auto_archive_duration: None,
             last_message_id: None,
+            last_pin_timestamp: None,
             permission_overwrites: Box::new([]),
             recipients: Box::new([]),
             icon: Some(hash.clone()),

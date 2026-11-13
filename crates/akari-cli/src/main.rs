@@ -43,8 +43,8 @@ enum Command {
     Logout,
     /// Connect to the gateway with the stored login and print a summary of READY.
     Connect(ConnectArgs),
-    /// Print what Discord sent and what Akari has for one channel's unread state, mentions
-    /// and threads: IDs, flags, counts and times, no names or message content.
+    /// Print what Discord sent and what Akari has for one channel's unread state, mentions,
+    /// pins and threads: IDs, flags, counts and times, no names or message content.
     ReadState(ReadStateArgs),
     /// Get one image as the app would for a box of the given size, and say where it came
     /// from: its file, its pixels, and whether it was on disk already.
@@ -84,8 +84,8 @@ struct ReadStateArgs {
     /// copy; quit the app first.
     #[arg(long)]
     cache: Option<PathBuf>,
-    /// Stay connected and print the channel's new and deleted messages and badge changes
-    /// until Ctrl+C.
+    /// Stay connected and print the channel's new and deleted messages, badge changes and
+    /// pins dot changes until Ctrl+C.
     #[arg(long)]
     watch: bool,
 }

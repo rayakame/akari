@@ -4,9 +4,9 @@ use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Call, Channel, CurrentUser, Delivery, Discriminator, Embed, EmbedAuthor,
     EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ForumLayout, ForumSettings, ForumSort,
-    ForumTag, Guild, ImageHash, Member, Message, MessageReference, PermissionOverwrite,
-    ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, TagEmoji, TagMatching,
-    ThreadInfo, ThreadMembership, User,
+    ForumTag, Guild, ImageHash, Member, Message, MessageReference, PermissionOverwrite, Role,
+    RoleSubscription, Sticker, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership,
+    User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
@@ -133,7 +133,7 @@ impl Guild {
     }
 }
 
-pub(crate) fn emoji_ids(emojis: &[model::EmojiRef]) -> Box<[EmojiId]> {
+pub(crate) fn emoji_ids(emojis: &[model::GuildEmoji]) -> Box<[EmojiId]> {
     let mut ids: Vec<EmojiId> = emojis.iter().map(|emoji| emoji.id).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -255,6 +255,7 @@ impl Channel {
             rate_limit_per_user: channel.rate_limit_per_user.unwrap_or(0),
             default_auto_archive_duration: channel.default_auto_archive_duration,
             last_message_id: channel.last_message_id,
+            last_pin_timestamp: channel.last_pin_timestamp,
             permission_overwrites: list(channel.permission_overwrites, overwrite),
             recipients,
             icon: image(channel.icon),
@@ -278,6 +279,7 @@ impl Channel {
     pub(crate) fn same_apart_from_activity(&self, other: &Channel) -> bool {
         Channel {
             last_message_id: other.last_message_id,
+            last_pin_timestamp: other.last_pin_timestamp,
             ..self.clone()
         } == *other
     }
@@ -305,6 +307,9 @@ impl Channel {
             .or(next.default_auto_archive_duration);
         if let Some(Some(id)) = update.last_message_id {
             next.note_message(id);
+        }
+        if let Some(pinned) = update.last_pin_timestamp {
+            next.last_pin_timestamp = pinned;
         }
         if let Some(overwrites) = update.permission_overwrites {
             next.permission_overwrites = list(overwrites, overwrite);
@@ -505,14 +510,8 @@ fn overwrite(overwrite: model::PermissionOverwrite) -> PermissionOverwrite {
 pub(crate) type Intern<'a> = &'a mut dyn FnMut(model::User) -> Arc<User>;
 
 impl Message {
+    // Without the message it refers to, which the windows keep apart.
     pub(crate) fn from_wire(message: model::Message, intern: Intern<'_>) -> Self {
-        let referenced_message = match message.referenced_message {
-            None => ReferencedMessage::NotIncluded,
-            Some(None) => ReferencedMessage::Deleted,
-            Some(Some(original)) => {
-                ReferencedMessage::Message(Arc::new(Self::from_wire(*original, intern)))
-            }
-        };
         Self {
             id: message.id,
             channel_id: message.channel_id,
@@ -531,6 +530,7 @@ impl Message {
             attachments: list(message.attachments, attachment),
             embeds: list(message.embeds, embed),
             stickers: list(message.sticker_items, sticker),
+            reactions: super::reactions::reactions(message.reactions),
             reference: message.message_reference.map(|reference| {
                 Box::new(MessageReference {
                     kind: reference.kind,
@@ -539,7 +539,6 @@ impl Message {
                     guild_id: reference.guild_id,
                 })
             }),
-            referenced_message,
             delivery: Delivery::Sent,
             system: SystemData {
                 call: message.call.map(call),
@@ -586,8 +585,8 @@ impl Message {
             attachments: Box::new([]),
             embeds: Box::new([]),
             stickers: Box::new([]),
+            reactions: None,
             reference: None,
-            referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Pending,
             system: None,
         }
@@ -724,9 +723,7 @@ mod tests {
     use super::*;
     use crate::gateway::{GatewayGuild, Ready};
     use crate::model::{self, ChannelType, MessageType, Permissions, PremiumType, Snowflake};
-    use crate::state::types::{
-        Channel, CurrentUser, Guild, ImageHash, Member, Message, ReferencedMessage, User,
-    };
+    use crate::state::types::{Channel, CurrentUser, Guild, ImageHash, Member, Message, User};
 
     #[track_caller]
     fn parse<T: DeserializeOwned>(json: &str) -> T {
@@ -878,30 +875,19 @@ mod tests {
     }
 
     #[test]
-    fn a_message_converts_with_reply_states() {
+    fn a_message_converts_with_its_reference_alone() {
         let fixture = include_str!("../../tests/fixtures/message_reply.json");
-        let present = Message::from_wire(parse(fixture), &mut new_arc);
-        let deleted = Message::from_wire(
-            edited(fixture, |value| value["referenced_message"] = Value::Null),
-            &mut new_arc,
-        );
-        let missing = Message::from_wire(
-            edited(fixture, |value| {
-                value.as_object_mut().unwrap().remove("referenced_message");
-            }),
-            &mut new_arc,
-        );
 
-        assert_eq!(present.kind, MessageType::Reply);
-        let ReferencedMessage::Message(original) = &present.referenced_message else {
-            panic!("expected the referenced message");
-        };
+        let reply = Message::from_wire(parse(fixture), &mut new_arc);
+
+        assert_eq!(reply.kind, MessageType::Reply);
         assert_eq!(
-            Some(original.id),
-            present.reference.as_ref().and_then(|r| r.message_id)
+            reply.replied_to(),
+            Some((
+                Snowflake::new(300_000_000_000_000_002),
+                Snowflake::new(400_000_000_000_000_001)
+            ))
         );
-        assert_eq!(deleted.referenced_message, ReferencedMessage::Deleted);
-        assert_eq!(missing.referenced_message, ReferencedMessage::NotIncluded);
     }
 
     #[test]
@@ -920,7 +906,6 @@ mod tests {
         assert_eq!(message.embeds[0].title.as_deref(), Some("Akari 0.1"));
         assert_eq!(message.mentions.len(), 1);
         assert_eq!(message.stickers.len(), 1);
-        assert_eq!(message.referenced_message, ReferencedMessage::NotIncluded);
     }
 
     // An embed's cover needs its flags and scan; its media boxes their placeholders.

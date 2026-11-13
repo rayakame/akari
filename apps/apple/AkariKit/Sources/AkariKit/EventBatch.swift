@@ -36,6 +36,12 @@ struct EventBatch {
     var deletedMessages: [ChannelId: Set<MessageId>] = [:]
     // Confirmed message ID → the pending ID it replaced.
     var confirmed: [ChannelId: [MessageId: MessageId]] = [:]
+    // Messages whose reactions changed, and nothing else of them.
+    var reactionsChanged: [ChannelId: Set<MessageId>] = [:]
+    // Messages that replies answer, by their own channel: loaded, edited or deleted.
+    var replyTargetsChanged: [ChannelId: Set<MessageId>] = [:]
+    // Channels whose pins dot changed.
+    var pinsUnreadChanged: Set<ChannelId> = []
 
     // Read everything again: a new session, or the disk cache's state before the first one.
     var everythingChanged: Bool { ready || restored }
@@ -108,6 +114,12 @@ struct EventBatch {
             case .messageReplaced(let channel, let pending, let message):
                 windowsChanged.insert(channel)
                 confirmed[channel, default: [:]][message] = pending
+            case .messageReactionsChanged(let channel, let message):
+                reactionsChanged[channel, default: []].insert(message)
+            case .replyTargetChanged(let channel, let target):
+                replyTargetsChanged[channel, default: []].insert(target)
+            case .pinsUnreadChanged(let channel):
+                pinsUnreadChanged.insert(channel)
             }
         }
     }

@@ -7,6 +7,7 @@ use super::snowflake::{
 };
 use super::timestamp::Timestamp;
 use super::user::User;
+use crate::lenient::{default_on_error, skip_invalid_or_empty};
 
 /// A guild's own settings. Its channels, roles and members arrive next to it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -46,23 +47,27 @@ pub struct Guild {
 pub struct GuildEmoji {
     pub id: Snowflake<EmojiMarker>,
     /// `None` only for an emoji that was deleted.
+    #[serde(default, deserialize_with = "default_on_error")]
     pub name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_on_error")]
     pub animated: bool,
     /// `false` when the guild lost the boosts the emoji needs.
-    #[serde(default = "yes")]
+    #[serde(default = "yes", deserialize_with = "true_on_error")]
     pub available: bool,
+    /// Made by an integration, such as a Twitch subscription's.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub managed: bool,
+    /// The roles that may use it; empty for everyone.
+    #[serde(default, deserialize_with = "skip_invalid_or_empty")]
+    pub roles: Vec<Snowflake<RoleMarker>>,
 }
 
 fn yes() -> bool {
     true
 }
 
-/// A guild emoji by its ID alone: READY's and GUILD_EMOJIS_UPDATE's lists, of which the store
-/// keeps only which guild an emoji is from, decoded without their names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub struct EmojiRef {
-    pub id: Snowflake<EmojiMarker>,
+fn true_on_error<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    default_on_error::<D, Option<bool>>(deserializer).map(|available| available.unwrap_or(true))
 }
 
 // The reference's documented default.

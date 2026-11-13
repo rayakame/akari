@@ -432,10 +432,10 @@ fn message_parses() {
     );
     assert_eq!(
         thumbs_up.count_details,
-        ReactionCountDetails {
+        Some(ReactionCountDetails {
             normal: 2,
             burst: 1
-        }
+        })
     );
     assert!(thumbs_up.me);
     assert_eq!(
@@ -534,7 +534,7 @@ fn broken_list_entries_drop_only_themselves() {
     value["reactions"]
         .as_array_mut()
         .unwrap()
-        .push(serde_json::json!({"emoji": {}}));
+        .push(serde_json::json!({"emoji": 7}));
 
     let message: Message = parse(&value.to_string());
 
@@ -789,4 +789,50 @@ fn a_search_in_another_shape_still_decodes() {
     assert_eq!(results.members.len(), 1);
     assert_eq!(results.most_recent_messages.len(), 1);
     assert_eq!(results.total_results, None);
+}
+
+// Whether every source of messages sends the counts' details and the flags isn't known.
+#[test]
+fn a_sparse_reaction_keeps_its_message() {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["reactions"] = json!([
+        {"emoji": {"id": null, "name": "🔥"}, "count": 3},
+        {"emoji": {"id": null, "name": "👍"}, "count": 2, "count_details": "none", "me": true},
+        {"emoji": {"id": null, "name": "🎉"}, "count_details": {"normal": 1}, "me_burst": true}
+    ]);
+
+    let message: Message = parse(&value.to_string());
+
+    let [fire, thumbs_up, party] = &message.reactions[..] else {
+        panic!("expected three reactions, got {:?}", message.reactions);
+    };
+    assert_eq!((fire.count, fire.count_details), (3, None));
+    assert!(!fire.me && !fire.me_burst);
+    assert_eq!((thumbs_up.count, thumbs_up.count_details), (2, None));
+    assert!(thumbs_up.me);
+    assert_eq!(
+        party.count_details,
+        Some(ReactionCountDetails {
+            normal: 1,
+            burst: 0
+        })
+    );
+    assert!(party.me_burst);
+}
+
+#[test]
+fn an_emoji_with_a_broken_animated_flag_keeps_its_reaction() {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["reactions"] = json!([
+        {"emoji": {"id": "41771983429993937", "name": "wave", "animated": null}, "count": 1},
+        {"emoji": {"id": null, "name": "🔥", "animated": "no"}, "count": 2}
+    ]);
+
+    let message: Message = parse(&value.to_string());
+
+    let [wave, fire] = &message.reactions[..] else {
+        panic!("expected two reactions, got {:?}", message.reactions);
+    };
+    assert!(!wave.emoji.animated && !fire.emoji.animated);
+    assert_eq!((wave.count, fire.count), (1, 2));
 }

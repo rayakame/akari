@@ -67,7 +67,9 @@ before compression. The 4 MiB body limit applies to the decompressed body.
   they didn't decode still count.
 - Edits and deletes that arrive while a page is loading are applied to the page when it
   lands, since it may predate them: a deleted message never comes back. An edit older than
-  the page's own version of the message is skipped.
+  the page's own version of the message is skipped. Only what arrived after a page's own load
+  began is applied to it: a load that begins later asks Discord later and has it. Reactions
+  are kept the same way ([dispatches.md](dispatches.md#reactions)).
 - On an error the window stays as it was, except a stale one (below). A load whose future
   is dropped before its page arrives, e.g. because its task was cancelled, ends the same
   way.
@@ -117,6 +119,46 @@ without one) needs the thread and its newest message:
   and the count), newer only, never a starter; an edit patches it, deleting it leaves none, and
   a thread payload naming a newer `last_message_id` drops it. It isn't cached.
 
+## Replies
+
+A reply (type 19) and a context-menu command's result (23) name the message they answer in
+`message_reference` and may carry it as `referenced_message`: the message, `null` for a deleted
+one, or no key when Discord didn't fetch it ([models.md](models.md)). The store keeps those
+messages apart from the replies, as the official client's ReferencedMessageStore does (module
+9842; from the code read of canary 671549, not observed): a reply's record has only its reference (`Message::replied_to`), and
+`Store::reply_target(channel, target)` answers `Loaded(ReplyPreview)`, `Deleted` or `NotLoaded`.
+
+- A reply that arrives, live or on a page, sets its target: `Loaded` from the message sent
+  along, `Deleted` for `null`; without the key, `Loaded` from the window's copy if the window
+  has the message, else the target stays what it was and is `NotLoaded` when new.
+- Any message that arrives whole (a page, MESSAGE_CREATE) and is a target some reply named
+  becomes `Loaded` with its current content, so "not loaded" ends as soon as a load brings it.
+- MESSAGE_UPDATE patches a `Loaded` target, in the window or not; MESSAGE_DELETE and
+  MESSAGE_DELETE_BULK make a known target `Deleted`, as does a refresh whose page lacks a row
+  within its range. What happens to a target while a page
+  loads is put over what the page brings, as for the page's messages.
+- `ReplyTargetChanged { channel_id, target_id }` says the answer changed; the IDs are the
+  target's. Every reply to it reads the same answer.
+- `ReplyPreview` is what the one-line preview needs: the author (the member's name and color
+  are looked up by the ID in the target's guild, unless `webhook`), `kind` (system kinds have
+  their own wording, 20 and 23 are a command's result), `content`, `edited`, `flags` (voice
+  message, 1 << 13), `has_attachments`, `has_embeds`, `has_sticker` and `forwarded`. Whether
+  an embed stands for the content's one link isn't in it: that needs the markdown, and the
+  message itself when the window has it. The `interaction` the official client reads for
+  "Click to see command" isn't modeled.
+- The official client keeps 100 targets a channel, least recently used first out. Akari keeps
+  100 a channel by when a reply or the message last fed them, *and besides them every target a
+  reply the store holds names* (a window's row, a held message, the outbox, a thread's
+  starter), so a line never falls back to "not loaded" under its reader. A channel's targets go
+  with the channel, and with its window unless another window's reply names them. A new
+  session keeps them (the official client drops them all); the refresh brings them again.
+- The preview's "@": `Store::reply_mentions_author(&reply)`, which is
+  `Message::mentions_user(author)` on the reply for the loaded target's author.
+  Discord puts the author into a pinging reply's `mentions`; the official client shows the "@"
+  whenever they are there, also for a mention typed into the text.
+- Other kinds with a reference (a pin's line, "started a thread", a crosspost, a forward) have
+  no target.
+
 ## A thread's starter message
 
 A thread started from a message begins with a `THREAD_STARTER_MESSAGE` (21): no content, only
@@ -130,9 +172,12 @@ around it, `GET /channels/{parent}/messages?limit=1&around={id}`, through the ra
 - The message whose ID was asked for is the starter. A page without it, or a Discord error (403
   Missing Access, 404) means it's gone: `StarterMessage::Unavailable`.
 - A network or server error leaves it `Unavailable` too, and the thread's next page asks again.
+- The message sent along, or its `null`, is kept beside the thread's window, not in the
+  starter's record; a later page that leaves it out changes nothing. A starter that is itself
+  a reply brings its target ([Replies](#replies)).
 - Otherwise each thread's starter is asked for once per account. While the request runs the
   starter is `Loading`; once it settles, `MessageUpdated` for the thread's first message tells a
-  list to read it again. The disk cache doesn't keep `referenced_message`, so a cached starter is
+  list to read it again. The disk cache doesn't keep the starter's message, so a cached starter is
   fetched only when no fresh page of the thread brings the message along. A page that fails
   leaves a cached starter `Unavailable` without a request, and the next page asks.
 - A live MESSAGE_CREATE of a starter without its message is fetched at once.
@@ -295,7 +340,8 @@ What a custom emoji's or a sticker's popout shows comes partly from the store, p
 Discord (canary 649848's calls):
 
 - The user's servers carry their custom emoji in READY and GUILD_CREATE (`emojis`) and
-  GUILD_EMOJIS_UPDATE (the whole list); akari-core keeps each server's emoji IDs, sorted
+  GUILD_EMOJIS_UPDATE (the whole list); akari-core decodes them with their names and
+  availability ([models.md](models.md)) and keeps each server's emoji IDs, sorted
   (`Store::emoji_guild`), in memory and in the disk cache's guild row.
 - `GET /emojis/{emoji.id}/source` (`Account::emoji_source`): `{type: "GUILD" | "APPLICATION",
   guild, application}`. A guild is answered only while it's discoverable; its object has `id`,

@@ -71,6 +71,28 @@ async fn a_slow_load_never_blocks_a_send_in_the_same_channel() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_put_has_its_own_lane() {
+    let limiter = RateLimiter::new(HOUR);
+    let put = |channel| {
+        RouteKey::new(
+            Method::Put,
+            "channels/{}/messages/{}/reactions/{}/@me",
+            channel,
+        )
+    };
+    let delete = RouteKey::new(
+        Method::Delete,
+        "channels/{}/messages/{}/reactions/{}/@me",
+        1,
+    );
+    let _adding = limiter.acquire(put(1)).await.unwrap();
+
+    assert!(starts_within(&limiter, delete, Duration::from_millis(1)).await);
+    assert!(starts_within(&limiter, put(2), Duration::from_millis(1)).await);
+    assert!(!starts_within(&limiter, put(1), Duration::from_millis(1)).await);
+}
+
+#[tokio::test(start_paused = true)]
 async fn different_channels_run_in_parallel() {
     let limiter = RateLimiter::new(HOUR);
     let _first = limiter.acquire(send(1)).await.unwrap();

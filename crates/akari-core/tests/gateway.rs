@@ -1,19 +1,25 @@
 use akari_core::gateway::{
-    ChannelDelete, ChannelUnread, ChannelUnreadUpdate, DecodeError, DispatchEvent, GatewayEvent,
-    GatewayGuild, GuildDelete, GuildRoleDelete, Hello, MessageAck, MessageDelete,
-    MessageDeleteBulk, MuteConfig, NotificationSettings, PassiveUpdateV2, ReadStateEntry, Ready,
-    Relationship, RelationshipRemove, RelationshipUpdate, SettingsProto, SettingsProtoUpdate,
-    UnavailableGuild, Versioned, decode,
+    ChannelDelete, ChannelPinsAck, ChannelPinsUpdate, ChannelUnread, ChannelUnreadUpdate,
+    DebouncedReaction, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, GuildDelete,
+    GuildRoleDelete, Hello, MessageAck, MessageDelete, MessageDeleteBulk, MessageReaction,
+    MessageReactionAddMany, MessageReactionRemoveAll, MessageReactionRemoveEmoji, MuteConfig,
+    NotificationSettings, PassiveUpdateV2, ReadStateEntry, Ready, Relationship, RelationshipRemove,
+    RelationshipUpdate, SettingsProto, SettingsProtoUpdate, UnavailableGuild, Versioned, decode,
 };
 use akari_core::model::{
-    ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
-    RelationshipType, Snowflake, Timestamp,
+    ChannelType, GuildEmoji, MessageNotificationLevel, NsfwLevel, PartialEmoji, Permissions,
+    PremiumTier, PremiumType, ReactionType, RelationshipType, Snowflake, Timestamp,
 };
 use serde_json::Value;
 
 #[track_caller]
 fn decode_ok(json: &str) -> GatewayEvent {
     decode(json.as_bytes()).unwrap_or_else(|err| panic!("failed to decode: {}", chain(&err)))
+}
+
+#[track_caller]
+fn timestamp(text: &str) -> Timestamp {
+    serde_json::from_value(text.into()).unwrap_or_else(|err| panic!("not a timestamp: {err}"))
 }
 
 #[track_caller]
@@ -521,6 +527,7 @@ fn ready_reads_the_read_states() {
                 last_message_id: Some(Snowflake::new(400_000_000_000_000_002)),
                 mention_count: 2,
                 flags: 1,
+                last_pin_timestamp: Some(timestamp("1970-01-01T00:00:00+00:00")),
             },
             ReadStateEntry {
                 id: Snowflake::new(300_000_000_000_000_020),
@@ -528,6 +535,7 @@ fn ready_reads_the_read_states() {
                 last_message_id: Some(Snowflake::new(400_000_000_000_000_030)),
                 mention_count: 0,
                 flags: 3,
+                last_pin_timestamp: Some(timestamp("1970-01-01T00:00:00+00:00")),
             },
             ReadStateEntry {
                 id: Snowflake::new(300_000_000_000_000_010),
@@ -535,6 +543,7 @@ fn ready_reads_the_read_states() {
                 last_message_id: Some(Snowflake::new(400_000_000_000_000_020)),
                 mention_count: 0,
                 flags: 0,
+                last_pin_timestamp: None,
             },
             ReadStateEntry {
                 id: Snowflake::new(200_000_000_000_000_001),
@@ -542,6 +551,7 @@ fn ready_reads_the_read_states() {
                 last_message_id: None,
                 mention_count: 0,
                 flags: 0,
+                last_pin_timestamp: None,
             },
         ]
     );
@@ -1651,10 +1661,12 @@ fn passive_update_v2_decodes() {
                 ChannelUnread {
                     id: Snowflake::new(300_000_000_000_000_002),
                     last_message_id: Some(Snowflake::new(400_000_000_000_000_003)),
+                    last_pin_timestamp: Some(timestamp("2026-10-01T13:00:00+00:00")),
                 },
                 ChannelUnread {
                     id: Snowflake::new(300_000_000_000_000_004),
                     last_message_id: None,
+                    last_pin_timestamp: None,
                 },
             ],
         }
@@ -1681,6 +1693,7 @@ fn a_broken_updated_channel_is_skipped() {
         [ChannelUnread {
             id: Snowflake::new(300_000_000_000_000_004),
             last_message_id: Some(Snowflake::new(400_000_000_000_000_005)),
+            last_pin_timestamp: None,
         }]
     );
 }
@@ -1803,10 +1816,12 @@ fn channel_unread_update_decodes() {
                 ChannelUnread {
                     id: Snowflake::new(300_000_000_000_000_002),
                     last_message_id: Some(Snowflake::new(400_000_000_000_000_005)),
+                    last_pin_timestamp: None,
                 },
                 ChannelUnread {
                     id: Snowflake::new(300_000_000_000_000_003),
                     last_message_id: None,
+                    last_pin_timestamp: None,
                 },
             ],
         }
@@ -1908,4 +1923,306 @@ fn decode_errors_never_quote_the_payload() {
         assert!(!shown.contains("leak-me"), "{shown}");
         assert!(shown.contains("line 1"), "{shown}");
     }
+}
+
+fn unicode(name: &str) -> PartialEmoji {
+    PartialEmoji {
+        id: None,
+        name: Some(name.to_owned()),
+        animated: false,
+    }
+}
+
+#[test]
+fn reaction_add_and_remove_decode() {
+    let data = r##"{
+        "user_id": "100000000000000002",
+        "channel_id": "300000000000000002",
+        "message_id": "400000000000000001",
+        "guild_id": "200000000000000001",
+        "member": {"user": {"id": "100000000000000002", "username": "ray"}, "roles": []},
+        "message_author_id": "100000000000000001",
+        "emoji": {"id": "700000000000000001", "name": "wave", "animated": true},
+        "burst": true,
+        "burst_colors": ["#f0ca59"],
+        "type": 1
+    }"##;
+    let expected = MessageReaction {
+        channel_id: Snowflake::new(300_000_000_000_000_002),
+        message_id: Snowflake::new(400_000_000_000_000_001),
+        guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+        user_id: Snowflake::new(100_000_000_000_000_002),
+        emoji: PartialEmoji {
+            id: Some(Snowflake::new(700_000_000_000_000_001)),
+            name: Some("wave".to_owned()),
+            animated: true,
+        },
+        kind: ReactionType::Burst,
+        burst: true,
+    };
+
+    assert_eq!(
+        dispatch("MESSAGE_REACTION_ADD", data),
+        DispatchEvent::MessageReactionAdd(Box::new(expected.clone()))
+    );
+    assert_eq!(
+        dispatch("MESSAGE_REACTION_REMOVE", data),
+        DispatchEvent::MessageReactionRemove(Box::new(expected))
+    );
+}
+
+// A DM's reaction has no guild, and nothing says the type when it is a normal one.
+#[test]
+fn a_sparse_reaction_is_a_normal_one() {
+    for kind in [
+        r#""type": "burst","#,
+        r#""type": null,"#,
+        r#""burst": 3,"#,
+        "",
+    ] {
+        let DispatchEvent::MessageReactionAdd(reaction) = dispatch(
+            "MESSAGE_REACTION_ADD",
+            &format!(
+                r#"{{{kind} "user_id": "100000000000000002", "channel_id": "300000000000000010",
+                    "message_id": "400000000000000001", "emoji": {{"id": null, "name": "👍"}}}}"#
+            ),
+        ) else {
+            panic!("expected MESSAGE_REACTION_ADD");
+        };
+
+        assert_eq!(reaction.kind, ReactionType::Normal, "{kind}");
+        assert!(!reaction.burst, "{kind}");
+        assert_eq!(reaction.guild_id, None, "{kind}");
+        assert_eq!(reaction.emoji, unicode("👍"), "{kind}");
+    }
+}
+
+#[test]
+fn the_reaction_removals_decode() {
+    assert_eq!(
+        dispatch(
+            "MESSAGE_REACTION_REMOVE_ALL",
+            r#"{"channel_id": "300000000000000002", "message_id": "400000000000000001",
+                "guild_id": "200000000000000001"}"#,
+        ),
+        DispatchEvent::MessageReactionRemoveAll(MessageReactionRemoveAll {
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            message_id: Snowflake::new(400_000_000_000_000_001),
+            guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+        })
+    );
+    assert_eq!(
+        dispatch(
+            "MESSAGE_REACTION_REMOVE_EMOJI",
+            r#"{"channel_id": "300000000000000010", "message_id": "400000000000000001",
+                "emoji": {"id": null, "name": "🔥"}}"#,
+        ),
+        DispatchEvent::MessageReactionRemoveEmoji(Box::new(MessageReactionRemoveEmoji {
+            channel_id: Snowflake::new(300_000_000_000_000_010),
+            message_id: Snowflake::new(400_000_000_000_000_001),
+            guild_id: None,
+            emoji: unicode("🔥"),
+        }))
+    );
+}
+
+#[test]
+fn reaction_add_many_decodes_and_skips_what_is_broken() {
+    let DispatchEvent::MessageReactionAddMany(many) = dispatch(
+        "MESSAGE_REACTION_ADD_MANY",
+        r#"{
+            "channel_id": "300000000000000002",
+            "message_id": "400000000000000001",
+            "guild_id": "200000000000000001",
+            "reactions": [
+                {"users": ["100000000000000002", "nope", "100000000000000003"],
+                 "emoji": {"id": null, "name": "👍"}},
+                {"users": ["100000000000000002"]},
+                {"emoji": {"id": null, "name": "🔥"}}
+            ]
+        }"#,
+    ) else {
+        panic!("expected MESSAGE_REACTION_ADD_MANY");
+    };
+
+    assert_eq!(
+        *many,
+        MessageReactionAddMany {
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            message_id: Snowflake::new(400_000_000_000_000_001),
+            guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+            reactions: vec![
+                DebouncedReaction {
+                    users: vec![
+                        Snowflake::new(100_000_000_000_000_002),
+                        Snowflake::new(100_000_000_000_000_003)
+                    ],
+                    emoji: unicode("👍"),
+                },
+                DebouncedReaction {
+                    users: Vec::new(),
+                    emoji: unicode("🔥"),
+                },
+            ],
+        }
+    );
+}
+
+#[test]
+fn channel_pins_update_decodes() {
+    assert_eq!(
+        dispatch(
+            "CHANNEL_PINS_UPDATE",
+            r#"{"channel_id": "300000000000000002", "guild_id": "200000000000000001",
+                "last_pin_timestamp": "2026-10-01T13:00:00.250000+00:00"}"#,
+        ),
+        DispatchEvent::ChannelPinsUpdate(ChannelPinsUpdate {
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+            last_pin_timestamp: Some(timestamp("2026-10-01T13:00:00.250000+00:00")),
+        })
+    );
+    for time in [
+        r#""last_pin_timestamp": null,"#,
+        r#""last_pin_timestamp": 5,"#,
+        "",
+    ] {
+        let DispatchEvent::ChannelPinsUpdate(update) = dispatch(
+            "CHANNEL_PINS_UPDATE",
+            &format!(r#"{{{time} "channel_id": "300000000000000010"}}"#),
+        ) else {
+            panic!("expected CHANNEL_PINS_UPDATE");
+        };
+
+        assert_eq!(update.last_pin_timestamp, None, "{time}");
+        assert_eq!(update.guild_id, None, "{time}");
+    }
+}
+
+#[test]
+fn channel_pins_ack_decodes() {
+    assert_eq!(
+        dispatch(
+            "CHANNEL_PINS_ACK",
+            r#"{"channel_id": "300000000000000002", "guild_id": "200000000000000001",
+                "timestamp": "2026-10-01T13:00:00+00:00", "version": 4325}"#,
+        ),
+        DispatchEvent::ChannelPinsAck(ChannelPinsAck {
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            timestamp: Some(timestamp("2026-10-01T13:00:00+00:00")),
+            version: 4325,
+        })
+    );
+    assert_eq!(
+        dispatch(
+            "CHANNEL_PINS_ACK",
+            r#"{"channel_id": "300000000000000002", "timestamp": "soon", "version": "x"}"#,
+        ),
+        DispatchEvent::ChannelPinsAck(ChannelPinsAck {
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            timestamp: None,
+            version: 0,
+        })
+    );
+}
+
+#[test]
+fn a_channel_update_separates_a_null_pin_time_from_a_missing_one() {
+    let update = |edit: fn(&mut Value)| {
+        let data = edited(include_str!("fixtures/channel_update.json"), edit);
+        match dispatch("CHANNEL_UPDATE", &data) {
+            DispatchEvent::ChannelUpdate(update) => update.last_pin_timestamp,
+            other => panic!("expected CHANNEL_UPDATE, got {other:?}"),
+        }
+    };
+
+    assert_eq!(update(|_| {}), None);
+    assert_eq!(
+        update(|data| data["last_pin_timestamp"] = Value::Null),
+        Some(None)
+    );
+    assert_eq!(
+        update(|data| data["last_pin_timestamp"] = "2026-10-01T13:00:00+00:00".into()),
+        Some(Some(timestamp("2026-10-01T13:00:00+00:00")))
+    );
+    assert_eq!(
+        update(|data| data["last_pin_timestamp"] = 7.into()),
+        Some(None)
+    );
+}
+
+#[test]
+fn a_broken_pin_time_leaves_its_read_state() {
+    let ready = ready_with(|payload| {
+        payload["d"]["read_state"]["entries"][0]["last_pin_timestamp"] = 12.into();
+    });
+
+    let entry = &ready.read_state.entries[0];
+    assert_eq!(entry.id, Snowflake::new(300_000_000_000_000_002));
+    assert_eq!(entry.last_pin_timestamp, None);
+    assert_eq!(entry.mention_count, 2);
+}
+
+#[test]
+fn guild_emoji_decode_with_their_names_and_availability() {
+    let ready = ready_with(|payload| {
+        payload["d"]["guilds"][0]["emojis"] = serde_json::json!([
+            {"id": "700000000000000001", "name": "wave", "animated": true, "available": false,
+             "managed": true, "require_colons": true, "roles": ["500000000000000001", "x"]},
+            {"id": "700000000000000002", "name": null},
+            {"id": "700000000000000003", "name": 4, "animated": "yes", "available": null,
+             "managed": [], "roles": "all"},
+            {"name": "no id"}
+        ]);
+    });
+
+    let GatewayGuild::Available(guild) = &ready.guilds[0] else {
+        panic!("expected an available guild");
+    };
+    assert_eq!(
+        guild.emojis,
+        [
+            GuildEmoji {
+                id: Snowflake::new(700_000_000_000_000_001),
+                name: Some("wave".to_owned()),
+                animated: true,
+                available: false,
+                managed: true,
+                roles: vec![Snowflake::new(500_000_000_000_000_001)],
+            },
+            GuildEmoji {
+                id: Snowflake::new(700_000_000_000_000_002),
+                name: None,
+                animated: false,
+                available: true,
+                managed: false,
+                roles: Vec::new(),
+            },
+            GuildEmoji {
+                id: Snowflake::new(700_000_000_000_000_003),
+                name: None,
+                animated: false,
+                available: true,
+                managed: false,
+                roles: Vec::new(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn guild_emojis_update_decodes_the_names() {
+    let DispatchEvent::GuildEmojisUpdate(update) = dispatch(
+        "GUILD_EMOJIS_UPDATE",
+        r#"{"guild_id": "200000000000000001", "emojis": [
+            {"id": "700000000000000001", "name": "wave", "available": true},
+            {"id": "nope", "name": "x"}
+        ]}"#,
+    ) else {
+        panic!("expected GUILD_EMOJIS_UPDATE");
+    };
+
+    assert_eq!(update.emojis.len(), 1);
+    assert_eq!(update.emojis[0].name.as_deref(), Some("wave"));
+    assert!(update.emojis[0].available);
 }

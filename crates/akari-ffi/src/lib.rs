@@ -48,9 +48,10 @@ pub use login::{
 pub use records::{
     AgeGate, Attachment, AttachmentDisplay, AttachmentKind, Channel, ConnectionState, ContentStats,
     Delivery, DisplaySettings, EmojiSource, ExplicitContentFilter, ExplicitContentSettings, Guild,
-    MediaCover, Message, MessageReference, MessageWindow, Nitro, Redaction, Slowmode, SourceEmoji,
-    SourceGuild, SpoilerSetting, StarterMessage, Sticker, StickerAnimation, StickerDetails,
-    StickerOrigin, StickerPack, User,
+    MediaCover, Message, MessageActions, MessageReactions, MessageReference, MessageWindow, Nitro,
+    Reaction, ReactionEmoji, Redaction, RepliedTo, ReplyPreview, ReplyTarget, Slowmode,
+    SourceEmoji, SourceGuild, SpoilerSetting, StarterMessage, Sticker, StickerAnimation,
+    StickerDetails, StickerOrigin, StickerPack, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

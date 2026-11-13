@@ -5,12 +5,12 @@ use crate::model::{self, ChannelId, ChannelType, MessageId, Permissions};
 use crate::state::events::StoreEvent;
 use crate::state::read_states::Ack;
 use crate::state::send::Slowmode;
-use crate::state::types::{Delivery, PostCreation, ThreadCreation, ThreadMembership};
+use crate::state::types::{Delivery, Message, PostCreation, ThreadCreation, ThreadMembership};
 
 // The kinds Discord's client lets a thread start from: a user's message, reply or command and a
 // few more that render as one (module 406704).
-const STARTS_THREADS: [u16; 9] = [0, 19, 20, 23, 26, 41, 45, 47, 68];
-const EPHEMERAL: u64 = 1 << 6;
+pub(super) const STARTS_THREADS: [u16; 9] = [0, 19, 20, 23, 26, 41, 45, 47, 68];
+pub(super) const EPHEMERAL: u64 = 1 << 6;
 // Discord's client waits the interval, or the wait a 20016 names, and 100 ms more before it
 // lets the user create again.
 const COOLDOWN_MARGIN: Duration = Duration::from_millis(100);
@@ -71,22 +71,24 @@ impl State {
         }
     }
 
-    // Only the public permission counts: a thread from a message is never private.
     pub(crate) fn can_start_thread(
         &self,
         channel: ChannelId,
         message: MessageId,
         now_millis: i64,
     ) -> bool {
-        let Some(found) = self.message(channel, message) else {
-            return false;
-        };
-        found.delivery == Delivery::Sent
-            && STARTS_THREADS.contains(&u16::from(found.kind))
-            && !found.has_thread()
-            && found.flags & EPHEMERAL == 0
-            && !self.entities.channels.contains_key(&message.cast())
-            && self.thread_creation(channel, now_millis).public
+        self.message(channel, message)
+            .is_some_and(|found| self.starts_thread(&found, now_millis))
+    }
+
+    // Only the public permission counts: a thread from a message is never private.
+    pub(super) fn starts_thread(&self, message: &Message, now_millis: i64) -> bool {
+        message.delivery == Delivery::Sent
+            && STARTS_THREADS.contains(&u16::from(message.kind))
+            && !message.has_thread()
+            && message.flags & EPHEMERAL == 0
+            && !self.entities.channels.contains_key(&message.id.cast())
+            && self.thread_creation(message.channel_id, now_millis).public
     }
 
     // A message the window let go of since the form opened (a jump, a trim) is Discord's to judge.

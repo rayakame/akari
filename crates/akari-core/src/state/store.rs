@@ -14,18 +14,20 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
+use super::reactions::Reaction;
 use super::read_states::{Ack, ReadState};
+use super::replies::ReplyTarget;
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostCreation,
-    PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, MessageActions,
+    PostCreation, PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
-    CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
+    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
 };
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
@@ -749,9 +751,9 @@ impl Store {
         restored
     }
 
-    pub(crate) fn fill_from_cache(&self, ticket: LoadTicket, messages: Vec<Arc<Message>>) {
+    pub(crate) fn fill_from_cache(&self, ticket: LoadTicket, cached: CachedMessages) {
         self.write("load", |inner, events| {
-            inner.state.fill_from_cache(ticket, messages, events);
+            inner.state.fill_from_cache(ticket, cached, events);
         });
     }
 
@@ -1324,6 +1326,36 @@ impl Store {
         self.read(|inner| inner.state.can_start_thread(channel, message, now))
     }
 
+    /// What the user may do with the message, by the official client's rules: the message's
+    /// type, flags and delivery, the user's permissions in its channel (a DM or group DM asks
+    /// none, its system DM allows next to nothing), their timeout, and a thread's archived and
+    /// locked state. Nothing for a message the store doesn't have. Read again when the message,
+    /// its channel or the user's permissions change. A viewed thread's starter row (the
+    /// thread's ID and the row's) answers for the message it shows, in that message's channel:
+    /// requests take the IDs of [`Store::shown_message`].
+    pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.message_actions(channel, message, now))
+    }
+
+    /// The channel and ID of the message the row `row` of `channel` shows, which requests for
+    /// it take: the row's own, but for a viewed thread's starter row whose message is loaded,
+    /// which shows that message of the parent channel. `None` for a row the store doesn't have.
+    pub fn shown_message(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+    ) -> Option<(ChannelId, MessageId)> {
+        self.read(|inner| inner.state.shown_message(channel, row))
+    }
+
+    /// [`Store::message_actions`] for a message the caller holds, which the store may have let
+    /// go of: a pinned message of the pins list, a reply's target, a row a jump trimmed away.
+    pub fn message_actions_of(&self, message: &Message) -> MessageActions {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.message_actions_of(message, now))
+    }
+
     /// The parent's slowmode for creating threads, which Discord counts apart from sending: each
     /// thread the user creates starts it. `None` without slowmode, as [`Store::slowmode`].
     pub fn thread_slowmode(&self, parent: ChannelId) -> Option<Slowmode> {
@@ -1383,6 +1415,53 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    /// The message's reactions, in Discord's order, new emoji at the end; empty when it has
+    /// none or isn't loaded. Read again on `MessageReactionsChanged`, and with the message
+    /// itself on `MessageUpdated`. A viewed thread's starter row answers for the message it
+    /// shows, a forum post's ID in both places for its first message.
+    pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
+        self.read(|inner| inner.state.reactions(channel, message))
+    }
+
+    /// [`Store::reactions`] of the messages among `messages` that have some, in the order
+    /// given, as one read.
+    pub fn reactions_of(
+        &self,
+        channel: ChannelId,
+        messages: &[MessageId],
+    ) -> Vec<(MessageId, Arc<[Reaction]>)> {
+        self.read(|inner| inner.state.reactions_of(channel, messages))
+    }
+
+    /// Whether the channel has a pin newer than the one the user last acknowledged: the dot
+    /// on the header's pins button. Never for a muted channel, or a thread the user hasn't
+    /// joined. `PinsUnreadChanged` says when a pin or an acknowledgement changed it; a mute
+    /// or a join comes with `GuildSettingsChanged` or `ChannelUpdated`.
+    pub fn pins_unread(&self, channel: ChannelId) -> bool {
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        self.read(|inner| inner.state.pins_unread(channel, now))
+    }
+
+    /// The message a reply answers, by the IDs [`Message::replied_to`] gives (the target's
+    /// channel and its ID): as Discord sent it along with a reply, or as a load brought it,
+    /// kept current by its edits and its deletion. `ReplyTargetChanged` says to read it again.
+    /// `NotLoaded` also for a message no loaded reply names.
+    pub fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {
+        self.read(|inner| inner.state.reply_target(channel, target))
+    }
+
+    /// [`Store::reply_target`] for each of `targets`, in the order given, as one read.
+    pub fn reply_targets(&self, channel: ChannelId, targets: &[MessageId]) -> Vec<ReplyTarget> {
+        self.read(|inner| inner.state.reply_targets(channel, targets))
+    }
+
+    /// Whether `reply` mentions the author of the message it answers (it pinged them, or names
+    /// them in its text): the "@" before the name in its preview. False while the target isn't
+    /// loaded, so read again on its `ReplyTargetChanged`.
+    pub fn reply_mentions_author(&self, reply: &Message) -> bool {
+        self.read(|inner| inner.state.reply_mentions_author(reply))
     }
 
     /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and

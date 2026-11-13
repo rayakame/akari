@@ -19,7 +19,9 @@ Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari
   item in a batch collapse into one read, and a view model always converges to the store's
   state at batch time.
 - **Reads by ID** come in single and batch form (`channel(id)`, `channels(ids)`,
-  `messages(channel_id, ids)`, `muted_channels(ids)`, `channel_badges(ids)`); lists cross as
+  `messages(channel_id, ids)`, `muted_channels(ids)`, `channel_badges(ids)`,
+  `reactions(channel_id, message_id)` and `message_reactions(channel_id, message_ids)`,
+  `reply_target(channel_id, target_id)` and `reply_targets(channel_id, target_ids)`); lists cross as
   ID lists (`guild_ids`, `channel_list`, `window`), or as `server_list`'s entries (a guild ID,
   or a folder with its guild IDs).
 
@@ -200,6 +202,60 @@ change the content without an edit time. `Store.content_stats()` counts them: pa
 when read though a load had parsed them, because the cache dropped them since) and
 `event_parses` (parsed when read because no load did: live messages and edits, also those the
 store held back while a page loaded).
+
+## Reactions, replies, pins and what a message allows
+
+`Store.reactions(channel_id, message_id)` are a message's reactions in Discord's order, new
+emoji at the end: each a `Reaction` with its `emoji` (`ReactionEmoji`: a custom one's `id`,
+the `name`, which is the emoji itself for a Unicode one and `None` for a deleted custom one,
+`animated`, and for a custom one the `key` its image is asked by, as an emoji span's), the
+`normal` and `burst` counts and whether the user is in each (`me`, `me_burst`). Empty for a
+message without any or one the store doesn't have. `message_reactions(channel_id, message_ids)`
+reads a page's worth at once and returns only the messages that have some. They aren't on the
+`Message` record: `MessageReactionsChanged { channel_id, message_id }` says to read them again
+and nothing else of the message, so a click rebuilds a row's pills, not its text; a message
+that arrives whole again (`MessageUpdated`, a load) may bring other reactions, so read them
+with it. A viewed thread's starter row asks with the thread's ID and the row's and reads the
+reactions of the message it shows
+([dispatches.md](../../docs/protocol/dispatches.md#reactions)).
+
+A reply's `Message.replied_to` (`RepliedTo`; also a context-menu command's result, `None` for
+every other kind) names the message it answers: `channel_id` and `message_id` are what
+`Store.reply_target(channel_id, target_id)` takes, and `reply_targets(channel_id, target_ids)`
+for a page of replies, in the order given. The answer is a `ReplyTarget`: `Loaded { preview }`,
+`Deleted` or `NotLoaded` (also for a message no loaded reply names). A `ReplyPreview` is what
+the one-line preview needs and no more: `kind`, the `author` as a `User` (the name and color a
+host shows are found as for a message's author; `from_webhook` says it isn't a real user), the
+raw `content` (no formatted text crosses yet: akari-markdown has no rule set for the one-line
+preview), `edited`, `voice_message`, `has_attachments`, `has_embeds`, `has_sticker` and
+`forwarded`. `ReplyTargetChanged { channel_id, target_id }` says the answer changed (the target
+was loaded, edited or deleted); the IDs are the target's, and every reply to it reads the same
+answer. `RepliedTo.mentions_author` is the preview's "@": akari-core's
+`Store::reply_mentions_author`, the reply's mentions naming the loaded target's author, so it
+is false while the target isn't loaded: read the replies' messages again with their target
+([messages.md](../../docs/protocol/messages.md#replies)).
+
+`Store.pins_unread(channel_id)` is the dot on the header's pins button; `PinsUnreadChanged {
+channel_id }` says to read it again, and so do a mute (`GuildSettingsChanged`) and a thread's
+join (`ChannelUpdated`) ([read-states.md](../../docs/protocol/read-states.md#pins)).
+
+`Store.message_actions(channel_id, message_id)` is what the user may do with a message, as
+`MessageActions`: `reply`, `reply_pings`, `mention_toggle`, `edit`, `delete`, `pin`, `unpin`,
+`react`, `toggle_reaction`, `remove_reactions`, `mark_unread`, `copy_link`, `create_thread`
+and `view_thread`, all false for a message the store doesn't have. The rules are akari-core's
+([message-actions.md](../../docs/ui/message-actions.md)); a host asks when its bar or menu
+opens and decides nothing itself. No event reports a change: the answer moves with the
+message, its channel, the user's roles and the end of a timeout.
+
+A thread's starter row is asked about with the thread's ID and the row's, for `reactions` and
+for `message_actions` alike, and both answer for the message the row shows once
+`starter_message(thread_id)` is `Loaded`: that message's type, flags and author, and the
+permissions of the parent channel it is in, whatever the thread's archived or locked state
+(`view_thread` is false there, the row being in that thread). Until then both answer for the
+row itself. Requests (a reaction, a reply, a pin, a delete) never take the row's IDs: they go
+to the shown message, the `channel_id` and `id` of `starter_message`'s message. akari-core
+resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross
+yet.
 
 ## Events
 

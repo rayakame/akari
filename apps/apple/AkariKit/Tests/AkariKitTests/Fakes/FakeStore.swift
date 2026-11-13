@@ -20,6 +20,12 @@ final class FakeStore: Store, @unchecked Sendable {
         var permissions: [ChannelId: Permissions] = [:]
         var windows: [ChannelId: MessageWindow] = [:]
         var messages: [MessageId: Message] = [:]
+        var reactions: [MessageId: [Reaction]] = [:]
+        // By the target's ID; none: not loaded.
+        var replyTargets: [MessageId: ReplyTarget] = [:]
+        var unreadPins: Set<ChannelId> = []
+        // None: nothing is allowed.
+        var messageActions: [MessageId: MessageActions] = [:]
         var lengthLimit: UInt32 = 2000
         var slowmodes: [ChannelId: Slowmode] = [:]
         var channelBadges: [ChannelId: Badge] = [:]
@@ -180,6 +186,45 @@ final class FakeStore: Store, @unchecked Sendable {
     override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
         read(.messages(channelId, ids)) { state in
             ids.compactMap { state.messages[$0] }.filter { $0.channelId == channelId }
+        }
+    }
+
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] {
+        read(.reactions(channelId, messageId)) { $0.reactions[messageId] ?? [] }
+    }
+
+    override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] {
+        read(.messageReactions(channelId, messageIds)) { state in
+            messageIds.compactMap { id in
+                state.reactions[id].flatMap { reactions in
+                    reactions.isEmpty ? nil : MessageReactions(messageId: id, reactions: reactions)
+                }
+            }
+        }
+    }
+
+    override func replyTarget(channelId: ChannelId, targetId: MessageId) -> ReplyTarget {
+        read(.replyTarget(channelId, targetId)) { $0.replyTargets[targetId] ?? .notLoaded }
+    }
+
+    override func replyTargets(channelId: ChannelId, targetIds: [MessageId]) -> [ReplyTarget] {
+        read(.replyTargets(channelId, targetIds)) { state in
+            targetIds.map { state.replyTargets[$0] ?? .notLoaded }
+        }
+    }
+
+    override func pinsUnread(channelId: ChannelId) -> Bool {
+        read(.pinsUnread(channelId)) { $0.unreadPins.contains(channelId) }
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        read(.messageActions(channelId, messageId)) { state in
+            state.messageActions[messageId]
+                ?? MessageActions(
+                    reply: false, replyPings: false, mentionToggle: false, edit: false, delete: false,
+                    pin: false, unpin: false, react: false, toggleReaction: false,
+                    removeReactions: false, markUnread: false, copyLink: false, createThread: false,
+                    viewThread: false)
         }
     }
 

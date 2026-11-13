@@ -8,14 +8,18 @@ public struct Permissions: OptionSet, Hashable, Sendable {
 
     public static let all = Permissions(rawValue: .max)
     public static let administrator = Permissions(rawValue: 1 << 3)
+    public static let addReactions = Permissions(rawValue: 1 << 6)
     public static let viewChannel = Permissions(rawValue: 1 << 10)
     public static let sendMessages = Permissions(rawValue: 1 << 11)
     public static let sendTtsMessages = Permissions(rawValue: 1 << 12)
+    public static let manageMessages = Permissions(rawValue: 1 << 13)
     public static let embedLinks = Permissions(rawValue: 1 << 14)
     public static let attachFiles = Permissions(rawValue: 1 << 15)
     public static let readMessageHistory = Permissions(rawValue: 1 << 16)
     public static let mentionEveryone = Permissions(rawValue: 1 << 17)
+    public static let useExternalEmojis = Permissions(rawValue: 1 << 18)
     public static let changeNickname = Permissions(rawValue: 1 << 26)
     public static let manageThreads = Permissions(rawValue: 1 << 34)
     public static let sendMessagesInThreads = Permissions(rawValue: 1 << 38)
+    public static let pinMessages = Permissions(rawValue: 1 << 51)
 }
