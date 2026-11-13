@@ -364,7 +364,7 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("🎉"), on: row())
         try await eventually { self.tooltips.count == 2 }
         model.pointerEntered(try pill("👍"), on: row())
-        await Task.yield()
+        try await Task.sleep(for: .milliseconds(30))
 
         #expect(
             calls == [
