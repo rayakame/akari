@@ -286,6 +286,21 @@ async fn switching_channels_stops_the_old_one() {
     );
 }
 
+// The host can name what it reads before it names its lists: only an open list can be left.
+#[tokio::test]
+async fn naming_the_open_lists_keeps_reading_a_channel_that_was_never_open() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    online.account.set_reading(&[general()]);
+
+    online.account.set_open_channels(&[id(THREAD)]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+}
+
 const THREAD_MESSAGES: &str = "/api/v9/channels/300000000000000020/messages";
 
 fn thread_message(seq: u64, message_id: u64) -> Value {

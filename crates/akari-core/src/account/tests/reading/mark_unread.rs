@@ -296,6 +296,30 @@ async fn a_mark_while_the_channel_isnt_read_holds_it_too() {
     assert!(badge(&online.account, GENERAL).unread);
 }
 
+// Already unread from that message on: the mark changes nothing in the store and still holds.
+#[tokio::test]
+async fn a_mark_where_the_channel_is_already_unread_holds_it() {
+    let online = acking(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = (NEWEST - 1).to_string().into();
+        ready["read_state"]["entries"][0]["mention_count"] = 1.into();
+    })
+    .await;
+    showing(&online, &[FIRST, FIRST + 1, NEWEST]).await;
+    online.account.set_open_channels(&[general()]);
+    let before = online.account.store().read_state(general());
+
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    assert_eq!(online.account.store().read_state(general()), before);
+    online.account.set_reading(&[general()]);
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
 // Scrolling away, the window losing key: the host stops naming the channel, which stays open.
 #[tokio::test]
 async fn reading_stopping_and_starting_again_leaves_it_unread() {
@@ -482,6 +506,58 @@ async fn a_deleted_channel_is_held_no_longer() {
             "CHANNEL_DELETE",
             json!({"id": GENERAL.to_string(), "type": 0, "guild_id": G1.to_string()}),
         ))
+        .await;
+    event_with(&online.subscription, "ChannelRemoved").await;
+
+    assert!(!online.account.store().holds(general()));
+}
+
+#[tokio::test]
+async fn a_thread_deleted_with_its_channel_is_held_no_longer() {
+    let mut online = acking(|_| {}).await;
+    showing_in(&online, THREAD, &[THREAD_NEWEST - 1, THREAD_NEWEST], &[]).await;
+    online.account.set_open_channels(&[id(THREAD)]);
+    online
+        .account
+        .mark_unread(id(THREAD), msg(THREAD_NEWEST))
+        .await
+        .unwrap();
+    assert!(online.account.store().holds(id(THREAD)));
+
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "CHANNEL_DELETE",
+            json!({"id": GENERAL.to_string(), "type": 0, "guild_id": G1.to_string()}),
+        ))
+        .await;
+    event_with(&online.subscription, "ChannelRemoved").await;
+
+    assert!(!online.account.store().holds(id(THREAD)));
+}
+
+// The server comes back from an outage without the channel.
+#[tokio::test]
+async fn a_channel_its_server_no_longer_lists_is_held_no_longer() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    assert!(online.account.store().holds(general()));
+
+    let ready: Value = serde_json::from_str(READY).unwrap();
+    let mut guild = ready["d"]["guilds"][0].clone();
+    guild["channels"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|channel| channel["id"] != GENERAL.to_string());
+    online
+        .connection
+        .send(dispatch(2, "GUILD_CREATE", guild))
         .await;
     event_with(&online.subscription, "ChannelRemoved").await;
 
