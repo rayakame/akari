@@ -128,9 +128,10 @@ failed), Copy Message Link names the row itself, in the thread: `Store::message_
 back to the row's own IDs.
 
 So the row's bar and menu have Copy Text (the original's text), Copy Message Link (the
-original's, in the parent channel; the row's own until the original is loaded) and Mark Unread (the thread's); never Create Thread, since
-the original has its thread, nor View Thread. *Akari: the apps ask the core with the row's own
-IDs and take the shown message's from the `starter_message` they already hold for the row.*
+original's, in the parent channel; the row's own until the original is loaded) and Mark Unread
+(the thread's); never Create Thread, since the original has its thread, nor View Thread, nor
+Reply. *Akari: the apps ask the core with the row's own IDs and take the shown message's from
+the `starter_message` they already hold for the row.*
 
 ## The hover bar
 
@@ -265,17 +266,19 @@ keeps the channel unread while it stays open are in
 - An Option-click counts anywhere in the message's box: on its text, a link or an emoji too,
   which then aren't followed or opened, and no text is selected. From the code read: the
   official client's row handler takes every Alt+click and stops the click's default.
-- *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar),
-  which keep their click, and only with Option alone. Where the message can't be marked
-  (an archived, locked thread, a message still sending) the click isn't taken: it is an
-  ordinary click with Option held. A click that is taken takes its drag and its release too.*
+- *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar, the
+  text and the spine of a reply's line), which keep their click, and only with Option alone.
+  Where the message can't be marked (an archived, locked thread, a message still sending) the
+  click isn't taken: it is an ordinary click with Option held. A click that is taken takes its
+  drag and its release too.*
 - On a thread's starter row the thread is marked, from its start
   ([A thread's starter row](#a-threads-starter-row)).
 - The open list's new messages line goes over the chosen message, the user's own too, and
   the channel isn't read again while it stays open: leaving it (another channel, the split
-  closed), marking it read (Escape) or writing there ends that. Scrolling, another window, the
-  Mac asleep or a lost connection don't: the channel is still open. Coming back to a channel
-  that was left reads it as always.
+  closed), marking it read (Escape) or writing there ends that. With a reply pending the first
+  Escape only cancels the reply ([replies.md](replies.md#escape)); the next one marks read.
+  Scrolling, another window, the Mac asleep or a lost connection don't: the channel is still
+  open. Coming back to a channel that was left reads it as always.
 - *Akari: the badge and the new messages line change at the click; the official client waits
   for Discord's answer. If Discord refuses, they go back and one alert says so ("Couldn't Mark as
   Unread"). A mark that something later replaced before it counted (Escape right after, the

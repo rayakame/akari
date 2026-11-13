@@ -195,7 +195,10 @@ A click on the line's text or its spine, or on the reply bar, goes to the answer
 Escape's order ([shortcuts.md](shortcuts.md#notes)): an open New Thread form closes first; then
 a pending reply is cancelled, the one of the pane the key was pressed in before the other
 pane's; only a further Escape marks read and jumps to the present. Cancelling a reply marks
-nothing, scrolls nothing and keeps what was typed.
+nothing, scrolls nothing and keeps what was typed. A channel the user marked unread
+([message-actions.md](message-actions.md#mark-unread)) stays unread through that first Escape,
+its new messages line where it is; the pending reply and the mark don't touch each other, in
+either order.
 
 ## Highlight
 
