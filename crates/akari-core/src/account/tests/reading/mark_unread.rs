@@ -551,10 +551,11 @@ async fn a_channel_its_server_no_longer_lists_is_held_no_longer() {
 
     let ready: Value = serde_json::from_str(READY).unwrap();
     let mut guild = ready["d"]["guilds"][0].clone();
+    let gone = GENERAL.to_string();
     guild["channels"]
         .as_array_mut()
         .unwrap()
-        .retain(|channel| channel["id"] != GENERAL.to_string());
+        .retain(|channel| channel["id"] != gone.as_str());
     online
         .connection
         .send(dispatch(2, "GUILD_CREATE", guild))
