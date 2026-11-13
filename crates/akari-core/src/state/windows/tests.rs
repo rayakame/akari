@@ -1012,6 +1012,94 @@ fn a_response_replaces_its_pending_message_and_the_echo_changes_nothing() {
     assert_eq!(harness.ids(), [20]);
 }
 
+// A send from a window away from the present jumps there while it is delivered.
+fn sending_detached() -> (Harness, LoadTicket) {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    harness.queue(pending(500, "hi"));
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    (harness, ticket)
+}
+
+#[test]
+fn a_sent_message_stays_whichever_of_its_answer_and_the_jumps_page_comes_first() {
+    let (mut page_first, ticket) = sending_detached();
+    page_first.finish(ticket, &[28, 31], 3);
+    let answer = page_first.confirm(500, echo(30, 500));
+
+    let (mut answer_first, ticket) = sending_detached();
+    let held = answer_first.confirm(500, echo(30, 500));
+    let page = answer_first.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(answer, ["Replaced(500 -> 30)"]);
+    assert_eq!(page_first.ids(), [28, 30, 31]);
+    assert_eq!(held, ["Replaced(500 -> 30)"]);
+    assert_eq!(page, ["Cleared(1)", "Loaded(28..31)"]);
+    assert_eq!(answer_first.ids(), [28, 30, 31]);
+    assert!(answer_first.window().latest);
+    assert!(answer_first.outbox().is_empty());
+}
+
+#[test]
+fn a_sent_message_the_jumps_page_has_is_there_once() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+
+    let events = harness.finish(ticket, &[28, 30, 31], 5);
+
+    assert_eq!(events, ["Cleared(1)", "Loaded(28..31)"]);
+    assert_eq!(harness.ids(), [28, 30, 31]);
+}
+
+#[test]
+fn a_sent_message_deleted_before_the_jumps_page_stays_deleted() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+    harness.delete(30);
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
+#[test]
+fn a_sent_message_from_before_a_reconnect_is_left_to_the_page() {
+    let (mut harness, ticket) = sending_detached();
+    harness.confirm(500, echo(30, 500));
+    harness.windows.mark_stale(&mut Vec::new());
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
+#[test]
+fn a_sent_message_stays_when_a_refresh_that_lacks_it_has_a_newer_one() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    harness.windows.mark_stale(&mut Vec::new());
+    harness.queue(pending(500, "hi"));
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    harness.confirm(500, echo(12, 500));
+
+    let events = harness.finish(ticket, &[11, 13], 5);
+
+    assert_eq!(events, ["Loaded(13..13)", "Loaded(12..12)", "Refreshed(1)"]);
+    assert_eq!(harness.ids(), [10, 11, 12, 13]);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn another_users_held_message_older_than_the_pages_newest_is_left_to_the_page() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.live(wire(30));
+
+    harness.finish(ticket, &[28, 31], 3);
+
+    assert_eq!(harness.ids(), [28, 31]);
+}
+
 #[test]
 fn a_failed_message_can_be_retried_or_discarded() {
     let mut harness = Harness::viewing(LIMITS);

@@ -105,6 +105,9 @@ struct Window {
     holding: u32,
     // Live messages that arrived while stale or holding; appending them would leave a gap.
     held: Vec<Arc<Message>>,
+    // Held messages Discord confirmed as ours since the last reconnect: a page without one
+    // was read before it, even where it has a newer message.
+    sent: Vec<MessageId>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
     // The newest placing, in the host's order, of a Latest or Around load or a supersede: an
@@ -192,6 +195,7 @@ impl Window {
             self.release_held(channel_id, limit, events);
         } else if !self.holds_live() {
             self.held.clear();
+            self.sent.clear();
             self.held_deleted = None;
             self.held_dropped = None;
         }
@@ -235,9 +239,12 @@ impl Window {
 
     fn release_held(&mut self, channel_id: ChannelId, limit: usize, events: &mut Vec<StoreEvent>) {
         let newest = self.messages.last().map(|message| message.id);
+        let sent = std::mem::take(&mut self.sent);
         let held: Vec<_> = std::mem::take(&mut self.held)
             .into_iter()
-            .filter(|message| newest.is_none_or(|newest| message.id > newest))
+            .filter(|message| {
+                newest.is_none_or(|newest| message.id > newest) || sent.contains(&message.id)
+            })
             .collect();
         let dropped = self
             .held_dropped
@@ -880,6 +887,9 @@ impl Windows {
                 window.outbox.remove(index);
                 window.quiet.retain(|quiet| *quiet != pending_id);
                 window.place(channel_id, message.clone(), limit, false, events);
+                if Window::position(&window.held, message.id).is_ok() {
+                    window.sent.push(message.id);
+                }
                 events.push(StoreEvent::MessageReplaced {
                     channel_id,
                     pending_id,
@@ -1400,6 +1410,7 @@ impl Windows {
                 }
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
+                let sent = std::mem::take(&mut window.sent);
                 let held_deleted = window.held_deleted;
                 // As for a release: the page can't join held messages past a dropped one.
                 let past_dropped =
@@ -1427,12 +1438,15 @@ impl Windows {
                 window.present_through = through.max(held_deleted).filter(|_| at_present);
                 if at_present {
                     let newest = window.messages.last().map(|message| message.id);
-                    for message in held
-                        .into_iter()
-                        .filter(|message| newest.is_none_or(|newest| message.id > newest))
-                    {
-                        added.add(message.id);
-                        window.messages.push(message);
+                    let joining = held.into_iter().filter(|message| {
+                        newest.is_none_or(|newest| message.id > newest)
+                            || sent.contains(&message.id)
+                    });
+                    for message in joining {
+                        if let Err(index) = Window::position(&window.messages, message.id) {
+                            added.add(message.id);
+                            window.messages.insert(index, message);
+                        }
                     }
                 }
                 added.push(channel_id, events);
@@ -1674,6 +1688,8 @@ impl Windows {
         for channel_id in channels {
             if let Some(window) = self.windows.get_mut(&channel_id) {
                 window.stale = true;
+                // A delete may have been missed since.
+                window.sent.clear();
                 events.push(StoreEvent::MessagesStale { channel_id });
             }
         }
