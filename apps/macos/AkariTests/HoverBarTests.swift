@@ -1504,7 +1504,7 @@ struct OptionClickTests {
     }
 
     // Sees what the app sends it and does nothing with it.
-    final class SeeingWindow: NSWindow {
+    final class SeeingWindow: OutOfSightWindow {
         var seen: [NSEvent.EventType] = []
 
         override func sendEvent(_ event: NSEvent) {
