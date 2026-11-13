@@ -148,6 +148,8 @@ public final class ComposerModel {
     // The core let go of the message when it queued the reply.
     @ObservationIgnored private var queuedReply = false
     @ObservationIgnored var onSend: (() -> Void)?
+    // A failed reply's row says why it failed: the list reads it again.
+    @ObservationIgnored var onRefusalChanged: ((MessageId) -> Void)?
 
     init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts) {
         self.channelId = channelId
@@ -208,9 +210,33 @@ public final class ComposerModel {
             _ = try await account.deliverMessage(channelId: channelId, pendingId: pending)
             problem = nil
         } catch {
-            problem = .failed(error as? RequestError ?? .UnexpectedResponse)
+            fail(pending, with: error)
         }
         slowmode = store.slowmode(channelId: channelId)
+    }
+
+    /// Whether Discord refused the failed message `id` because the message it answers was
+    /// deleted; not for a reply that failed otherwise, whatever became of that message since.
+    public func replyWasRefused(_ id: MessageId) -> Bool {
+        drafts.refusedReplies.contains(id)
+    }
+
+    private func fail(_ pending: MessageId, with error: Error) {
+        let failure = error as? RequestError ?? .UnexpectedResponse
+        problem = .failed(failure)
+        setRefused(failure == .ReplyTargetDeleted, for: pending)
+    }
+
+    private func setRefused(_ refused: Bool, for pending: MessageId) {
+        guard refused != drafts.refusedReplies.contains(pending) else {
+            return
+        }
+        if refused {
+            drafts.refusedReplies.insert(pending)
+        } else {
+            drafts.refusedReplies.remove(pending)
+        }
+        onRefusalChanged?(pending)
     }
 
     // The list names people; the bar follows it.
@@ -253,17 +279,19 @@ public final class ComposerModel {
 
     /// Sends a failed message again.
     public func retry(_ id: MessageId) async {
+        setRefused(false, for: id)
         do {
             _ = try await account.retryMessage(channelId: channelId, pendingId: id)
             problem = nil
         } catch {
-            problem = .failed(error as? RequestError ?? .UnexpectedResponse)
+            fail(id, with: error)
         }
         slowmode = store.slowmode(channelId: channelId)
     }
 
     /// Drops a failed message.
     public func discard(_ id: MessageId) {
+        setRefused(false, for: id)
         account.discardMessage(channelId: channelId, pendingId: id)
     }
 
