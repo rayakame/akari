@@ -2,7 +2,8 @@
 
 How custom emoji and stickers show in a message, as the official Discord client shows them
 (canary 649848, read 2026-10-24; plan decisions D139 and D140). Unicode emoji are text in the
-system's emoji font ([markdown.md](markdown.md)); reactions aren't in Akari yet. The pictures
+system's emoji font ([markdown.md](markdown.md)); reactions are in
+[reactions.md](reactions.md). The pictures
 come from Discord's CDN at runtime like every image ([images.md](images.md),
 [cdn.md](../protocol/cdn.md)).
 

@@ -73,7 +73,8 @@ say:
 - Which emoji the picker offers (Use External Emojis, availability, Nitro): the picker's.
 - The user's own row in the reactors list always has its "×".
 - The setting "Show emoji reactions" (`text_and_images.render_reactions`), which hides the rows
-  and every way to react: a display setting, which Akari doesn't read yet.
+  and every way to react: a display setting, which the apps read beside the answer
+  ([reactions.md](reactions.md#show-emoji-reactions)).
 
 *Akari:*
 
@@ -141,8 +142,8 @@ A row of small buttons over the hovered message's top right corner. From the cod
 ### Where and how it shows
 
 - **Size:** 34 high: a 1 border, 2 of padding, buttons of 28 × 28 side by side with no gap, each
-  with a 20 × 20 icon in its middle. Its width is 28 per button plus 6. Corner radius 8, a
-  button's 6.
+  with a 20 × 20 icon in its middle. Its width is 28 per button plus 6, and 9 more for the line
+  after the quick reactions. Corner radius 8, a button's 6.
 - **Place:** its right edge 14 inside the message's box, its top 25 above the box's top, so it
   lies over the row above (y −25 to +9). Over the first message of a group it sits lower, 16
   above the box's top (−16 to +18), unless that message is a reply or a system line. *Akari: the
@@ -187,8 +188,8 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 
 | # | Button | When | In Akari |
 |---|---|---|---|
-| 1 | up to 3 quick reactions, then a separator | `react` | with reactions |
-| 2 | Add Reaction | `react` | with reactions |
+| 1 | up to 3 quick reactions, then a separator | `react` | yes: 💯, 😆 and 💖 ([reactions.md](reactions.md#quick-reactions)) |
+| 2 | Add Reaction | `react` | yes: opens the quick reactions as a menu until Akari has its emoji picker |
 | 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
 | 4 | Edit | `edit` | with editing |
 | 5 | Forward | | left out |
@@ -234,10 +235,10 @@ client's order, with what Akari has in bold:
 
 | Group | Items |
 |---|---|
-| Reactions | Add Reaction, View Reactions |
+| Reactions | **Add Reaction** (its submenu: the quick reactions), **View Reactions** (a message with reactions) |
 | Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
-| Removing | Remove Reactions, Remove All Reactions, **Delete Message** (red; today a failed send's only) |
+| Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red; today a failed send's only) |
 | Developer | Copy Message ID (developer mode) |
 
 *Akari:*
@@ -247,7 +248,9 @@ client's order, with what Akari has in bold:
 - *A message that is still sending, and an ephemeral one, keep "Copy Text" alone: the official
   client's sending row has more, its ephemeral row no menu at all.*
 - *What a thread's starter row has is in [A thread's starter row](#a-threads-starter-row).*
-- *Left out: the row of quick reactions, Forward, Translate, Bookmark and reminders, Apps, Speak
+- *The quick reactions are Add Reaction's submenu, not a row over the menu
+  ([reactions.md](reactions.md#quick-reactions)).*
+- *Left out: Forward, Translate, Bookmark and reminders, Apps, Speak
   Message, polls' and interactions' items, Report Message, the items for a clicked image, link,
   emoji or sticker (the media viewer has Copy Image and Copy Media Link), and Copy and Search
   with Google for a text selection (a selection's menu ends with macOS's "Copy"). Copy Message ID
