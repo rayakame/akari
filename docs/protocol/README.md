@@ -20,6 +20,8 @@ surprises we found.
 - [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
 - [messages.md](messages.md): loading history, refreshing after a new session, sending with
   a nonce, request errors
+- [reactions.md](reactions.md): adding and removing reactions and listing who reacted: the
+  routes, the emoji in the path, the optimistic change and its undo, the errors
 - [rate-limits.md](rate-limits.md): per-route and global REST limits and how Akari stays
   within them
 - [user-settings.md](user-settings.md): the settings proto (server folders and order) and
