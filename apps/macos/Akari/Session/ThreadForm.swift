@@ -661,16 +661,31 @@ final class MessagePreviewView: NSView, CursorAuthority {
     init() {
         super.init(frame: .zero)
         cell.expressionsEnabled = false
-        addSubview(cell)
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        place()
+    }
+
     override func layout() {
         super.layout()
+        place()
+    }
+
+    // SwiftUI lays the view out before it has a size, where the cell's margins can't hold.
+    private func place() {
+        guard bounds.width > 0, bounds.height > 0 else {
+            return
+        }
         cell.frame = bounds
+        if cell.superview == nil {
+            addSubview(cell)
+        }
     }
 
     override func updateTrackingAreas() {
