@@ -22,7 +22,7 @@ use super::types::{
     ThreadMembership, User,
 };
 use super::windows::{
-    CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, Outgoing,
+    Answered, CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, Outgoing,
     StarterFetch, WindowLimits, Windows,
 };
 use crate::gateway::{
@@ -1764,7 +1764,7 @@ impl State {
         let send = message.id;
         match reply {
             Some(reply) => {
-                let Some(target) = self.answerable(channel, reply.message, now_millis) else {
+                let Some(preview) = self.answered(channel, reply.message, now_millis) else {
                     return false;
                 };
                 let guild = self
@@ -1772,8 +1772,14 @@ impl State {
                     .channels
                     .get(&channel)
                     .and_then(|channel| channel.guild_id);
-                let message = Arc::new(message.answering(&target, guild, reply.mention));
-                let answers = Some((&*target, reply.mention));
+                let mention = reply.mention;
+                let pinged = mention.then(|| preview.author.clone());
+                let message = Arc::new(message.answering(reply.message, pinged, guild));
+                let answers = Some(Answered {
+                    target: reply.message,
+                    preview,
+                    mention,
+                });
                 self.windows.queue(channel, message, answers, events);
             }
             None => self.windows.queue(channel, Arc::new(message), None, events),
