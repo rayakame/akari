@@ -673,3 +673,11 @@ async fn an_ack_hands_a_502_back_instead_of_retrying_it() {
     );
     assert_eq!(requests(&server).await.len(), 1);
 }
+
+#[test]
+fn a_deleted_reply_target_is_logged_as_its_own_kind() {
+    assert_eq!(
+        RequestError::ReplyTargetDeleted.kind(),
+        "reply_target_deleted"
+    );
+}

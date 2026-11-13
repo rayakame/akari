@@ -205,6 +205,8 @@ async fn a_queued_reply_shows_as_a_reply_with_its_preview_at_once() {
     assert_eq!(row.delivery, Delivery::Pending);
     assert_eq!(row.replied_to(), Some((general(), target())));
     let reference = row.reference.as_deref().unwrap();
+    assert_eq!(reference.kind, crate::model::MessageReferenceType::Default);
+    assert_eq!(reference.channel_id, Some(general()));
     assert_eq!(
         reference.guild_id.map(Snowflake::get),
         Some(GUILD.parse().unwrap())
@@ -450,6 +452,195 @@ async fn unknown_message_is_the_deleted_target_only_for_a_reply() {
         matches!(plain_error, RequestError::Discord { code: 10008, .. }),
         "{plain_error:?}"
     );
+    assert_eq!(
+        account.store().reply_target(general(), target()),
+        ReplyTarget::Deleted
+    );
+}
+
+#[tokio::test]
+async fn a_deleted_target_among_other_field_errors_is_still_the_deleted_target() {
+    let unknown = json!({"_errors": [
+        {"code": "REPLIES_UNKNOWN_MESSAGE", "message": "Unknown message"}
+    ]});
+    let required = json!({"_errors": [
+        {"code": "BASE_TYPE_REQUIRED", "message": "This field is required"}
+    ]});
+    let refusal =
+        |errors: Value| json!({"code": 50035, "message": "Invalid Form Body", "errors": errors});
+    let answers = [
+        (
+            refusal(json!({"content": required, "message_reference": unknown})),
+            true,
+        ),
+        (
+            refusal(json!({"message_reference": unknown, "content": required})),
+            true,
+        ),
+        (refusal(json!({"content": unknown})), false),
+    ];
+    for (answer, deleted) in answers {
+        let mut fake = FakeGateway::start().await;
+        let server = MockServer::start().await;
+        refuse(&server, 400, answer.clone()).await;
+        let (account, _subscription, _connection) = replying(&mut fake, &server).await;
+
+        let error = account
+            .send_message(general(), "hello".to_owned(), reply(true))
+            .await
+            .unwrap_err();
+
+        if deleted {
+            assert!(
+                matches!(error, RequestError::ReplyTargetDeleted),
+                "{error:?} for {answer}"
+            );
+        } else {
+            assert!(
+                matches!(error, RequestError::Discord { code: 50035, .. }),
+                "{error:?} for {answer}"
+            );
+            assert!(matches!(
+                account.store().reply_target(general(), target()),
+                ReplyTarget::Loaded(_)
+            ));
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_reply_refused_for_its_deleted_target_is_refused_again_on_a_retry() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let bodies: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let seen = bodies.clone();
+    Mock::given(method("POST"))
+        .and(path(MESSAGES))
+        .respond_with(move |request: &wiremock::Request| {
+            seen.lock()
+                .unwrap()
+                .push(serde_json::from_slice(&request.body).unwrap());
+            ResponseTemplate::new(400).set_body_json(unknown_reference())
+        })
+        .mount(&server)
+        .await;
+    let (account, _subscription, _connection) = replying(&mut fake, &server).await;
+    account
+        .send_message(general(), "hello".to_owned(), reply(false))
+        .await
+        .unwrap_err();
+    let failed = pending_row(&account, general());
+
+    let again = account.retry_message(general(), failed.id).await;
+
+    assert!(
+        matches!(again, Err(RequestError::ReplyTargetDeleted)),
+        "{again:?}"
+    );
+    let bodies = bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], bodies[1]);
+    assert_eq!(
+        bodies[1]["message_reference"]["message_id"],
+        TARGET.to_string()
+    );
+    let row = pending_row(&account, general());
+    assert_eq!(row.id, failed.id);
+    assert_eq!(row.delivery, Delivery::Failed);
+    assert_eq!(row.replied_to(), Some((general(), target())));
+    assert_eq!(
+        account.store().reply_target(general(), target()),
+        ReplyTarget::Deleted
+    );
+}
+
+#[tokio::test]
+async fn a_reply_discord_makes_to_a_message_deleted_meanwhile_says_so() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(MESSAGES))
+        .respond_with(|request: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let mut answer = created(400_000_000_000_000_050, &body);
+            answer["referenced_message"] = Value::Null;
+            ResponseTemplate::new(200).set_body_json(answer)
+        })
+        .mount(&server)
+        .await;
+    let (account, subscription, mut connection) = replying(&mut fake, &server).await;
+    sync(&mut connection, &subscription, 3).await;
+
+    let sent = account
+        .send_message(general(), "hello".to_owned(), reply(true))
+        .await
+        .unwrap();
+
+    let confirmed = account.store().message(general(), sent).unwrap();
+    assert_eq!(confirmed.kind, MessageType::Reply);
+    assert_eq!(confirmed.replied_to(), Some((general(), target())));
+    assert_eq!(
+        account.store().reply_target(general(), target()),
+        ReplyTarget::Deleted
+    );
+    let events = sync(&mut connection, &subscription, 4).await;
+    let changed = format!(
+        "ReplyTargetChanged {{ channel_id: Snowflake({GENERAL}), target_id: Snowflake({TARGET}) }}"
+    );
+    assert_eq!(
+        events.iter().filter(|event| **event == changed).count(),
+        2,
+        "loaded when queued, deleted with the answer: {events:?}"
+    );
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_reply_starts_the_cooldown_and_a_refused_one_does_not() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let (account, subscription, mut connection) =
+        slowmode_sending(&mut fake, &server, json!([])).await;
+    connection.send(message(2, TARGET)).await;
+    events_until(&subscription, &format!("MessageInserted({TARGET})")).await;
+    let unknown = Some(ReplyTo {
+        message: Snowflake::new(4242),
+        mention: true,
+    });
+
+    let refused = account.queue_message(general(), "hello", unknown);
+
+    assert!(matches!(refused, Err(RequestError::InvalidRequest)));
+    assert_eq!(slowmode_until(&account), None);
+
+    account
+        .queue_message(general(), "hello", reply(true))
+        .unwrap();
+
+    assert!(slowmode_until(&account).is_some());
+}
+
+#[tokio::test]
+async fn a_failed_reply_is_not_delivered_again_without_a_retry() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let sends = Sends::new(&[403]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = replying(&mut fake, &server).await;
+    account
+        .send_message(general(), "hello".to_owned(), reply(true))
+        .await
+        .unwrap_err();
+    let failed = pending_row(&account, general());
+
+    let delivered = account.deliver_message(general(), failed.id).await;
+
+    assert!(
+        matches!(delivered, Err(RequestError::InvalidRequest)),
+        "{delivered:?}"
+    );
+    assert_eq!(sends.bodies().len(), 1);
+    assert_eq!(pending_row(&account, general()).delivery, Delivery::Failed);
 }
 
 #[tokio::test]
