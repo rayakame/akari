@@ -711,7 +711,7 @@ mod tests {
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
     use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
     use serde_json::{Value, json};
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -720,6 +720,12 @@ mod tests {
     // message_reply.json: the user's reply and the message of Mira's it answers.
     const REPLY: u64 = 400_000_000_000_000_002;
     const TARGET: u64 = 400_000_000_000_000_001;
+
+    // akari-core's fake gateway helpers, shared instead of copied.
+    #[allow(dead_code)]
+    mod gateway {
+        include!("../../akari-core/tests/support/gateway.rs");
+    }
 
     struct NoTokens;
 
@@ -955,6 +961,211 @@ mod tests {
                 message: Snowflake::new(7),
                 mention: false
             })
+        );
+    }
+
+    const ME: u64 = 100_000_000_000_000_001;
+
+    struct OneAccount;
+
+    impl TokenStore for OneAccount {
+        fn load(&self, _: UserId) -> Result<Option<Token>, TokenStoreError> {
+            Ok(Some(Token::new("t".to_owned())))
+        }
+
+        fn save(&self, _: UserId, _: &Token) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+
+        fn delete(&self, _: UserId) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    impl Accounts for OneAccount {
+        fn current_account(&self) -> Result<Option<UserId>, TokenStoreError> {
+            Ok(Some(UserId::new(ME)))
+        }
+
+        fn set_current_account(&self, _: UserId) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+
+        fn clear_current_account(&self) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    // A gateway that answers one login with the READY fixture, and a client for it and `api`.
+    async fn online(api: &MockServer) -> DiscordClient {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut ws = gateway::accept(&listener).await;
+            assert_eq!(gateway::handshake(&mut ws).await["op"], 2);
+            let ready: Value =
+                serde_json::from_str(include_str!("../../akari-core/tests/fixtures/ready.json"))
+                    .unwrap();
+            gateway::send(&mut ws, ready).await;
+            while let Some(Ok(_)) = futures_util::StreamExt::next(&mut ws).await {}
+        });
+        let host = HostInfo {
+            os: DesktopOs::MacOs,
+            os_version: "25.0.0".to_owned(),
+            arch: Arch::Arm64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+        let endpoints = Endpoints {
+            api: format!("{}/api/v9/", api.uri()),
+            gateway: format!("ws://{address}/"),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        };
+        DiscordClient::with_endpoints(properties, Arc::new(OneAccount), endpoints).unwrap()
+    }
+
+    fn answered(id: u64, kind: u8) -> Value {
+        let mut message: Value = serde_json::from_str(include_str!(
+            "../../akari-core/tests/fixtures/message_create.json"
+        ))
+        .unwrap();
+        message["id"] = id.to_string().into();
+        message["type"] = kind.into();
+        message.as_object_mut().unwrap().remove("nonce");
+        message
+    }
+
+    // #general's pages: the one around message 7 holds it alone, as `kind`.
+    async fn pages(server: &MockServer, kind: u8) {
+        let messages = format!("/api/v9/channels/{GENERAL}/messages");
+        Mock::given(method("GET"))
+            .and(path(messages.clone()))
+            .and(query_param("around", "7"))
+            .and(query_param("limit", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([answered(7, kind)])))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(messages.clone()))
+            .and(query_param_is_missing("around"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([answered(7, kind)])))
+            .mount(server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(messages))
+            .respond_with(|request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let mut created = answered(50, 19);
+                created["author"]["id"] = ME.to_string().into();
+                created["content"] = body["content"].clone();
+                created["nonce"] = body["nonce"].clone();
+                created["message_reference"] = body["message_reference"].clone();
+                ResponseTemplate::new(200).set_body_json(created)
+            })
+            .mount(server)
+            .await;
+    }
+
+    fn reply_command(no_mention: bool) -> SessionCommand {
+        SessionCommand::Send {
+            repeat_nonce: false,
+            reply: Some(7),
+            no_mention,
+            channel_id: GENERAL,
+            text: vec!["hi".to_owned(), "there".to_owned()],
+        }
+    }
+
+    fn succeeded(code: ExitCode) -> bool {
+        code == ExitCode::SUCCESS
+    }
+
+    // Each request to #general's messages, in the order they arrived: its method, query and body.
+    async fn requests(server: &MockServer) -> Vec<(String, String, Value)> {
+        let received = server.received_requests().await.unwrap();
+        received
+            .iter()
+            .filter(|request| request.url.path().ends_with("/messages"))
+            .map(|request| {
+                (
+                    request.method.to_string(),
+                    request.url.query().unwrap_or_default().to_owned(),
+                    serde_json::from_slice(&request.body).unwrap_or(Value::Null),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn send_loads_around_the_target_then_sends_the_reply() {
+        for no_mention in [false, true] {
+            let server = MockServer::start().await;
+            pages(&server, 0).await;
+            let client = online(&server).await;
+
+            let code = run(&client, &Arc::new(OneAccount), reply_command(no_mention)).await;
+
+            assert!(succeeded(code));
+            let requests = requests(&server).await;
+            let (first, query, _) = &requests[0];
+            assert_eq!(
+                (first.as_str(), query.as_str()),
+                ("GET", "limit=1&around=7")
+            );
+            let posts: Vec<&Value> = requests
+                .iter()
+                .skip(1)
+                .filter(|(method, ..)| method == "POST")
+                .map(|(.., body)| body)
+                .collect();
+            assert_eq!(posts.len(), 1, "{requests:?}");
+            assert_eq!(posts[0]["content"], "hi there");
+            assert_eq!(posts[0]["message_reference"]["message_id"], "7");
+            let quiet = json!({"parse": ["users", "roles", "everyone"], "replied_user": false});
+            assert_eq!(
+                posts[0].get("allowed_mentions"),
+                no_mention.then_some(&quiet)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reply_whose_message_cant_be_loaded_sends_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages")))
+            .and(query_param("around", "7"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"message": "Missing Access", "code": 50001})),
+            )
+            .mount(&server)
+            .await;
+        pages(&server, 0).await;
+        let client = online(&server).await;
+
+        let code = run(&client, &Arc::new(OneAccount), reply_command(false)).await;
+
+        assert!(!succeeded(code));
+        let requests = requests(&server).await;
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        assert_eq!(requests[0].0, "GET");
+    }
+
+    #[tokio::test]
+    async fn a_reply_the_core_refuses_fails_without_a_request() {
+        let server = MockServer::start().await;
+        pages(&server, 6).await;
+        let client = online(&server).await;
+
+        let code = run(&client, &Arc::new(OneAccount), reply_command(false)).await;
+
+        assert!(!succeeded(code));
+        let requests = requests(&server).await;
+        assert!(
+            requests.iter().all(|(method, ..)| method == "GET"),
+            "{requests:?}"
         );
     }
 
