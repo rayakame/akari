@@ -13,6 +13,7 @@ use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::keychain::Accounts;
+use crate::reactions;
 use crate::session::{self, Session, closed_message};
 use crate::{printable, report};
 
@@ -48,6 +49,33 @@ pub enum SessionCommand {
         channel_id: u64,
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
+    },
+    /// React to a message. The emoji is the Unicode emoji itself or a custom one as `name:id`.
+    React {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+    },
+    /// Take your reaction back.
+    Unreact {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+    },
+    /// List the users who reacted to a message with an emoji.
+    Reactors {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+        /// The super reactions' users.
+        #[arg(long)]
+        burst: bool,
+        /// Go on after this user (the last one of the page before).
+        #[arg(long, value_name = "USER_ID")]
+        after: Option<u64>,
+        /// How many users, 1 to 100.
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(1..=100))]
+        limit: u8,
     },
     /// Print a channel's latest messages, then new, edited and deleted ones, reaction changes
     /// and changes to messages that replies answer, until Ctrl+C.
@@ -96,6 +124,39 @@ pub async fn run<S: Accounts>(
                 let reply = reply_to(reply, no_mention);
                 send(&session, channel, text.join(" "), reply).await
             }
+        }
+        SessionCommand::React {
+            channel_id,
+            message_id,
+            emoji,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::toggle(&session.account, channel, message, &emoji, true).await
+        }
+        SessionCommand::Unreact {
+            channel_id,
+            message_id,
+            emoji,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::toggle(&session.account, channel, message, &emoji, false).await
+        }
+        SessionCommand::Reactors {
+            channel_id,
+            message_id,
+            emoji,
+            burst,
+            after,
+            limit,
+        } => {
+            let args = reactions::ReactorsArgs {
+                emoji,
+                burst,
+                after,
+                limit,
+            };
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::reactors(&session.account, channel, message, args).await
         }
         SessionCommand::Tail {
             flags_only,
@@ -826,6 +887,54 @@ mod tests {
         let marks = marks(row(&account, REPLY).reactions());
 
         assert_eq!(reactions_text(&marks), "👍 3* (1 super)  :party: 1  🔥 2*");
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn reactors_are_listed_with_where_to_go_on() {
+        let (server, account) = loaded(vec![reply()]).await;
+        let users = json!([
+            {"id": "100000000000000002", "username": "mira", "global_name": "Mira",
+             "discriminator": "0", "avatar": null},
+            {"id": "100000000000000003", "username": "to\u{7}m", "discriminator": "0",
+             "avatar": null},
+        ]);
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path_regex("/reactions/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(users))
+            .mount(&server)
+            .await;
+        let emoji = crate::reactions::parse_emoji("wave:7").unwrap();
+        let ask = |limit| {
+            account.reactors(
+                Snowflake::new(GENERAL),
+                Snowflake::new(REPLY),
+                &emoji,
+                akari_core::ReactionKind::Normal,
+                None,
+                limit,
+            )
+        };
+
+        let full = ask(2).await.unwrap();
+        let short = ask(100).await.unwrap();
+
+        assert_eq!(
+            crate::reactions::reactor_lines(&full),
+            [
+                "Mira (mira)  100000000000000002",
+                "to\\u{7}m (to\\u{7}m)  100000000000000003",
+                "(more: --after 100000000000000003)",
+            ]
+        );
+        assert_eq!(crate::reactions::reactor_lines(&short).len(), 2);
+        let asked = server.received_requests().await.unwrap();
+        let last = asked.last().unwrap();
+        assert_eq!(
+            last.url.path(),
+            format!("/api/v9/channels/{GENERAL}/messages/{REPLY}/reactions/wave:7")
+        );
+        assert_eq!(last.url.query(), Some("limit=100&type=0"));
         account.close();
     }
 
