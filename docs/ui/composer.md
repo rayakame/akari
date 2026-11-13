@@ -22,6 +22,10 @@ from Discord's documentation.
   chat's background, so they stay readable over a message.
 - Discord puts buttons for attachments, gifts, GIFs, stickers and emoji into the card. Akari
   has none of them yet.
+- While a reply is pending, the card's top part is the reply bar: a band of 37 (35 without the
+  ping's switch) and a line of 1 over the text, inside the card's round corners
+  ([replies.md](replies.md#the-reply-bar)). The card grows by it upward; the text stays where
+  it is.
 
 ## Growing
 
@@ -50,7 +54,7 @@ The official placeholder measured `#6c6d75` on the dark theme, darker than `text
   commits the composition; it never sends.
 - **Up arrow in an empty composer** edits the user's last message in the official client.
   Akari reserves the key for that and does nothing yet.
-- **Escape** see [shortcuts.md](shortcuts.md).
+- **Escape** cancels a pending reply first, see [shortcuts.md](shortcuts.md).
 
 Pasted text arrives as plain text. Smart quotes, smart dashes, text replacement and automatic
 spelling correction are off, since they would change markdown and code; the official client
@@ -67,6 +71,8 @@ never reaches back past a send or into another channel's draft.
 - After a reconnect, messages that were still pending or had failed come back as the draft of
   their channel, after any text already there, so nothing typed is lost.
 - Sending while the list shows older messages jumps to the present first.
+- With a reply pending, the message answers its message and the reply bar goes as soon as the
+  message is queued ([replies.md](replies.md)).
 
 ## Failed messages
 
@@ -74,6 +80,9 @@ never reaches back past a send or into another channel's draft.
   (`danger`). Under it a line says "Not sent." with two buttons, "Retry" and "Delete", in
   `textLink`. The official client also turns failed messages red and lets the user resend or
   delete them.
+- A failed reply keeps its line and, on Retry, its message and its ping choice. When Discord
+  refused it because the answered message is gone, the line says "Not sent: the message it
+  replies to was deleted." *Akari's wording; the official client tells no reason apart.*
 - The reason shows on the left of the strip under the card, in `danger` at 12, on one line.
   Akari words its reasons itself: being too fast (with how long to wait), missing
   permission, a person who doesn't accept the user's messages, a message that is too long, no

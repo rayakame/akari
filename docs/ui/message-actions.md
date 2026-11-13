@@ -116,8 +116,8 @@ official client marks from this row wasn't read.*
 
 Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
 gives the channel and ID of the message a row shows: the original's for such a starter row,
-the row's own for every other; a reaction, a reply, a pin or a delete from the row goes there,
-and Copy Message Link names them. Mark Unread alone takes the row's own:
+the row's own for every other; a reaction, a pin or a delete from the row goes there, and Copy
+Message Link names them. Mark Unread alone takes the row's own:
 `Account::mark_unread(thread, row)`. While the row's message isn't resolved (loading, gone or
 failed), Copy Message Link names the row itself, in the thread: `Store::message_link` falls
 back to the row's own IDs.
@@ -183,7 +183,7 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 |---|---|---|---|
 | 1 | up to 3 quick reactions, then a separator | `react` | with reactions |
 | 2 | Add Reaction | `react` | with reactions |
-| 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | with replies |
+| 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
 | 4 | Edit | `edit` | with editing |
 | 5 | Forward | | left out |
 | 6 | Create Thread | `create_thread` | yes |
@@ -201,7 +201,7 @@ With **Shift held**, the bar changes at once, the pointer still, and back when S
 | 4 | Mark Unread | `mark_unread` | yes |
 | 5 | Bookmark Message | | left out |
 | 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
-| 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | with replies |
+| 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | yes |
 | 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
 | 9 | Delete | `delete`; no question asked | with deleting |
 | 10 | More | only where Delete isn't | yes |
@@ -229,7 +229,7 @@ client's order, with what Akari has in bold:
 | Group | Items |
 |---|---|
 | Reactions | Add Reaction, View Reactions |
-| Writing | Edit Message, Reply, Forward, **Create Thread**, ***View Thread*** |
+| Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
 | Removing | Remove Reactions, Remove All Reactions, **Delete Message** (red; today a failed send's only) |
 | Developer | Copy Message ID (developer mode) |
