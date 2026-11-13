@@ -779,9 +779,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
-        tableView.beginUpdates()
         tableView.noteHeightOfRows(withIndexesChanged: rows)
-        tableView.endUpdates()
         NSAnimationContext.endGrouping()
     }
 
