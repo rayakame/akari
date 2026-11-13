@@ -299,6 +299,194 @@ struct PendingReplyTests {
     }
 }
 
+// Channel 10 with messages 1...60, the list at its newest; 58 can be answered. A load around
+// 5 leaves 3...7, the latest page 57...60.
+@MainActor @Suite(.timeLimit(.minutes(1)))
+struct ReplyHoldTests {
+    let store = FakeStore()
+    let account: FakeAccount
+    let here: ChannelId = id(10)
+    let drafts = Drafts()
+
+    init() {
+        account = FakeAccount(store: store)
+        store.update { state in
+            state.currentUser = user(1)
+            state.channels[id(10)] = channel(10, guild: 1)
+            state.channels[id(20)] = dm(20, with: 2)
+            state.permissions[id(10)] = [.viewChannel, .sendMessages]
+            for raw in UInt64(1)...60 {
+                state.show(message(raw, by: user(2)))
+            }
+            state.windows[id(10)] = window([57, 58, 59, 60])
+            state.allow(replying(), message: 58, in: 10)
+            state.allow(replying(), message: 59, in: 10)
+            state.allow(replying(toggle: false), message: 200, in: 20)
+        }
+        account.windowAfter.withLock {
+            $0 = { load in
+                switch load {
+                case .around: return window([3, 4, 5, 6, 7], latest: false)
+                case .latest: return window([57, 58, 59, 60])
+                default: return nil
+                }
+            }
+        }
+    }
+
+    func makeModel() -> MessageListModel {
+        MessageListModel(
+            channelId: here, userId: id(1), account: account, store: store, drafts: drafts)
+    }
+
+    func answer(_ raw: UInt64, in model: MessageListModel) throws {
+        let row = try #require(model.rows.first { $0.id == id(raw) })
+        model.composer.startReply(to: row, shift: false)
+        #expect(model.composer.reply?.messageId == id(raw))
+    }
+
+    var replies: [CallLog.Call] {
+        store.log.actions.filter { call in
+            if case .reply = call { true } else { false }
+        }
+    }
+
+    func hold(_ raw: UInt64?, in channel: UInt64 = 10) -> FakeAccount.ReplyHold {
+        FakeAccount.ReplyHold(channel: id(channel), message: raw.map { id($0) })
+    }
+
+    @Test
+    func aReplyIsSentAfterAJumpTookItsMessageOutOfTheList() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        await model.jump(to: id(5))
+        #expect(model.rows.map(\.id) == [3, 4, 5, 6, 7].map { id($0) })
+        #expect(model.composer.reply?.messageId == id(58), "the bar stays")
+
+        model.composer.draft = "hi"
+        await model.composer.submit()
+
+        #expect(replies == [.reply(here, id(58), mention: true)])
+        #expect(model.composer.problem == nil)
+        #expect(model.composer.reply == nil)
+        #expect(model.composer.draft.isEmpty)
+    }
+
+    @Test
+    func aReplyIsSentAfterTheJumpToThePresentReloadedTheList() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        await model.jump(to: id(5))
+        account.windowAfter.withLock { $0 = { _ in window([59, 60]) } }
+
+        await model.jumpToPresent()
+        model.composer.draft = "hi"
+        await model.composer.submit()
+
+        #expect(replies == [.reply(here, id(58), mention: true)])
+        #expect(model.composer.problem == nil)
+    }
+
+    @Test
+    func aReplyKeptAcrossAChannelSwitchIsStillHeld() async throws {
+        let first = makeModel()
+        try answer(58, in: first)
+        await first.jump(to: id(5))
+
+        let again = makeModel()
+        #expect(again.composer.reply?.messageId == id(58))
+        again.composer.draft = "hi"
+        await again.composer.submit()
+
+        #expect(account.replyHolds.current == [hold(58)], "held once, by the core for the session")
+        #expect(replies == [.reply(here, id(58), mention: true)])
+    }
+
+    @Test
+    func startingAReplyHoldsItsMessageAndAnotherReplacesIt() throws {
+        let model = makeModel()
+
+        try answer(58, in: model)
+        try answer(59, in: model)
+
+        #expect(account.replyHolds.current == [hold(58), hold(59)])
+        #expect(account.heldReplies.current == [here: id(59)])
+    }
+
+    @Test
+    func theSwitchHoldsNothingAgain() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+
+        model.composer.toggleReplyMention()
+
+        #expect(account.replyHolds.current == [hold(58)])
+    }
+
+    @Test
+    func cancellingReleasesTheHold() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+
+        model.composer.cancelReply()
+        model.composer.cancelReply()
+
+        #expect(account.replyHolds.current == [hold(58), hold(nil)])
+        #expect(account.heldReplies.current.isEmpty)
+    }
+
+    @Test
+    func aSendLeavesTheReleaseToTheCore() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        model.composer.draft = "hi"
+
+        await model.composer.submit()
+
+        #expect(account.replyHolds.current == [hold(58)])
+        #expect(account.heldReplies.current.isEmpty)
+    }
+
+    @Test
+    func theMessagesDeletionReleasesTheHold() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+
+        model.composer.apply(EventBatch([.messageDeleted(channelId: here, messageId: id(58))]))
+
+        #expect(model.composer.reply == nil)
+        #expect(account.replyHolds.current == [hold(58), hold(nil)])
+    }
+
+    @Test
+    func aRefusedReplyReleasesTheHold() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        model.composer.draft = "hi"
+        account.queueError.withLock { $0 = .InvalidRequest }
+
+        await model.composer.submit()
+
+        #expect(model.composer.problem == .replyTargetGone)
+        #expect(account.replyHolds.current == [hold(58), hold(nil)])
+    }
+
+    @Test
+    func aMessageThatIsNeitherLoadedNorHeldIsStillRefused() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        await model.jump(to: id(5))
+        account.heldReplies.withLock { $0 = [:] }
+
+        model.composer.draft = "hi"
+        await model.composer.submit()
+
+        #expect(replies.isEmpty)
+        #expect(model.composer.problem == .replyTargetGone)
+        #expect(model.composer.draft == "hi")
+    }
+}
+
 // Channel 11 in guild 1 with thread 31 beside it; message 1 in 11 and 4 in 31 can be answered.
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class ReplyEscapeTests {

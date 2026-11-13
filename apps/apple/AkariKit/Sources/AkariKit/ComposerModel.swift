@@ -120,9 +120,20 @@ public final class ComposerModel {
     }
     public private(set) var problem: Problem?
     /// One per channel, kept while the session lasts: until its send starts, ✕, Escape, or the
-    /// message is deleted.
+    /// message is deleted. The core holds its message meanwhile, so the reply can be sent once
+    /// the message left the loaded ones.
     public private(set) var reply: PendingReply? {
-        didSet { drafts.replies[channelId] = reply }
+        didSet {
+            drafts.replies[channelId] = reply
+            guard reply?.messageId != oldValue?.messageId else {
+                return
+            }
+            if let reply {
+                _ = account.holdReply(channelId: channelId, messageId: reply.messageId)
+            } else if !queuedReply {
+                account.releaseReply(channelId: channelId)
+            }
+        }
     }
     /// Counts the times the composer should take the focus: a reply was started.
     public private(set) var focusRequests = 0
@@ -134,6 +145,8 @@ public final class ComposerModel {
     @ObservationIgnored private let drafts: Drafts
     @ObservationIgnored private var guildId: GuildId?
     @ObservationIgnored private var cooldownEnd: Task<Void, Never>?
+    // The core let go of the message when it queued the reply.
+    @ObservationIgnored private var queuedReply = false
     @ObservationIgnored var onSend: (() -> Void)?
 
     init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts) {
@@ -186,7 +199,9 @@ public final class ComposerModel {
             return
         }
         draft = ""
+        queuedReply = true
         reply = nil
+        queuedReply = false
         onSend?()
         willSend()
         do {
