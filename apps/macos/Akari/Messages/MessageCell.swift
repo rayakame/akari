@@ -56,6 +56,14 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         didSet { stickers?.animates = animatesStickers }
     }
     private let reply = CellText.label()
+    /// The pending reply answers this message: the official client's tint and bar.
+    var isReplyTarget = false {
+        didSet {
+            if isReplyTarget != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
@@ -447,6 +455,15 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     override func draw(_ dirtyRect: NSRect) {
         let box = box
         defer { drawConnector() }
+        // The official client's sheet: the reply's tint takes the mention's place, and its
+        // hovered color the hover tint's.
+        if isReplyTarget {
+            (isHovered ? Palette.replyingBackgroundHover : Palette.replyingBackground).setFill()
+            box.fill(using: .sourceOver)
+            Palette.brand.setFill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
+            return
+        }
         if mentioned {
             Palette.mentionedBackground.setFill()
             box.fill(using: .sourceOver)
