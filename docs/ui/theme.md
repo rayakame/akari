@@ -29,6 +29,10 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `textError` | errors next to form fields | `#f87e7a` | `#b92733` |
 | `channelDefault` | channel and category names | `#81828a` | `#666770` |
 | `threadSpine` | the line joining threads to their channel | `#474850` | `#aaabb3` |
+| `spine` | the elbow beside a reply's line (Discord's `spine-default`) | `#474850` | `#c5c6ca` |
+| `replyName` | the name in a reply's line: `textStrong` at 64 % | `#fbfbfb` at 64% | `#28282d` at 64% |
+| `replyingBackground` | the row a pending reply answers (Discord's message highlight) | `#5865f2` at 16% | `#5865f2` at 16% |
+| `replyingBackgroundHover` | that row while hovered | `#5865f2` at 10% | `#5865f2` at 10% |
 | `interactiveText` | icons and buttons at rest | `#abacb2` | `#595a63` |
 | `interactiveTextActive` | hovered and selected names | `#fbfbfb` | `#28282d` |
 | `hoverBackground` | hovered rows and messages, the background of server initials | `#97979f` at 12% | `#97979f` at 12% |
@@ -42,7 +46,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `mentionBackground` | a mention's pill | `#5865f2` at 30% | `#5865f2` at 15% |
 | `mentionedBackground` | a message that mentions you | `#f8a300` at 8% | `#f8a300` at 10% |
 | `mentionedBar` | the bar beside a message that mentions you | `#f8a300` | `#f8a300` |
-| `messageHighlight` | a message a jump landed on, for 2 s (Discord's flash) | `#5865f2` at 41/255 | `#5865f2` at 41/255 |
+| `messageHighlight` | a message a jump landed on, for 2 s (Discord's flash): two layers of it, the upper one with a `textBrand` bar | `#5865f2` at 41/255 | `#5865f2` at 41/255 |
 | `codeBackground` | inline code and code blocks | `#97979f` at 8% | `#97979f` at 10% |
 | `codeBorder` | the outline of inline code and code blocks | `#97979f` at 16% | `#97979f` at 24% |
 | `quoteBar` | the bar beside a quote | `#97979f` at 40% | `#97979f` at 40% |

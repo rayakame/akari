@@ -42,7 +42,9 @@ sends), the state store (`akari_core::state`, which also keeps the user's settin
 folders and order, mutes and notification settings; and the read states, with unread dots
 and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
-rate-limited REST, applying the message length limit and slowmode; it also acks what the user
+rate-limited REST, applying the message length limit and slowmode, a reply too (the message it
+answers, with or without the ping, its pending row a reply at once, and Discord's refusal for a
+deleted message told apart); it also acks what the user
 reads (paced per channel, one request at a time, "now" message IDs from Discord's clock, not the
 Mac's; threads with their flag) and marks channels and servers read, in bulk chunks, and a
 channel unread from a message on (the official client's manual ack, the store changed at once and
@@ -84,8 +86,8 @@ account asks for in viewed channels and stops waiting for after 3 s), how its em
 under its one image, and the same covers, a spoilered link covering them all), and whether a
 channel waits behind the age gate, with the user's agreement per server in the cache, and whether
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
-`akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
-messages with their reactions and what a reply answers, show where a channel's unread state,
+`akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
+answers a message) and tail messages with their reactions and what a reply answers, show where a channel's unread state,
 mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
@@ -93,10 +95,14 @@ emoji span's key, the display settings, attachments with their kind, size, place
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), a message's reactions, what a reply answers, the pins dot, what the user
-may do with a message and marking unread from one, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+message's thumbnail), a message's reactions, what a reply answers (its preview on one line, formatted), sending a
+reply, the pins dot, what the user may do with a message and marking unread from one, through
+UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, server, channel, DM and message lists, the composer, the media viewer, the
+login, session, server, channel, DM and message lists, the composer with its pending reply
+(one per channel, the ping's switch, ended by the send, ✕, Escape and the answered message's
+deletion), what the line over a reply shows and the jump to the message it answers with the way
+back, the media viewer, the
 forum page and its form for a new post, and what a message's hover bar and menu list: the
 official client's order for the plain and the Shift-held bar and the menu's groups as values,
 later features' places included, with Mark Unread moving the new messages line), the message
@@ -132,14 +138,21 @@ Open in Browser, Copy Image, Copy Media Link and View Details, the neighbours as
 age gate in place of a gated channel's list and composer; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
-its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
+its thread, a pin's line jumps to the pinned message, and a jump flashes its message (two
+layers, the upper one blinking twice); a message
 with a thread has the thread's box (count, newest message, time), which opens it, and a thread's
 "…" and row menu join and leave it; the hovered message has the official client's hover bar (one
 view of the list's controller over the rows, counted as its row where it overhangs the one above,
 SF Symbols, the longer row while Shift is held, Retry and Delete on a failed send, More opening
 the message's menu, the row lit while its menu is open), the message's menu has Create or View
 Thread, Copy Text, Mark Unread and Copy Message Link in the official order, and an Option-click
-on a message marks unread from it; the header's Threads button, "See all threads" and the
+on a message marks unread from it; Reply in the bar and the menu starts a reply (Shift at the
+click without the ping), with the reply bar in the composer's card ("Replying to Name", the "@"
+switch, ✕), the answered row tinted and Escape cancelling it before anything is marked read; a
+reply has the line about the message it answers over its header (the small avatar and the name,
+the text on one line, the official client's words for a deleted or not loaded one, the spine),
+whose click jumps to that message, and the bar over the list's bottom leads back to the reply;
+the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and
 creates threads; a forum's row opens its page (search, Sort & View, the tag filter, list and
@@ -153,7 +166,8 @@ connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
 Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
-offsets, jumbo for up to 30 emoji, Discord's rule sets for embed text and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
+offsets, jumbo for up to 30 emoji, Discord's rule sets for embed text and for a reply's
+one-line preview, and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
 on Akari's runtime through akari-core's message preparer hook; the macOS app renders it (styles,
 code, quotes, lists, mentions, timestamps, spoilers and links), drawing boxes, pills and spoiler
 backgrounds as layers behind the text. The other app folders contain only a README.

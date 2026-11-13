@@ -26,7 +26,7 @@ Drawn size per place (the pixels asked on Retina in brackets):
 | Place | Size | Animates |
 |---|---|---|
 | Message header (a group's first message) | 40 (80) | while any message of the group is hovered |
-| Reply line | 16 (32) | never |
+| Reply line ([replies.md](replies.md#the-line-over-a-reply)) | 16 (32) | never |
 | DM list row | 32 (64) | while the row is hovered |
 | Unread DM on the rail | 40 (80) | while hovered |
 | User panel | 32 (64) | never |
