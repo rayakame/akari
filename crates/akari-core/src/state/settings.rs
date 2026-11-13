@@ -180,6 +180,8 @@ pub struct DisplaySettings {
     /// Play GIFs while the client is focused.
     pub gif_auto_play: bool,
     pub render_embeds: bool,
+    /// Show messages' reactions and the ways to react ("Show emoji reactions").
+    pub render_reactions: bool,
     pub animate_emoji: bool,
     pub animate_stickers: StickerAnimation,
     pub explicit_content_filter: ExplicitContentFilter,
@@ -197,6 +199,7 @@ impl Default for DisplaySettings {
             inline_embed_media: true,
             gif_auto_play: true,
             render_embeds: true,
+            render_reactions: true,
             animate_emoji: true,
             animate_stickers: StickerAnimation::Always,
             explicit_content_filter: ExplicitContentFilter::NonFriends,
@@ -231,6 +234,7 @@ impl DisplaySettings {
                 .unwrap_or(defaults.inline_embed_media),
             gif_auto_play: proto.gif_auto_play.unwrap_or(defaults.gif_auto_play),
             render_embeds: proto.render_embeds.unwrap_or(defaults.render_embeds),
+            render_reactions: proto.render_reactions.unwrap_or(defaults.render_reactions),
             animate_emoji: proto.animate_emoji.unwrap_or(defaults.animate_emoji),
             animate_stickers: match proto.animate_stickers {
                 Some(1) => StickerAnimation::OnInteraction,

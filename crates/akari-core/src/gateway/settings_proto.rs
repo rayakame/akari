@@ -26,6 +26,7 @@ pub(crate) struct TextAndImages {
     pub(crate) inline_embed_media: Option<bool>,
     pub(crate) gif_auto_play: Option<bool>,
     pub(crate) render_embeds: Option<bool>,
+    pub(crate) render_reactions: Option<bool>,
     pub(crate) animate_emoji: Option<bool>,
     /// UInt32Value 15: 0 always, 1 on interaction, 2 never.
     pub(crate) animate_stickers: Option<u32>,
@@ -147,7 +148,7 @@ fn guild_folder(mut reader: Reader<'_>) -> Result<GuildFolder, ProtoError> {
 
 fn text_and_images(mut reader: Reader<'_>, into: &mut TextAndImages) -> Result<(), ProtoError> {
     while let Some((number, wire, at)) = reader.tag()? {
-        let known = matches!(number, 4 | 7 | 9..=12 | 14 | 15 | 19 | 29 | 32 | 35);
+        let known = matches!(number, 4 | 7 | 9..=15 | 19 | 29 | 32 | 35);
         if known && wire != Wire::Len {
             return Err(ProtoError::Malformed { offset: at });
         }
@@ -159,6 +160,7 @@ fn text_and_images(mut reader: Reader<'_>, into: &mut TextAndImages) -> Result<(
             10 => merge_bool(&mut into.inline_embed_media, reader.message()?)?,
             11 => merge_bool(&mut into.gif_auto_play, reader.message()?)?,
             12 => merge_bool(&mut into.render_embeds, reader.message()?)?,
+            13 => merge_bool(&mut into.render_reactions, reader.message()?)?,
             14 => merge_bool(&mut into.animate_emoji, reader.message()?)?,
             15 => merge_u32(&mut into.animate_stickers, reader.message()?)?,
             19 => merge_u32(&mut into.explicit_content_filter, reader.message()?)?,
