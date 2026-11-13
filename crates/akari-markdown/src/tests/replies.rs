@@ -239,6 +239,54 @@ fn nothing_to_show_is_no_block() {
 }
 
 #[test]
+fn a_source_of_nothing_but_line_feeds_has_no_block() {
+    for source in ["", "\n", "\n\n\n"] {
+        assert!(parse_inline_reply(source).blocks().is_empty(), "{source:?}");
+    }
+}
+
+#[test]
+fn the_line_is_a_spoiler_only_when_all_of_it_is() {
+    for source in ["||a|| b", "||a||\nb", "a ||b||", "||a|| ||b||"] {
+        let doc = parse_inline_reply(source);
+        assert!(doc.blocks()[0].spoiler.is_none(), "{source:?}");
+    }
+    for source in ["||a||", "||a\nb||", "||a **b**||"] {
+        let doc = parse_inline_reply(source);
+        let block = &doc.blocks()[0];
+        assert!(block.spoiler.is_some(), "{source:?}");
+        assert!(
+            block
+                .inlines
+                .iter()
+                .all(|inline| inline.spoiler == block.spoiler),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn a_spoiler_ends_where_it_ends_in_the_source() {
+    let doc = parse_inline_reply("||a||\n- b");
+
+    let hidden: Vec<bool> = doc.blocks()[0]
+        .inlines
+        .iter()
+        .map(|inline| inline.spoiler.is_some())
+        .collect();
+    assert_eq!(hidden, [true, false, false]);
+    assert_eq!(line("||a||\n- b"), "a b");
+}
+
+#[test]
+fn the_lines_source_covers_every_block_it_shows() {
+    let doc = parse_inline_reply("# One\ntwo");
+
+    assert_eq!(doc.blocks()[0].source.range(), 2..9);
+    assert_eq!(line("# One\ntwo"), "One two");
+}
+
+#[test]
 fn the_line_text_keeps_every_offset() {
     assert_eq!(line_text("a\r\nb\nc"), "a  b c");
     assert!(matches!(
