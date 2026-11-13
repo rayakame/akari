@@ -178,9 +178,14 @@ final class TimeRefreshTests {
         let height = table.rect(ofRow: index(of: 20)).height
         let before = MessageTableTests.visibleViews(in: controller)
         #expect(before[25] != nil)
+        let actions = MessageTableTests.RecordingActions()
+        controller.actions = actions
+        let y = clip.bounds.minY
 
         clock.now = fire
         timers.fire()
+        #expect(clip.bounds.minY != y, "the list moved itself to keep the place")
+        #expect(actions.scrolls.isEmpty && actions.bottoms.isEmpty, "which is no scroll of the user's")
 
         // Before any layout: 25 has a new cell, the others keep theirs.
         MessageTableTests.expectTheSameViewsInPlace(
@@ -224,6 +229,135 @@ final class TimeRefreshTests {
         window.layoutIfNeeded()
         #expect(controller.isPinnedToBottom)
         #expect(clip.bounds.origin == bottom)
+    }
+
+    func plainRows(_ count: Int) -> [MessageListModel.Row] {
+        (1...count).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+    }
+
+    var gapBelowTheRows: CGFloat {
+        controller.scrollView.contentView.bounds.maxY
+            - (table.contentHeight + controller.scrollView.contentInsets.bottom)
+    }
+
+    @Test
+    func aRelativeTimeThatRewrapsTheLastRowWhilePinnedStaysPinned() throws {
+        let fire = clock.now + 2
+        var rows = plainRows(60)
+        rows[59] = row(
+            60, by: author(1), at: clock.now + 1800,
+            content: try wrapping(due: seconds(clock.now) + 61, at: fire))
+        show(rows)
+        #expect(controller.isPinnedToBottom && abs(gapBelowTheRows) <= 0.5)
+        let height = table.rect(ofRow: index(of: 60)).height
+
+        clock.now = fire
+        timers.fire()
+
+        #expect(table.rect(ofRow: index(of: 60)).height > height)
+        #expect(controller.isPinnedToBottom)
+        #expect(abs(gapBelowTheRows) <= 0.5, "a gap of \(gapBelowTheRows) below the rows")
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
+    }
+
+    @Test
+    func aRevealThatGrowsARowWhilePinnedStaysPinned() throws {
+        let fire = clock.now + 2
+        var rows = plainRows(60)
+        rows[58] = row(
+            59, by: author(2), at: clock.now + 1770,
+            content: try wrapping(due: seconds(clock.now) + 61, at: fire, prefix: "||x|| "))
+        show(rows)
+        #expect(controller.isPinnedToBottom && abs(gapBelowTheRows) <= 0.5)
+        let height = table.rect(ofRow: index(of: 59)).height
+
+        clock.now = fire
+        controller.show(
+            MessageTableState(
+                rows: rows, reachedOldest: true,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 59), index: 0)]))
+
+        #expect(table.rect(ofRow: index(of: 59)).height > height)
+        #expect(controller.isPinnedToBottom)
+        #expect(abs(gapBelowTheRows) <= 0.5, "a gap of \(gapBelowTheRows) below the rows")
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
+    }
+
+    // Two rows grow during one gesture at the bottom: the list is measured from where its rows
+    // ended when the first one grew, and follows the new end once the user lets go.
+    @Test
+    func rowsThatGrowDuringAGestureAtTheBottomArePinnedWhenItEnds() throws {
+        let start = clock.now
+        let (first, second) = (start + 2, start + 62)
+        var rows = plainRows(60)
+        rows[58] = row(
+            59, by: author(2), at: start + 1770,
+            content: try wrapping(due: seconds(start) + 61, at: first))
+        clock.now = first
+        rows[59] = row(
+            60, by: author(1), at: start + 1800,
+            content: try wrapping(due: seconds(start) + 121, at: second, prefix: "y"))
+        clock.now = start
+        show(rows)
+        let clip = controller.scrollView.contentView
+        let bottom = clip.bounds.origin
+        let ended = table.contentHeight
+        let live = { (name: Notification.Name) in
+            NotificationCenter.default.post(name: name, object: self.controller.scrollView)
+        }
+
+        live(NSScrollView.willStartLiveScrollNotification)
+        live(NSScrollView.didLiveScrollNotification)
+        clock.now = first
+        timers.fire()
+        let grown = table.contentHeight
+        #expect(grown > ended + 10)
+        #expect(clip.bounds.origin == bottom)
+        clock.now = second
+        timers.fire()
+        #expect(table.contentHeight > grown + 10)
+        #expect(clip.bounds.origin == bottom)
+
+        // A finger that slips a few points is still at the end the gesture began at.
+        let slipped = NSPoint(x: bottom.x, y: bottom.y - 10)
+        clip.scroll(to: slipped)
+        live(NSScrollView.didLiveScrollNotification)
+        #expect(clip.bounds.origin == slipped)
+
+        live(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(controller.isPinnedToBottom)
+        #expect(abs(gapBelowTheRows) <= 0.5, "a gap of \(gapBelowTheRows) below the rows")
+    }
+
+    // Jump to Present was asked for and its page hasn't landed: the list follows no bottom yet,
+    // and the reader's place is kept as anywhere else.
+    @Test
+    func aRevealThatRewrapsAboveTheReaderOnTheWayToThePresentMovesNoViews() throws {
+        let fire = clock.now + 2
+        var rows = plainRows(60)
+        rows[19] = row(
+            20, by: author(1), at: clock.now + 600,
+            content: try wrapping(due: seconds(clock.now) + 61, at: fire, prefix: "||x|| "))
+        controller.show(MessageTableState(rows: rows, atPresent: false, reachedOldest: true))
+        window.layoutIfNeeded()
+        scroll(toRowOf: 21)
+        controller.jumpToPresent(load: true)
+        let height = table.rect(ofRow: index(of: 20)).height
+        let before = MessageTableTests.visibleViews(in: controller)
+        #expect(before[21] != nil && before[20] == nil)
+
+        clock.now = fire
+        controller.show(
+            MessageTableState(
+                rows: rows, atPresent: false, reachedOldest: true,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 20), index: 0)]))
+
+        #expect(table.rect(ofRow: index(of: 20)).height != height)
+        MessageTableTests.expectTheSameViewsInPlace(before, in: controller)
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
     }
 
     // The timer is stopped while no relative time is on screen; a reveal builds the text anew.

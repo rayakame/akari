@@ -632,6 +632,18 @@ struct ThreadFormPreviewTests {
         return (session, form, host, window)
     }
 
+    // The message isn't in a list here: its menu is the one item that needs none.
+    @Test
+    func thePreviewsMenuCopiesItsText() throws {
+        let cell = MessageCell()
+
+        MessagePreview.configure(cell, with: row(1, at: .now, content: "hello **there**").message, now: .now)
+        #expect(cell.menuItems().map(\.title) == ["Copy Text"])
+
+        MessagePreview.configure(cell, with: row(1, at: .now, content: "").message, now: .now)
+        #expect(cell.menuItems().isEmpty)
+    }
+
     @Test
     func aTallMessageScrollsAndTheNameAndItsErrorStayVisible() async throws {
         let (session, form, host, window) = try rendered(lines: 40)
