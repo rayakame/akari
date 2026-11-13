@@ -474,6 +474,116 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.requestPostPreviews(forumId, postIds))
     }
 
+    // Reactions, as the core does them: the store changes at once and goes back on a refusal.
+    let reactionError = Locked<ReactionError?>(nil)
+    // While set, each react, unreact and removal waits for a reply before it answers.
+    let holdReactions = Locked(false)
+    let reactionReplies = AsyncQueue<Void>()
+    // Who reacted, by `reactorsKey`; a page is the users after `after`, up to `limit`.
+    let reactorLists = Locked<[String: [User]]>([:])
+    let reactorsError = Locked<RequestError?>(nil)
+    let holdReactors = Locked(false)
+    let reactorReplies = AsyncQueue<Void>()
+
+    static func path(_ emoji: ReactionEmoji) -> String {
+        emoji.id.map { "\(emoji.name ?? "null"):\($0.rawValue)" } ?? emoji.name ?? ""
+    }
+
+    static func reactorsKey(_ emoji: ReactionEmoji, _ kind: ReactionKind) -> String {
+        "\(path(emoji)) \(kind == .normal ? "normal" : "burst")"
+    }
+
+    private func setMine(_ mine: Bool, _ emoji: ReactionEmoji, on message: MessageId) {
+        fakeStore.update { state in
+            var reactions = state.reactions[message] ?? []
+            let same = { (other: Reaction) in ReactionPill.ID(other.emoji) == ReactionPill.ID(emoji) }
+            if let index = reactions.firstIndex(where: same) {
+                var reaction = reactions[index]
+                guard (reaction.me || reaction.meBurst) != mine else {
+                    return
+                }
+                if mine {
+                    reaction.me = true
+                    reaction.normal += 1
+                } else if reaction.me {
+                    reaction.me = false
+                    reaction.normal -= 1
+                } else {
+                    reaction.meBurst = false
+                    reaction.burst -= 1
+                }
+                reactions[index] = reaction
+                if reaction.normal + reaction.burst == 0 {
+                    reactions.remove(at: index)
+                }
+            } else if mine {
+                reactions.append(Reaction(emoji: emoji, normal: 1, burst: 0, me: true, meBurst: false))
+            }
+            state.reactions[message] = reactions
+        }
+    }
+
+    private func settleReaction(undo: () -> Void) async throws {
+        if holdReactions.current {
+            _ = await reactionReplies.next()
+        }
+        if let error = reactionError.current {
+            undo()
+            throw error
+        }
+    }
+
+    override func react(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, location: ReactionLocation
+    ) async throws {
+        log.append(.react(channelId, messageId, Self.path(emoji), location))
+        let before = fakeStore.reactions(channelId: channelId, messageId: messageId)
+        setMine(true, emoji, on: messageId)
+        try await settleReaction { fakeStore.update { $0.reactions[messageId] = before } }
+    }
+
+    override func unreact(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, location: ReactionLocation
+    ) async throws {
+        log.append(.unreact(channelId, messageId, Self.path(emoji), location))
+        let before = fakeStore.reactions(channelId: channelId, messageId: messageId)
+        setMine(false, emoji, on: messageId)
+        try await settleReaction { fakeStore.update { $0.reactions[messageId] = before } }
+    }
+
+    override func removeReaction(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, kind: ReactionKind,
+        userId: UserId
+    ) async throws {
+        log.append(.removeReaction(channelId, messageId, Self.path(emoji), kind, userId))
+        try await settleReaction {}
+    }
+
+    override func removeReactions(channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji?)
+        async throws
+    {
+        log.append(.removeReactions(channelId, messageId, emoji.map(Self.path)))
+        try await settleReaction {}
+    }
+
+    override func reactors(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, kind: ReactionKind,
+        after: UserId?, limit: UInt8
+    ) async throws -> ReactorsPage {
+        log.append(
+            .reactors(channelId, messageId, Self.path(emoji), kind, after: after, limit: limit))
+        if holdReactors.current {
+            _ = await reactorReplies.next()
+        }
+        if let error = reactorsError.current {
+            throw error
+        }
+        let all = reactorLists.current[Self.reactorsKey(emoji, kind)] ?? []
+        let rest = after.map { after in all.filter { $0.id > after } } ?? all
+        let page = Array(rest.prefix(Int(limit)))
+        return ReactorsPage(users: page, hasMore: page.count == Int(limit))
+    }
+
     let membershipError = Locked<RequestError?>(nil)
 
     override func joinThread(threadId: ChannelId, location: ThreadLocation) async throws {

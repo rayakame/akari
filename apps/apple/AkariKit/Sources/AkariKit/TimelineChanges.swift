@@ -9,9 +9,12 @@ public struct TimelineChanges: Equatable, Sendable {
     /// Indexes in the new items of kept items whose content changed, or that started or stopped
     /// coming right after a day divider or the new messages line.
     public let reloaded: IndexSet
+    /// Indexes in the new items of kept messages whose reactions changed and nothing else: their
+    /// pills change in place.
+    public let reacted: IndexSet
 
     public var isEmpty: Bool {
-        removed.isEmpty && inserted.isEmpty && reloaded.isEmpty
+        removed.isEmpty && inserted.isEmpty && reloaded.isEmpty && reacted.isEmpty
     }
 
     public init(from old: [MessageTimeline.Item], to new: [MessageTimeline.Item]) {
@@ -37,16 +40,37 @@ public struct TimelineChanges: Equatable, Sendable {
             }
         }
         var reloaded = IndexSet()
+        var reacted = IndexSet()
         for (index, item) in new.enumerated() where !inserted.contains(index) {
-            if let oldIndex = oldIndexes[item.id],
-                old[oldIndex] != item || above(old, oldIndex) != above(new, index)
-            {
+            guard let oldIndex = oldIndexes[item.id] else {
+                continue
+            }
+            if above(old, oldIndex) != above(new, index) {
                 reloaded.insert(index)
+            } else if old[oldIndex] != item {
+                if Self.onlyReactionsDiffer(old[oldIndex], item) {
+                    reacted.insert(index)
+                } else {
+                    reloaded.insert(index)
+                }
             }
         }
         self.removed = removed
         self.inserted = inserted
         self.reloaded = reloaded
+        self.reacted = reacted
+    }
+
+    private static func onlyReactionsDiffer(
+        _ old: MessageTimeline.Item, _ new: MessageTimeline.Item
+    ) -> Bool {
+        guard case .message(let before, let startedGroup) = old,
+            case .message(let after, let startsGroup) = new, startedGroup == startsGroup,
+            before.reactions != after.reactions
+        else {
+            return false
+        }
+        return before.reacting(after.reactions) == after
     }
 }
 
