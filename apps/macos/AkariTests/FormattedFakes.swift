@@ -45,6 +45,18 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     { nil }
 
     override func reservePlacing() -> UInt64 { 0 }
+
+    // As akari-core: the message each channel's pending reply answers.
+    let heldReplies = OSAllocatedUnfairLock<[ChannelId: MessageId]>(initialState: [:])
+
+    override func holdReply(channelId: ChannelId, messageId: MessageId) -> Bool {
+        heldReplies.withLock { $0[channelId] = messageId }
+        return true
+    }
+
+    override func releaseReply(channelId: ChannelId) {
+        heldReplies.withLock { $0[channelId] = nil }
+    }
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
