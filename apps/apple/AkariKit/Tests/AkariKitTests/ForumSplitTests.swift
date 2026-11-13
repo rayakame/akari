@@ -126,6 +126,21 @@ final class ForumSplitTests {
         session.close()
     }
 
+    // The store has the forum before it has the user: only the forum's page says a list opened.
+    @Test
+    func aForumRestoredBeforeTheUserIsKnownNamesItsPage() {
+        inForum().close()
+        store.update { $0.currentUser = nil }
+        let told = account.openCalls.current.count
+
+        let session = makeSession()
+        session.start()
+
+        #expect(session.forum?.forumId == forumId && session.split == nil)
+        #expect(Array(account.openCalls.current.dropFirst(told)) == [[forumId]])
+        session.close()
+    }
+
     // As in the official client: clicking the selected forum again forgets its post.
     @Test
     func theOpenForumsRowClosesItsPost() async {
