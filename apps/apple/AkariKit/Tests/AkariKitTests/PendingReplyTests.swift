@@ -472,6 +472,53 @@ struct ReplyHoldTests {
     }
 
     @Test
+    func theBarsNameFollowsARename() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        #expect(model.composer.reply?.authorName == "someone")
+        store.update { $0.show(message(58, by: user(2, name: "Renamed"))) }
+
+        model.apply(EventBatch([.userUpdated(userId: id(2))]))
+
+        #expect(model.composer.reply?.authorName == "Renamed")
+        #expect(drafts.replies[here]?.authorName == "Renamed")
+        #expect(account.replyHolds.current == [hold(58)], "the same reply")
+    }
+
+    @Test
+    func theBarsNameFollowsANewSession() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        store.update { $0.show(message(58, by: user(2, name: "Renamed"))) }
+
+        model.apply(EventBatch([.ready]))
+
+        #expect(model.composer.reply?.authorName == "Renamed")
+    }
+
+    @Test
+    func theBarsNameFollowsAMessageThatLeftTheList() async throws {
+        let model = makeModel()
+        try answer(58, in: model)
+        await model.jump(to: id(5))
+        store.update { $0.replyTargets[id(58)] = preview(by: user(2, name: "Renamed")) }
+
+        model.apply(EventBatch([.replyTargetChanged(channelId: here, targetId: id(58))]))
+
+        #expect(model.composer.reply?.authorName == "Renamed")
+    }
+
+    @Test
+    func anotherUsersRenameLeavesTheBarsName() throws {
+        let model = makeModel()
+        try answer(58, in: model)
+
+        model.apply(EventBatch([.userUpdated(userId: id(7))]))
+
+        #expect(model.composer.reply?.authorName == "someone")
+    }
+
+    @Test
     func aMessageThatIsNeitherLoadedNorHeldIsStillRefused() async throws {
         let model = makeModel()
         try answer(58, in: model)
