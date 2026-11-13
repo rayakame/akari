@@ -107,6 +107,8 @@ final class ReplyLineView: NSView {
 
     var shownName: String? { name?.string }
 
+    var nameText: NSAttributedString? { name }
+
     var showsBadge: Bool { !badge.isHidden }
 
     override func layout() {
@@ -220,8 +222,6 @@ final class ReplyContentButton: NSButton {
         } else {
             isPlaceholder = false
         }
-        // A reused cell's line may be elsewhere now; the list says after its update.
-        hovered = false
         Self.set(leading, reply.leadingSymbol)
         Self.set(trailing, reply.trailingSymbol)
         setAccessibilityLabel(reply.accessibilityLabel)

@@ -460,6 +460,108 @@ struct ReplyScreenTests {
     }
 }
 
+// A list away from the present: the bar over its bottom after a reply's jump, and its button.
+@MainActor
+struct ReplyWayBackScreenTests {
+    let screens = SessionScreenTests()
+    let account = FormattedAccount(contents: ["test"], thread: true)
+    let channel = FormattedStore.channelIds[0]
+
+    init() {
+        account.formattedStore.answerable.withLock { $0 = true }
+        account.formattedStore.replies.withLock { $0 = [40: 5] }
+        account.formattedStore.away.withLock { $0 = true }
+    }
+
+    func message(_ number: UInt64) -> MessageId {
+        MessageId(rawValue: channel.rawValue * 1000 + number)
+    }
+
+    // The bar's button: the one hand area of SwiftUI's over the list.
+    func button(in host: NSView, over table: MessageTableView) throws -> NSRect {
+        func areas(_ view: NSView) -> [CursorArea.Area] {
+            ((view as? CursorArea.Area).map { [$0] } ?? []) + view.subviews.flatMap(areas)
+        }
+        let scroll = try #require(table.enclosingScrollView)
+        let list = scroll.convert(scroll.bounds, to: nil)
+        let found = areas(host).filter { $0.cursor == .pointingHand }.map { $0.convert($0.bounds, to: nil) }
+            .filter { list.contains(NSPoint(x: $0.midX, y: $0.midY)) && $0.height <= JumpBar.height }
+        try #require(found.count == 1, "\(found)")
+        return found[0]
+    }
+
+    func click(_ point: NSPoint, in window: NSWindow) async throws {
+        try settleEvents(in: window)
+        let event = { (type: NSEvent.EventType) in
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+        window.sendEvent(try #require(event(.leftMouseDown)))
+        try await Task.sleep(for: .milliseconds(30))
+        window.sendEvent(try #require(event(.leftMouseUp)))
+    }
+
+    @Test
+    func theBarOffersTheWayBackAndItsButtonGoesToTheReply() async throws {
+        let session = screens.formattedSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = screens.shownWindow(host)
+        defer { window.orderOut(nil) }
+        let table = try await screens.shown(account.formattedStore.newest(of: channel), in: host)
+        let list = try #require(session.messages)
+        try #require(!list.atPresent)
+        let toPresent = try button(in: host, over: table)
+        let controller = try #require(table.delegate as? MessageTableController)
+        let index = try #require(controller.timeline.items.firstIndex { $0.id == .message(message(40)) })
+        let reply = try #require(table.view(atColumn: 0, row: index, makeIfNecessary: true) as? MessageCell)
+
+        reply.replyLine.content.performClick(nil)
+
+        try await screens.waitUntil(host) { list.replyReturn == message(40) }
+        #expect(list.messageJump?.messageId == message(5))
+        try await screens.waitUntil(host) { try button(in: host, over: table).width > toPresent.width }
+        let back = try button(in: host, over: table)
+        #expect(back.maxX == toPresent.maxX && back.minY == toPresent.minY, "the longer words, in the same bar")
+
+        try await click(NSPoint(x: back.midX, y: back.midY), in: window)
+
+        try await screens.waitUntil(host) { list.messageJump?.messageId == message(40) }
+        #expect(list.replyReturn == nil)
+        #expect(list.shownJump == 2)
+        try await screens.waitUntil(host) { try button(in: host, over: table).width == toPresent.width }
+    }
+}
+
+// The New Thread form from a reply: its preview has the line, not a button there.
+@MainActor
+struct ReplyThreadFormTests {
+    @Test
+    func theFormsPreviewOfAReplyShowsWhatItAnswers() throws {
+        let account = FormattedAccount(contents: ["test"], thread: true)
+        account.formattedStore.replies.withLock { $0 = [40: 5] }
+        account.formattedStore.startsThreads.withLock { $0 = true }
+        let channel = FormattedStore.channelIds[0]
+        let session = SessionScreenTests().formattedSession(account)
+        session.openThreadForm(in: channel, from: MessageId(rawValue: channel.rawValue * 1000 + 40), location: .message)
+        let form = try #require(session.threadForm)
+        try #require(form.sourceReply != nil)
+        let host = NSHostingView(rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: 468))
+        let window = TestWindow.make(size: NSSize(width: 480, height: 468))
+        defer { window.close() }
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        let preview = try #require(SessionScreenTests().views(MessagePreviewView.self, in: host).first)
+        preview.cell.layoutSubtreeIfNeeded()
+        #expect(!preview.cell.replyLine.isHidden)
+        #expect(preview.cell.replyLine.shownName == "User 3")
+        #expect(preview.cell.replyLine.content.shownText.string == "test 5")
+        #expect(!preview.cell.replyLine.content.isEnabled)
+    }
+}
+
 // Reply in the hovered message's bar and in its menu, through the app's bridge.
 @MainActor
 struct ReplyActionTests {

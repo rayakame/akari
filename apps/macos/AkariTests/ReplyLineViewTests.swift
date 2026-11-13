@@ -252,6 +252,28 @@ struct ReplyLineViewTests {
         }
     }
 
+    // The text decides the height of a long reply, the avatar that of one without text.
+    @Test
+    func aLongReplyAndOneWithoutTextAreAsTallAsTheSizingPathSays() throws {
+        let table = MessageTableTests()
+        let long = String(repeating: "a long answer ", count: 60)
+        table.show([
+            row(9, at: table.noon - 10, content: "first"),
+            row(1, by: author(2, "Ray"), at: table.noon, content: long),
+            replyRow(2, by: author(3, "Kim"), at: table.noon + 10, content: long, target()),
+            row(3, by: author(2, "Ray"), at: table.noon + 20, content: ""),
+            replyRow(4, by: author(3, "Kim"), at: table.noon + 30, content: "", target()),
+        ])
+
+        for (plain, reply) in [(1, 2), (3, 4)] as [(UInt64, UInt64)] {
+            let index = table.index(of: reply)
+            let height = table.table.rect(ofRow: index).height
+            #expect(height == table.fittingHeight(ofRow: index), "\(reply)")
+            #expect(height == table.table.rect(ofRow: table.index(of: plain)).height + 22, "\(reply)")
+        }
+        #expect(table.table.rect(ofRow: table.index(of: 1)).height > 100, "the text wraps")
+    }
+
     @Test
     func aContextMenuCommandsResultShowsTheLineTheSameWay() throws {
         let list = list { [replyRow(5, at: $0.noon, target(), kind: .contextMenuCommand)] }
@@ -338,6 +360,41 @@ struct ReplyLineViewTests {
 
         #expect(try cell(5, in: list).failed?.text == "Not sent: the message it replies to was deleted.")
         #expect(try cell(6, in: list).failed?.text == "Not sent.")
+    }
+
+    // A reply always starts a group; a row under a header never shows a line.
+    @Test
+    func aRowThatContinuesAGroupShowsNoLine() throws {
+        let reply = replyRow(5, at: berlinTime(2026, 10, 10, 12, 0), content: "an answer", target())
+        let line = try #require(reply.reply)
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let cell = MessageCell()
+
+        cell.configure(
+            reply.message, body: NSAttributedString(string: "an answer"), startsGroup: false,
+            groupTime: "", shortTime: "", fullDate: "",
+            reply: (line, ReplyLineView.text(of: line, now: Date(), times: times)))
+
+        #expect(cell.replyLine.isHidden && cell.spine.isHidden)
+    }
+
+    @Test
+    func voiceOverReadsTheLineAsAButtonThatJumps() throws {
+        let list = list {
+            [
+                replyRow(5, at: $0.noon, content: "an answer", target()),
+                replyRow(6, at: $0.noon + 600, content: "another", to: 9, .deleted),
+            ]
+        }
+        let loaded = try cell(5, in: list).replyLine.content
+        let deleted = try cell(6, in: list).replyLine.content
+
+        #expect(loaded.accessibilityLabel() == "Replying to Ray: the original message")
+        #expect(loaded.accessibilityRole() == .button)
+        #expect(loaded.accessibilityHelp() == "Jump To Reply")
+        #expect(deleted.accessibilityLabel() == "Original message was deleted")
+        #expect(deleted.accessibilityRole() == .staticText)
+        #expect(deleted.accessibilityHelp() == nil)
     }
 
     // The New Thread form shows its source as the list does; its line isn't a button there.
@@ -430,6 +487,33 @@ struct ReplyLineBehaviorTests {
         #expect(!cell.replyHovered)
         #expect(list.controller.cursor(at: list.pointer.location ?? .zero) == .arrow)
         #expect(list.hovered == [5], "the row is still the hovered one")
+    }
+
+    // The pointer may be elsewhere by then; the list says so after its update.
+    @Test
+    func aCellShownForAnotherReplyIsNotLit() throws {
+        shown()
+        let cell = try cell(5)
+        list.move(to: middle(of: cell.replyLine.content))
+        #expect(cell.replyHovered)
+
+        let other = replyRow(7, at: list.noon + 900, content: "another", target("something else"))
+        let line = try #require(other.reply)
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        cell.configure(
+            other.message, body: NSAttributedString(string: "another"), startsGroup: true,
+            groupTime: "", shortTime: "", fullDate: "",
+            reply: (line, ReplyLineView.text(of: line, now: list.noon, times: times)))
+
+        #expect(!cell.replyHovered && !cell.replyLine.hovered && !cell.spine.hovered)
+        #expect(
+            cell.replyLine.content.shownText.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+                as? NSColor === Palette.textDefault)
+        var wanted: CGColor?
+        cell.effectiveAppearance.performAsCurrentDrawingAppearance {
+            wanted = Palette.spine.cgColor
+        }
+        #expect(cell.spine.shape.strokeColor == wanted)
     }
 
     @Test
@@ -592,5 +676,27 @@ struct ReplyLineUpdateTests {
         #expect(cell.replyLine.isHidden && cell.spine.isHidden)
         #expect(cell.replyLine.line == nil)
         #expect(cell.replyLine.content.shownText.length == 0)
+    }
+}
+
+// A time in the answered message's text follows the system's settings as the list's do.
+@MainActor
+struct ReplyLineTimeTests {
+    let refresh = TimeRefreshTests()
+
+    @Test
+    func aLocaleChangeReformatsATimeInTheLine() async throws {
+        let at = refresh.seconds(berlinTime(2026, 10, 10, 14, 5))
+        refresh.show([replyRow(5, at: berlinTime(2026, 10, 10, 15, 0), content: "an answer", target("at <t:\(at):t>"))])
+        let line = { () -> String in
+            let cell = refresh.table.view(atColumn: 0, row: refresh.index(of: 5), makeIfNecessary: true) as? MessageCell
+            return cell?.replyLine.content.shownText.string ?? ""
+        }
+        #expect(line().contains("2:05\u{202F}PM"), "\(line())")
+
+        refresh.clock.locale = Locale(identifier: "de_DE")
+        await refresh.post(NSLocale.currentLocaleDidChangeNotification)
+
+        #expect(line().contains("14:05"), "\(line())")
     }
 }
