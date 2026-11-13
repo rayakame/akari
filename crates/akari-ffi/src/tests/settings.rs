@@ -217,7 +217,8 @@ fn quiet_display_proto() -> String {
     let gif = bytes_field(11, &varint_field(1, 0));
     let emoji = bytes_field(14, &varint_field(1, 0));
     let stickers = bytes_field(15, &varint_field(1, 2));
-    STANDARD.encode(bytes_field(6, &[gif, emoji, stickers].concat()))
+    let reactions = bytes_field(13, &varint_field(1, 0));
+    STANDARD.encode(bytes_field(6, &[gif, reactions, emoji, stickers].concat()))
 }
 
 #[tokio::test]
@@ -239,6 +240,7 @@ async fn display_settings_cross_with_their_event() {
             inline_embed_media: true,
             gif_auto_play: true,
             render_embeds: true,
+            render_reactions: true,
             animate_emoji: true,
             animate_stickers: StickerAnimation::Always,
             explicit_content_filter: ExplicitContentFilter::NonFriends,
@@ -278,5 +280,6 @@ async fn display_settings_cross_with_their_event() {
     assert!(!display.animate_emoji);
     assert_eq!(display.animate_stickers, StickerAnimation::Never);
     assert!(display.render_embeds);
+    assert!(!display.render_reactions);
     account.close();
 }

@@ -12,6 +12,7 @@ mod images;
 mod login;
 mod message_data;
 mod messages;
+mod reactions;
 mod replies;
 mod settings;
 mod support;
