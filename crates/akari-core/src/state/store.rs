@@ -1361,7 +1361,7 @@ impl Store {
     /// The link Copy Message Link copies for the row `row` of `channel`:
     /// `https://discord.com/channels/{guild}/{channel}/{message}`, with `@me` outside a guild
     /// and the IDs of [`Store::shown_message`], so a thread's starter row gives the link of the
-    /// message it shows in the parent channel.
+    /// message it shows in the parent channel, and its own while that message isn't loaded.
     pub fn message_link(&self, channel: ChannelId, row: MessageId) -> String {
         self.read(|inner| inner.state.message_link(channel, row))
     }

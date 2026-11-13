@@ -118,10 +118,12 @@ Requests for the shown message never take the row's IDs. `Store::shown_message(c
 gives the channel and ID of the message a row shows: the original's for such a starter row,
 the row's own for every other; a reaction, a reply, a pin or a delete from the row goes there,
 and Copy Message Link names them. Mark Unread alone takes the row's own:
-`Account::mark_unread(thread, row)`.
+`Account::mark_unread(thread, row)`. While the row's message isn't resolved (loading, gone or
+failed), Copy Message Link names the row itself, in the thread: `Store::message_link` falls
+back to the row's own IDs.
 
 So the row's bar and menu have Copy Text (the original's text), Copy Message Link (the
-original's, in the parent channel) and Mark Unread (the thread's); never Create Thread, since
+original's, in the parent channel; the row's own until the original is loaded) and Mark Unread (the thread's); never Create Thread, since
 the original has its thread, nor View Thread. *Akari: the apps ask the core with the row's own
 IDs and take the shown message's from the `starter_message` they already hold for the row.*
 
