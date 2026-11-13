@@ -123,11 +123,18 @@ struct MessageArea: View {
                     }
                     .overlay(alignment: .bottom) {
                         VStack(spacing: 0) {
-                            if let text = JumpBar.text(
+                            if let kind = JumpBar.kind(
                                 atPresent: messages.atPresent, isStale: messages.isStale,
-                                hasRows: !messages.rows.isEmpty)
+                                hasRows: !messages.rows.isEmpty,
+                                fromReply: messages.replyReturn != nil)
                             {
-                                JumpBar(text: text) { bridge.jumpToPresent() }
+                                JumpBar(kind) {
+                                    if kind == .reply {
+                                        bridge.returnToReply()
+                                    } else {
+                                        bridge.jumpToPresent()
+                                    }
+                                }
                             }
                             // Above the composer, as in the official client: send errors on
                             // the left, slowmode on the right, over the list's last pixels.
@@ -343,6 +350,22 @@ final class MessageListBridge: MessageListActions {
 
     func jump(to message: MessageId) {
         Task { await messages.jump(to: message) }
+    }
+
+    func jumpToTarget(of row: MessageListModel.Row) {
+        Task { await messages.jumpToTarget(of: row) }
+    }
+
+    func returnToReply() {
+        Task { await messages.returnToReply() }
+    }
+
+    func jumpShown(_ number: Int) {
+        messages.shownJump = max(messages.shownJump, number)
+    }
+
+    func lastShownJump() -> Int {
+        messages.shownJump
     }
 
     func openGuild(_ id: GuildId) {
