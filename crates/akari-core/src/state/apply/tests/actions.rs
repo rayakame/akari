@@ -447,6 +447,7 @@ fn a_held_reply_is_sent_by_the_channels_permissions_as_they_are() {
         );
     }
 }
+
 #[test]
 fn only_discords_replyable_types_take_a_reply() {
     for kind in 0..=70 {

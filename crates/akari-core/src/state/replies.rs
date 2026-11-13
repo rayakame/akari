@@ -15,7 +15,8 @@ const LIMIT: usize = 100;
 pub struct ReplyTo {
     /// A message of the channel the reply goes to.
     pub message: MessageId,
-    /// Whether the reply pings the message's author.
+    /// Whether the reply pings the message's author; a reply to the user's own message never
+    /// does.
     pub mention: bool,
 }
 

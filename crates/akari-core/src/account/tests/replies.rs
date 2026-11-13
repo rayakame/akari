@@ -674,3 +674,26 @@ async fn closing_the_account_ends_its_holds() {
 
     assert_eq!(account.store().held_reply(general()), None);
 }
+
+#[tokio::test]
+async fn a_reply_to_the_users_own_message_asks_for_no_ping() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, subscription, mut connection) = sending(&mut fake, &server).await;
+    let mut own = message(2, TARGET);
+    own["d"]["author"]["id"] = ME.into();
+    connection.send(own).await;
+    events_until(&subscription, &format!("MessageInserted({TARGET})")).await;
+
+    account
+        .send_message(general(), "hello".to_owned(), reply(true))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sends.bodies()[0]["allowed_mentions"],
+        json!({"parse": ["users", "roles", "everyone"], "replied_user": false})
+    );
+}
