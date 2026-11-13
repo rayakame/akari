@@ -323,3 +323,18 @@ fn releasing_every_hold_leaves_none() {
     assert_eq!(held(&state), None);
     assert!(!queue_reply(&mut state, 9000, TARGET, true).0);
 }
+
+#[test]
+fn a_reply_to_the_users_own_message_never_pings() {
+    let mut state = viewing(GENERAL);
+    let mut own = original(GENERAL, "mine");
+    own["author"]["id"] = ME.to_string().into();
+    load(&mut state, GENERAL, LoadKind::Latest, &[own]);
+
+    assert!(queue_reply(&mut state, 9000, TARGET, true).0);
+
+    let outgoing = state.pending(general(), Snowflake::new(9000)).unwrap();
+    assert!(!outgoing.mention, "the request says so too");
+    assert!(outgoing.message.mentions.is_empty());
+    assert!(!state.reply_mentions_author(&outgoing.message));
+}

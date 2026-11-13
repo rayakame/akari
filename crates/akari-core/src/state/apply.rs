@@ -1772,7 +1772,7 @@ impl State {
                     .channels
                     .get(&channel)
                     .and_then(|channel| channel.guild_id);
-                let mention = reply.mention;
+                let mention = reply.mention && self.me() != Some(preview.author.id);
                 let pinged = mention.then(|| preview.author.clone());
                 let message = Arc::new(message.answering(reply.message, pinged, guild));
                 let answers = Some(Answered {
