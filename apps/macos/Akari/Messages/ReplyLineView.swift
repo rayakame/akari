@@ -146,23 +146,31 @@ final class ReplyLineView: NSView {
     static func text(
         of line: ReplyLine, now: Date, times: TimestampText
     ) -> NSAttributedString {
+        build(line, now: now, times: times).text
+    }
+
+    /// `text(of:now:times:)`, and when a relative time in it reads differently.
+    static func build(
+        _ line: ReplyLine, now: Date, times: TimestampText
+    ) -> (text: NSAttributedString, nextChange: Date?) {
         switch line.content {
         case .placeholder(let words):
-            return NSAttributedString(
+            let text = NSAttributedString(
                 string: words,
                 attributes: [.font: placeholderFont, .foregroundColor: Palette.textDefault])
+            return (text, nil)
         case .text(let text, let edited):
-            let built = NSMutableAttributedString(
-                attributedString: MessageText.build(
-                    MessageText.Source(
-                        text, base: .body, color: Palette.textDefault, spoilersShown: false),
-                    revealed: [], now: now, times: times
-                ).text)
+            let body = MessageText.build(
+                MessageText.Source(
+                    text, base: .body, color: Palette.textDefault, spoilersShown: false),
+                revealed: [], now: now, times: times)
+            let built = NSMutableAttributedString(attributedString: body.text)
             if edited {
                 built.append(CellText.editedMark())
             }
             let size = TypeScale.size(14)
-            return ThreadBoxView.content(built, size: size, emojiSide: (size * 1.25).rounded())
+            let shown = ThreadBoxView.content(built, size: size, emojiSide: (size * 1.25).rounded())
+            return (shown, body.nextChange)
         }
     }
 }
