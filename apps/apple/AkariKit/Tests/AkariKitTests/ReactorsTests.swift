@@ -152,6 +152,54 @@ final class ReactorsTests {
     }
 
     @Test
+    func anotherEmojiShowsNoneOfTheFirstOnesUsersWhileItsPageComes() async {
+        react(reaction("👍", 2), reaction("🎉", 1))
+        people(2...3)
+        people(7...7, emoji: "🎉")
+        let model = window()
+        await model.open()
+        account.holdReactors.withLock { $0 = true }
+
+        let chosen = Task { await model.select(ReactionPill.ID(.unicode("🎉"))) }
+        await account.reactorReplies.pulled(1)
+        #expect(model.reactors.isEmpty)
+        #expect(model.loading)
+        account.reactorReplies.send(())
+        await chosen.value
+
+        #expect(ids(model) == [7])
+    }
+
+    @Test
+    func choosingTheChosenEmojiAgainAsksNothing() async {
+        react(reaction("👍", 2), reaction("🎉", 1))
+        people(2...3)
+        let model = window()
+        await model.open()
+        store.log.forget()
+
+        await model.select(ReactionPill.ID(.unicode("👍")))
+
+        #expect(calls.isEmpty)
+        #expect(ids(model) == [2, 3])
+    }
+
+    @Test
+    func anEmojiTheMessageDoesntHaveIsntChosen() async {
+        react(reaction("👍", 2))
+        people(2...3)
+        let model = window()
+        await model.open()
+        store.log.forget()
+
+        await model.select(ReactionPill.ID(.unicode("🦊")))
+
+        #expect(model.selected == ReactionPill.ID(.unicode("👍")))
+        #expect(calls.isEmpty)
+        #expect(ids(model) == [2, 3])
+    }
+
+    @Test
     func aPageOfAnEmojiTheWindowLeftIsDropped() async {
         react(reaction("👍", 2), reaction("🎉", 1))
         people(2...3)
@@ -240,6 +288,24 @@ final class ReactorsTests {
 
         #expect(ids(model) == [2, 3])
         #expect(refusals == 1)
+    }
+
+    @Test(arguments: [
+        (ReactionError.Blocked, true), (.Forbidden, true), (.TooMany, false), (.UnknownEmoji, false),
+        (.RateLimited(retryAfter: nil), false), (.Request(error: .Network(kind: .other)), false),
+    ])
+    func onlyARefusalWithoutWordsIsFeltWhenARemovalFails(error: ReactionError, felt: Bool) async {
+        react(reaction("👍", 2))
+        people(2...3)
+        store.update { $0.allow(reacting(remove: true), message: 100, in: 11) }
+        let model = window()
+        await model.open()
+        account.reactionError.withLock { $0 = error }
+
+        await model.remove(model.reactors[0])
+
+        #expect(ids(model) == [2, 3])
+        #expect(refusals == (felt ? 1 : 0))
     }
 
     @Test
@@ -630,10 +696,12 @@ final class ReactorsTests {
         react(reaction("👍", 1), reaction("🎉", 2))
 
         model.apply(changed())
-        await Task.yield()
-
-        #expect(calls.isEmpty)
         #expect(model.tabs.map(\.count) == [2, 1])
+        // A refresh the change had begun would be asked before this returns.
+        people(7...8, emoji: "🎉")
+        await model.select(ReactionPill.ID(.unicode("🎉")))
+
+        #expect(calls == [.reactors(here, it, "🎉", .normal, after: nil, limit: 100)])
     }
 
     @Test
@@ -742,6 +810,22 @@ final class SessionReactionsTests {
         session.close()
     }
 
+    // The store answers for a starter row under the row's own IDs.
+    @Test
+    func aStarterRowsWindowIsOpenedWithTheRowsOwnIDs() {
+        store.update { $0.reactions[id(31)] = [reaction("👀", 1)] }
+        let starter = MessageListModel.Row(
+            id: id(31), message: message(31, in: 31, kind: .threadStarterMessage),
+            starter: .loaded(message(100, in: 11)))
+
+        session.viewReactions(of: starter)
+
+        #expect(session.reactors?.channelId == id(31))
+        #expect(session.reactors?.messageId == id(31))
+        #expect(session.reactors?.tabs.map(\.name) == ["👀"])
+        session.close()
+    }
+
     @Test
     func aMessageWithoutReactionsOpensNoWindow() {
         session.viewReactions(channelId: id(11), messageId: id(101))
@@ -755,19 +839,25 @@ final class SessionReactionsTests {
         let list = try #require(session.messages)
         let model = session.messageActions(for: list) { _ in }
 
+        let pill = try #require(try row().reactions?.pills.first)
+
         model.perform(.removeAllReactions, on: try row())
         #expect(session.messageConfirmation?.title == "Remove All Reactions")
         session.answerMessageConfirmation(false)
         #expect(session.messageConfirmation == nil)
-        #expect(!store.log.actions.contains(.removeReactions(id(11), id(100), nil)))
 
-        model.perform(.removeAllReactions, on: try row())
+        // A removal "No" had begun would be asked before this one.
+        model.removeReactions(of: pill, on: try row(), shift: false)
+        #expect(session.messageConfirmation?.title == "Remove Reactions for Emoji")
         session.answerMessageConfirmation(true)
-        try await eventually {
-            self.store.log.actions.contains(.removeReactions(id(11), id(100), nil))
-        }
+        try await eventually { self.removals.contains(.removeReactions(id(11), id(100), "👍")) }
+        #expect(removals == [.removeReactions(id(11), id(100), "👍")])
         #expect(session.messageConfirmation == nil)
         session.close()
+    }
+
+    var removals: [CallLog.Call] {
+        store.log.actions.filter { if case .removeReactions = $0 { true } else { false } }
     }
 
     @Test

@@ -136,6 +136,78 @@ struct ReactionRowsTests {
         #expect(pills(list) == [["👀 2"]])
     }
 
+    // The core names a starter row by the row's own IDs when the message it shows changes.
+    @Test
+    func aStarterRowRereadsItsPillsWhenTheCoreNamesTheRow() {
+        store.update { state in
+            state.channels[id(31)] = thread(31, in: 10)
+            state.show(message(31, in: 31, kind: .threadStarterMessage))
+            state.windows[id(31)] = window([31], oldest: true)
+            state.starters[id(31)] = .loaded(message: message(7, in: 10))
+            state.reactions[id(31)] = [reaction("👀", 1)]
+            state.allow(reacting(), message: 31, in: 31)
+        }
+        let list = list(31)
+        store.update { $0.reactions[id(31)] = [reaction("👀", 2)] }
+
+        list.apply(EventBatch([.messageReactionsChanged(channelId: id(31), messageId: id(31))]))
+
+        #expect(pills(list) == [["👀 2"]])
+    }
+
+    @Test
+    func aReactionChangeKeepsEverythingElseOfTheRow() {
+        let row = MessageListModel.Row(
+            id: id(99), message: message(31, in: 31, kind: .threadStarterMessage),
+            starter: .loaded(message(7, in: 10)), threadLinked: false,
+            noticeContext: .init(currentUserId: id(1), place: .thread), authorName: "Renamed",
+            threadBox: ThreadBox(
+                threadId: id(31), name: "t1", link: "See Thread ›", bottom: .noMessages, time: noon),
+            reply: ReplyLine(
+                channelId: here, messageId: id(5), target: preview(), mentionsAuthor: true,
+                authorName: "Ray"),
+            replyRefused: true,
+            reactions: ReactionRow(pills: [ReactionPill(reaction("👍", 1))], adds: true, toggles: true))
+        let other = ReactionRow(
+            pills: [ReactionPill(reaction("👍", 2, me: true))], adds: false, toggles: true)
+
+        let reacted = row.reacting(other)
+
+        #expect(reacted.reactions == other)
+        #expect(reacted.id == row.id)
+        #expect(reacted.message == row.message)
+        #expect(reacted.starter == row.starter)
+        #expect(!reacted.threadLinked)
+        #expect(reacted.noticeContext == row.noticeContext)
+        #expect(reacted.authorName == "Renamed")
+        #expect(reacted.threadBox == row.threadBox)
+        #expect(reacted.reply == row.reply)
+        #expect(reacted.replyRefused)
+    }
+
+    @Test
+    func aReactionChangeKeepsTheRowsThreadBoxAndReplyLine() throws {
+        var answering = reply(2, to: 1, by: user(2, name: "Ray"))
+        answering.hasThread = true
+        store.update { state in
+            state.show(answering)
+            state.answer(preview(), message: 1, in: 10)
+            state.channels[id(2)] = thread(2, in: 10, name: "t1")
+        }
+        let list = list()
+        let before = list.rows[1]
+        #expect(before.threadBox?.name == "t1")
+        #expect(before.reply?.messageId == id(1))
+        store.update { $0.reactions[id(2)] = [reaction("👍", 3, me: true)] }
+
+        list.apply(EventBatch([.messageReactionsChanged(channelId: here, messageId: id(2))]))
+
+        #expect(pills(list) == [nil, ["👍 3 mine"], nil])
+        #expect(list.rows[1].threadBox == before.threadBox)
+        #expect(list.rows[1].reply == before.reply)
+        #expect(list.rows[1].authorName == before.authorName)
+    }
+
     // MARK: A forum post
 
     func post(defaultReaction: TagEmoji? = nil, first: MessageActions? = reacting()) {

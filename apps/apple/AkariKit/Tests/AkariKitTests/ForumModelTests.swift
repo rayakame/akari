@@ -431,6 +431,49 @@ final class ForumModelTests {
     }
 
     @Test
+    func aCardWhoseFirstMessageHasntComeShowsNoReaction() throws {
+        offer(.unicode(emoji: "🔥"))
+        store.update { state in
+            state.reactions[id(41)] = [reaction("👍", 2)]
+            state.allow(reacting(), message: 41, in: 41)
+        }
+        list([41])
+        let session = inForum()
+
+        #expect(try forum(session).posts.first?.reaction == nil)
+        session.close()
+    }
+
+    @Test
+    func aCardsReactionTogglesWhereTheCoreLetsTheUserTakeOneBack() throws {
+        reacted(reaction("👍", 1), actions: reacting(toggle: false))
+        reacted(reaction("👍", 1), on: 42, actions: reacting(react: false))
+        list([41, 42])
+        let session = inForum()
+
+        #expect(try forum(session).posts.map { $0.reaction?.toggles } == [false, true])
+        session.close()
+    }
+
+    @Test
+    func aRefusedReactionOnACardAlertsLikeTheList() async throws {
+        reacted(reaction("👍", 1))
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+        let shown = try #require(forum.posts.first?.reaction)
+        account.reactionError.withLock { $0 = .TooMany }
+
+        await forum.react(shown, on: id(41))
+        #expect(session.messageActionFailure?.title == "We appreciate the enthusiasm, but...")
+
+        account.reactionError.withLock { $0 = .Blocked }
+        await forum.react(shown, on: id(41))
+        #expect(session.refusedReactions == 1)
+        session.close()
+    }
+
+    @Test
     func aCardsReactionFollowsItsFirstMessage() throws {
         reacted(reaction("👍", 1))
         list([41])
@@ -455,6 +498,30 @@ final class ForumModelTests {
         let session = inForum()
 
         #expect(try forum(session).posts.map(\.reaction) == [nil, nil])
+        session.close()
+    }
+
+    @Test
+    func theSettingTurnedOffWhileTheForumIsOpenTakesTheCardsReactionsAway() async throws {
+        offer(.unicode(emoji: "🔥"))
+        reacted(reaction("👍", 1))
+        reacted(on: 42)
+        list([41, 42])
+        let session = inForum()
+        let forum = try forum(session)
+        #expect(forum.posts.map { $0.reaction?.emoji } == [.unicode("👍"), .unicode("🔥")])
+
+        store.update { $0.displaySettings.renderReactions = false }
+        session.apply(EventBatch([.displaySettingsChanged]))
+        #expect(forum.posts.map(\.reaction) == [nil, nil])
+        let shown = try #require(forum.posts.first)
+        account.log.forget()
+        await forum.react(.init(emoji: .unicode("👍"), count: 1, mine: false, toggles: true), on: shown.id)
+        #expect(account.log.actions.isEmpty)
+
+        store.update { $0.displaySettings.renderReactions = true }
+        session.apply(EventBatch([.displaySettingsChanged]))
+        #expect(forum.posts.map { $0.reaction?.emoji } == [.unicode("👍"), .unicode("🔥")])
         session.close()
     }
 

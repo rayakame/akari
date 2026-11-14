@@ -243,7 +243,7 @@ final class ReactionsModelTests {
 
     @Test
     func theQuickReactionsAreTheDefaultsAndSayWhichAreMine() {
-        react(reaction("😆", 3, me: true))
+        react(reaction("💯", 2), reaction("😆", 3, me: true))
 
         let quick = model().quick(for: row())
 
@@ -336,6 +336,21 @@ final class ReactionsModelTests {
 
     // MARK: The tooltip
 
+    // Each of the pointer's waits ends when the test releases it, a cancelled one at once.
+    let rests = AsyncQueue<Void>()
+    let waited = Locked<[Duration]>([])
+
+    func resting() -> ReactionsModel {
+        let model = model(delay: ReactionsModel.tooltipDelay)
+        model.wait = { [rests, waited] duration in
+            waited.withLock { $0.append(duration) }
+            guard await rests.next() != nil else {
+                throw CancellationError()
+            }
+        }
+        return model
+    }
+
     func people(_ names: String..., emoji: String = "👍", kind: ReactionKind = .normal) {
         let users = names.enumerated().map { user(UInt64($0 + 2), name: $1) }
         account.reactorLists.withLock {
@@ -372,13 +387,112 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("🎉"), on: row())
         try await eventually { self.tooltips.count == 2 }
         model.pointerEntered(try pill("👍"), on: row())
-        try await Task.sleep(for: .milliseconds(30))
+        react(reaction("👍", 1), on: 101)
+        model.pointerEntered(try pill("👍"), on: row(101))
+        try await eventually { self.tooltips.count == 3 }
 
         #expect(
             calls == [
                 .reactors(here, it, "👍", .normal, after: nil, limit: 3),
                 .reactors(here, it, "🎉", .normal, after: nil, limit: 3),
+                .reactors(here, id(101), "👍", .normal, after: nil, limit: 3),
             ])
+    }
+
+    @Test
+    func theNamesAreAskedOnceThePointerRestedAsLongAsTheOfficialClientWaits() async throws {
+        react(reaction("👍", 1))
+        people("Ann")
+        let model = resting()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
+        #expect(calls.isEmpty)
+        rests.send(())
+
+        try await eventually { self.tooltips == ["100 👍"] }
+        #expect(waited.current == [.milliseconds(500)])
+    }
+
+    @Test
+    func thePointerEnteringItsPillAgainKeepsItsWait() async throws {
+        react(reaction("👍", 1))
+        people("Ann")
+        let model = resting()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
+        model.pointerEntered(try pill("👍"), on: row())
+        rests.send(())
+
+        try await eventually { self.tooltips == ["100 👍"] }
+        #expect(waited.current.count == 1)
+    }
+
+    @Test
+    func enteringAnotherPillEndsTheFirstOnesWait() async throws {
+        react(reaction("👍", 1), reaction("🎉", 1))
+        people("Ann")
+        people("Cy", emoji: "🎉")
+        let model = resting()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
+        model.pointerEntered(try pill("🎉"), on: row())
+        await rests.pulled(2)
+        rests.send(())
+
+        try await eventually { !self.tooltips.isEmpty }
+        #expect(tooltips == ["100 🎉"])
+        #expect(calls == [.reactors(here, it, "🎉", .normal, after: nil, limit: 3)])
+    }
+
+    @Test
+    func aPillWhoseNamesAreOnTheirWayIsntAskedAgain() async throws {
+        react(reaction("👍", 1))
+        people("Ann")
+        account.holdReactors.withLock { $0 = true }
+        let model = resting()
+        model.pointerEntered(try pill("👍"), on: row())
+        rests.send(())
+        await account.reactorReplies.pulled(1)
+
+        model.pointerLeft()
+        model.pointerEntered(try pill("👍"), on: row())
+        account.reactorReplies.send(())
+
+        try await eventually { self.tooltips == ["100 👍"] }
+        #expect(waited.current.count == 1)
+        #expect(calls.count == 1)
+    }
+
+    @Test
+    func superReactionsArentAskedForWhenThePlainOnesNameThree() async throws {
+        react(reaction("👍", 3, burst: 1))
+        people("Ann", "Bo", "Cy")
+        people("Di", kind: .burst)
+        let model = model()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        try await eventually { !self.tooltips.isEmpty }
+
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann, Bo, Cy, and 1 other")
+        #expect(calls == [.reactors(here, it, "👍", .normal, after: nil, limit: 3)])
+    }
+
+    @Test
+    func theNamesAreThePeoplesDisplayNames() async throws {
+        react(reaction("👍", 1))
+        let ann = User(
+            id: id(2), username: "ann_99", globalName: "Ann", displayName: "Ann", bot: false,
+            system: false, avatar: .defaultAvatar(index: 2))
+        account.reactorLists.withLock { $0[FakeAccount.reactorsKey(.unicode("👍"), .normal)] = [ann] }
+        let model = model()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        try await eventually { !self.tooltips.isEmpty }
+
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann")
     }
 
     @Test
@@ -422,6 +536,19 @@ final class ReactionsModelTests {
     }
 
     @Test
+    func aMessageThatArrivesWholeAgainDropsItsNames() async throws {
+        react(reaction("👍", 1))
+        people("Ann")
+        let model = model()
+        model.pointerEntered(try pill("👍"), on: row())
+        try await eventually { self.tooltips.count == 1 }
+
+        model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
+
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by 1 person")
+    }
+
+    @Test
     func aNewSessionDropsEveryName() async throws {
         react(reaction("👍", 1))
         people("Ann")
@@ -436,15 +563,20 @@ final class ReactionsModelTests {
 
     @Test
     func aPointerThatLeavesBeforeTheDelayAsksNothing() async throws {
-        react(reaction("👍", 1))
+        react(reaction("👍", 1), reaction("🎉", 1))
         people("Ann")
-        let model = model(delay: .seconds(30))
+        people("Cy", emoji: "🎉")
+        let model = resting()
 
         model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
         model.pointerLeft()
-        try await Task.sleep(for: .milliseconds(20))
+        rests.send(())
+        model.pointerEntered(try pill("🎉"), on: row())
 
-        #expect(calls.isEmpty)
+        try await eventually { !self.tooltips.isEmpty }
+        #expect(tooltips == ["100 🎉"])
+        #expect(calls == [.reactors(here, it, "🎉", .normal, after: nil, limit: 3)])
     }
 
     @Test
@@ -458,9 +590,13 @@ final class ReactionsModelTests {
 
         model.apply(EventBatch([.messageReactionsChanged(channelId: here, messageId: it)]))
         account.reactorReplies.send(())
-        try await Task.sleep(for: .milliseconds(20))
+        react(reaction("👍", 1), on: 101)
+        model.pointerEntered(try pill("👍"), on: row(101))
+        await account.reactorReplies.pulled(2)
+        account.reactorReplies.send(())
 
-        #expect(tooltips.isEmpty)
+        try await eventually { self.tooltips.contains("101 👍") }
+        #expect(tooltips == ["101 👍"])
         #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by 1 person")
     }
 

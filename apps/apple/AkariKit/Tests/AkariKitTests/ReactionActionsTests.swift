@@ -168,18 +168,20 @@ final class ReactionActionsTests {
         try await eventually { self.calls == [.removeReactions(self.here, self.it, "🎉")] }
     }
 
-    @Test
-    func aRefusedRemovalSaysSo() async {
-        account.reactionError.withLock { $0 = .Forbidden }
+    @Test(arguments: [
+        (ReactionError.Forbidden, "You don't have permission to do that here."),
+        (.Blocked, "You don't have permission to do that here."),
+        (.RateLimited(retryAfter: nil), "Discord is asking Akari to slow down. Try again in a moment."),
+        (.Request(error: .Network(kind: .other)), "Akari couldn't reach Discord. Check your connection, then try again."),
+        (.Request(error: .Closed), "Akari isn't connected. Reconnect, then try again."),
+        (.TooMany, "Discord had a problem. Try again in a moment."),
+    ])
+    func aRefusedRemovalSaysWhy(error: ReactionError, text: String) async {
+        account.reactionError.withLock { $0 = error }
 
         await MessageActionsModel.removeReactions(
             of: nil, in: here, from: it, account: account, failed: { failures.append($0) })
 
-        #expect(
-            failures == [
-                .init(
-                    title: "Couldn't Remove Reactions",
-                    message: "You don't have permission to do that here.")
-            ])
+        #expect(failures == [.init(title: "Couldn't Remove Reactions", message: text)])
     }
 }

@@ -35,6 +35,7 @@ public final class ReactionsModel {
     private var asking: [NamesKey: Int] = [:]
     private var asks = 0
     private var resting: (key: NamesKey, task: Task<Void, Never>)?
+    var wait: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     public init(store: Store, account: Account, tooltipDelay: Duration = ReactionsModel.tooltipDelay) {
         self.store = store
@@ -154,8 +155,8 @@ public final class ReactionsModel {
             return
         }
         let (channel, message) = (row.message.channelId, row.message.id)
-        let task = Task { [weak self, delay] in
-            try? await Task.sleep(for: delay)
+        let task = Task { [weak self, delay, wait] in
+            try? await wait(delay)
             guard !Task.isCancelled else {
                 return
             }
