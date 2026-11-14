@@ -294,6 +294,7 @@ impl State {
         if emoji.name.is_none() {
             emoji.name.clone_from(&asked.name);
         }
+        self.name_custom_emoji(&mut emoji);
         let taken = change.taken(had);
         let changed = taken.map_or(!had.any(), |burst| had.has(burst));
         let open = self

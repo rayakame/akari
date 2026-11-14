@@ -1914,3 +1914,71 @@ async fn a_page_is_full_by_what_discord_sent_and_has_its_users_as_sent() {
         "the store's own is older"
     );
 }
+
+// PR D finding 9: a forum's default reaction names a custom emoji by its ID alone. The user's
+// server has its name, so the path is `name:id`, as for any custom emoji, not `null:id`.
+#[tokio::test]
+async fn a_nameless_custom_emoji_takes_its_name_from_the_users_server() {
+    let mut online = reacting().await;
+    online
+        .dispatch(
+            "GUILD_EMOJIS_UPDATE",
+            json!({"guild_id": G1.to_string(), "emojis": [{"id": "7", "name": "wave"}]}),
+        )
+        .await;
+    online.events().await;
+    online.answer(204).await;
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+
+    online
+        .account
+        .reactors(
+            general(),
+            target(),
+            &nameless,
+            ReactionKind::Normal,
+            None,
+            3,
+        )
+        .await
+        .ok();
+    online
+        .account
+        .react(general(), target(), &nameless, INLINE)
+        .await
+        .unwrap();
+
+    let lines = online.lines().await;
+    assert!(
+        lines[0].starts_with(&format!("GET {BASE}/wave:7?")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        lines[1],
+        format!("PUT {BASE}/wave:7/@me?location=Message%20Inline%20Button&type=0")
+    );
+    assert_eq!(online.shown(), one("wave", 1, true));
+}
+
+// Reacting through the account counts the emoji as used: the hover bar's quick reactions follow.
+#[tokio::test]
+async fn a_reaction_made_is_a_quick_reaction_after() {
+    let online = reacting().await;
+    online.answer(204).await;
+    let newest = crate::emoji::EmojiVersion::NEWEST;
+
+    online
+        .account
+        .react(general(), target(), &ReactionEmoji::unicode("🔥"), INLINE)
+        .await
+        .unwrap();
+
+    let quick: Vec<String> = online
+        .account
+        .store()
+        .quick_reactions(general(), newest)
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect();
+    assert_eq!(quick, ["fire", "100", "laughing"]);
+}

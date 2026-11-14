@@ -788,18 +788,22 @@ impl Store {
         });
     }
 
-    // The emoji as the message the row shows has it, which knows a custom emoji's name.
+    // The emoji as the message the row shows has it, which knows a custom emoji's name, else as
+    // the user's server has it.
     pub(crate) fn reaction_emoji(
         &self,
         channel: ChannelId,
         row: MessageId,
         emoji: &ReactionEmoji,
     ) -> ReactionEmoji {
-        self.reactions(channel, row)
+        let mut named = self
+            .reactions(channel, row)
             .iter()
             .find(|known| known.emoji.same(emoji))
             .map_or(emoji, |known| &known.emoji)
-            .clone()
+            .clone();
+        self.read(|inner| inner.state.name_custom_emoji(&mut named));
+        named
     }
 
     // The store's own record of each user it knows unchanged.

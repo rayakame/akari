@@ -80,6 +80,16 @@ impl State {
         Some(self.access_of(&here, guild, &found))
     }
 
+    // A forum's default reaction names its custom emoji by ID alone; the request's path wants the
+    // name.
+    pub(crate) fn name_custom_emoji(&self, emoji: &mut ReactionEmoji) {
+        if emoji.name.is_none()
+            && let Some(id) = emoji.id
+        {
+            emoji.name = self.guild_emoji(id).map(|(_, found)| found.name);
+        }
+    }
+
     pub(crate) fn guild_emoji(&self, emoji: EmojiId) -> Option<(GuildId, GuildEmoji)> {
         self.entities.guilds.values().find_map(|guild| {
             let index = guild
