@@ -430,6 +430,23 @@ final class ReactionsModelTests {
     }
 
     @Test
+    func thePointerLeavingAndEnteringAgainWaitsAgain() async throws {
+        react(reaction("👍", 1))
+        people("Ann")
+        let model = resting()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
+        model.pointerLeft()
+        model.pointerEntered(try pill("👍"), on: row())
+        rests.send(())
+
+        try await eventually { self.tooltips == ["100 👍"] }
+        #expect(waited.current.count == 2)
+        #expect(calls.count == 1)
+    }
+
+    @Test
     func enteringAnotherPillEndsTheFirstOnesWait() async throws {
         react(reaction("👍", 1), reaction("🎉", 1))
         people("Ann")
@@ -464,6 +481,46 @@ final class ReactionsModelTests {
         try await eventually { self.tooltips == ["100 👍"] }
         #expect(waited.current.count == 1)
         #expect(calls.count == 1)
+    }
+
+    @Test
+    func aPillWhoseNamesCameIsntAskedAgainWhenThePointerRestsOnItAgain() async throws {
+        react(reaction("👍", 1), reaction("🎉", 1))
+        people("Ann")
+        people("Cy", emoji: "🎉")
+        let model = resting()
+        model.pointerEntered(try pill("👍"), on: row())
+        rests.send(())
+        try await eventually { self.tooltips == ["100 👍"] }
+
+        model.pointerLeft()
+        model.pointerEntered(try pill("👍"), on: row())
+        model.pointerEntered(try pill("🎉"), on: row())
+        await rests.pulled(2)
+        rests.send(())
+
+        try await eventually { self.tooltips.count == 2 }
+        #expect(waited.current.count == 2, "no wait for the names that came")
+        #expect(calls.count == 2)
+    }
+
+    // Discord had no one, or the ask failed: the next rest asks again.
+    @Test
+    func aPillWhoseAskBroughtNoNamesIsAskedAgain() async throws {
+        react(reaction("👍", 1), reaction("🎉", 1))
+        people("Cy", emoji: "🎉")
+        let model = model()
+        model.pointerEntered(try pill("👍"), on: row())
+        try await eventually { self.calls.count == 1 }
+        model.pointerEntered(try pill("🎉"), on: row())
+        try await eventually { !self.tooltips.isEmpty }
+        #expect(tooltips == ["100 🎉"], "no names, no change")
+
+        people("Ann")
+        model.pointerEntered(try pill("👍"), on: row())
+
+        try await eventually { self.tooltips.count == 2 }
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann")
     }
 
     @Test
@@ -511,6 +568,19 @@ final class ReactionsModelTests {
                 .reactors(here, it, "👍", .normal, after: nil, limit: 3),
                 .reactors(here, it, "👍", .burst, after: nil, limit: 3),
             ])
+    }
+
+    @Test
+    func aUserWithBothKindsIsNamedOnce() async throws {
+        react(reaction("👍", 1, burst: 2))
+        people("Ann")
+        people("Ann", "Bo", kind: .burst)
+        let model = model()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        try await eventually { !self.tooltips.isEmpty }
+
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann, Bo, and 1 other")
     }
 
     @Test
@@ -571,6 +641,25 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("👍"), on: row())
         await rests.pulled(1)
         model.pointerLeft()
+        rests.send(())
+        model.pointerEntered(try pill("🎉"), on: row())
+
+        try await eventually { !self.tooltips.isEmpty }
+        #expect(tooltips == ["100 🎉"])
+        #expect(calls == [.reactors(here, it, "🎉", .normal, after: nil, limit: 3)])
+    }
+
+    // The pill it waits for may have changed or gone.
+    @Test
+    func aChangeWhileThePointerRestsEndsItsWait() async throws {
+        react(reaction("👍", 1), reaction("🎉", 1))
+        people("Ann")
+        people("Cy", emoji: "🎉")
+        let model = resting()
+
+        model.pointerEntered(try pill("👍"), on: row())
+        await rests.pulled(1)
+        model.apply(EventBatch([.messageReactionsChanged(channelId: here, messageId: it)]))
         rests.send(())
         model.pointerEntered(try pill("🎉"), on: row())
 

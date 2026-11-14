@@ -83,6 +83,20 @@ final class ReactorsTests {
     }
 
     @Test
+    func openingAgainKeepsTheListAndAsksNothing() async {
+        react(reaction("👍", 250))
+        people(2...251)
+        let model = window()
+        await model.open()
+        store.log.forget()
+
+        await model.open()
+
+        #expect(calls.isEmpty)
+        #expect(ids(model) == Array(2...101))
+    }
+
+    @Test
     func morePagesAreAskedWhileDiscordHasMore() async {
         react(reaction("👍", 250))
         people(2...251)
@@ -322,6 +336,28 @@ final class ReactorsTests {
     }
 
     @Test
+    func aRowsRemoveClickedAgainBeforeTheAnswerAsksNothing() async {
+        react(reaction("👍", 2))
+        people(2...3)
+        store.update { $0.allow(reacting(remove: true), message: 100, in: 11) }
+        let model = window()
+        await model.open()
+        let row = model.reactors[0]
+        account.holdReactions.withLock { $0 = true }
+        store.log.forget()
+
+        let removal = Task { await model.remove(row) }
+        await account.reactionReplies.pulled(1)
+        account.holdReactions.withLock { $0 = false }
+        await model.remove(row)
+        account.reactionReplies.send(())
+        await removal.value
+
+        #expect(calls == [.removeReaction(here, it, "👍", .normal, id(2))])
+        #expect(ids(model) == [3])
+    }
+
+    @Test
     func aChangeAsksTheFirstPageAgainAndKeepsTheListMeanwhile() async throws {
         react(reaction("👍", 3))
         people(2...4)
@@ -505,6 +541,17 @@ final class ReactorsTests {
         react(reaction("👍", 1), reaction("🎉", 2))
 
         model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
+
+        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+    }
+
+    @Test
+    func aNewSessionRereadsTheTabs() {
+        react(reaction("👍", 1))
+        let model = window()
+        react(reaction("👍", 1), reaction("🎉", 2))
+
+        model.apply(EventBatch([.ready]))
 
         #expect(model.tabs.map(\.name) == ["🎉", "👍"])
     }
@@ -697,6 +744,26 @@ final class ReactorsTests {
     }
 
     @Test
+    func aRowWhoseRemovalIsOnItsWayStaysOutWhenItsEmojiIsChosenAgain() async {
+        react(reaction("👍", 2, me: true), reaction("🎉", 1))
+        people(1...2)
+        people(7...7, emoji: "🎉")
+        let model = window(on: "👍")
+        await model.open()
+        account.holdReactions.withLock { $0 = true }
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        await model.select(ReactionPill.ID(.unicode("🎉")))
+        await model.select(ReactionPill.ID(.unicode("👍")))
+        #expect(ids(model) == [2])
+        account.reactionReplies.send(())
+        await removal.value
+
+        #expect(ids(model) == [2])
+    }
+
+    @Test
     func aRemovalTakesOneKindAndLeavesTheUsersOther() async throws {
         react(reaction("👍", 2, burst: 1))
         people(2...3)
@@ -805,6 +872,7 @@ final class ReactorsTests {
         model.apply(changed())
 
         #expect(model.selected == ReactionPill.ID(.unicode("🎉")))
+        #expect(model.hasMore, "its users are still to come")
         try await eventually { self.ids(model) == [7, 8] }
     }
 
