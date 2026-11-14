@@ -1,7 +1,8 @@
 # Reactions
 
 The pills under a message, what a click on one does, the quick reactions in the hover bar and
-the menu, the window that lists who reacted, and a forum post's reactions. Read from the
+the menu, the window that lists who reacted, and a forum post's reactions. The picker that
+Add Reaction opens is in [emoji-picker.md](emoji-picker.md). Read from the
 official client's code and stylesheets (canary 671549, 2026-11-12); nothing here was observed in
 a running client, and the requests' shapes are code-read, not observed
 ([reactions.md](../protocol/reactions.md)). Sizes are at 100 % zoom and default density, colors
@@ -43,9 +44,10 @@ by their token in [theme.md](theme.md). Who may react is in
   a new emoji (`react`): 34 × 30, radius 8, the chat's own color with a smiling face in
   `interactiveText`; under the pointer the panel's color, a border and the face in
   `interactiveTextActive`. Its tooltip is "Add Reaction".
-- For VoiceOver the row is a group, each pill a button that reads "👍, 3 reactions, press to
-  react" or "…, press to remove your reaction" (a custom emoji by its name, underscores as
-  spaces), and the add button "Add Reaction". A pill that only shows reads "👍, 3 reactions".
+- For VoiceOver the row is a group, each pill a button that reads "thumbsup, 3 reactions, press
+  to react" or "…, press to remove your reaction" (the emoji's name without its colons,
+  underscores as spaces: "heart eyes"), and the add button "Add Reaction". A pill that only
+  shows reads "thumbsup, 3 reactions".
 
 *Akari:*
 
@@ -96,10 +98,10 @@ by their token in [theme.md](theme.md). Who may react is in
 
 ## A pill's tooltip
 
-- It names up to three of the users who reacted and counts the rest: "👍 reacted by Ann",
-  "… by Ann and Bo", "… by Ann, Bo, and Cy", "… by Ann and 1 other", "… by Ann, Bo, and 3
-  others", "… by Ann, Bo, Cy, and 2 others". While the names aren't there: "👍 reacted by 4
-  people" ("1 person").
+- It names up to three of the users who reacted and counts the rest: ":thumbsup: reacted by
+  Ann", "… by Ann and Bo", "… by Ann, Bo, and Cy", "… by Ann and 1 other", "… by Ann, Bo, and 3
+  others", "… by Ann, Bo, Cy, and 2 others". While the names aren't there: ":thumbsup: reacted
+  by 4 people" ("1 person").
 - The names are asked once per message and emoji, three of them, when the pointer has rested
   on the pill for half a second, and kept until that message's reactions change or a new
   session starts.
@@ -109,8 +111,10 @@ by their token in [theme.md](theme.md). Who may react is in
 - *macOS's own tooltip, under the pointer after its usual delay, where the official client
   shows a card of its own with the emoji at 32 that can be clicked to open the reactions window
   ("View Reactions" in the menu opens it).*
-- *A Unicode emoji is named by itself, a custom one as `:name:`. The official client names
-  Unicode emoji by its own short names (`:thumbsup:`), which Akari doesn't have.*
+- *A Unicode emoji is named by its short name, `:thumbsup:`: GitHub's gemoji names, which are
+  the ones Discord's users type (the official client has a table of its own,
+  [emoji-picker.md](../protocol/emoji-picker.md#unicode-emoji)). ©, ® and ™, which have no
+  name in a message, are named by themselves. A custom emoji is `:name:`.*
 - *Names are the users' display names; server nicknames come with the member milestone. A pill
   with super reactions fills its three names up from them.*
 - *The names are dropped when the row's reactions change (a thread's starter row hears of its
@@ -129,20 +133,27 @@ by their token in [theme.md](theme.md). Who may react is in
   ([message-actions.md](message-actions.md#the-buttons-in-order)). The bar is 28 wider per
   emoji and 9 for the line.
 - A click adds the reaction; on an emoji the user already reacted with it takes it back. The
-  tooltip is the emoji's name over "Click to react" or "Click to remove".
+  tooltip is the emoji's name (`:100:`) over "Click to react" or "Click to remove"; VoiceOver
+  reads "Click to react with 100" or "Click to remove 100".
+- A custom emoji among them is its picture from Discord's CDN at 20, which plays by
+  `animate_emoji` while the window is key, and under the pointer always.
 - **Which three:** the official client takes the user's most used reaction emoji and fills up
   with 💯, 😆 and 💖.
 - **In the menu:** the official client has a row of up to four quick reactions over the menu,
   and under "Add Reaction" a submenu of up to twelve with "View More" for the picker.
+- **Add Reaction** (the bar's button, the row's add button, a forum post's "React to Post")
+  opens the emoji picker ([emoji-picker.md](emoji-picker.md)).
 
 *Akari:*
 
-- *The three are always 💯, 😆 and 💖: Akari doesn't read the user's frequently used emoji yet.*
-- *"Add Reaction" (the bar's button, the row's add button, a forum post's "React to Post")
-  opens a menu of the three quick reactions under its button, with a checkmark on those that
-  are the user's already. The emoji picker takes its place when Akari has one.*
-- *In the message's menu the quick reactions are "Add Reaction"'s submenu; there is no row of
-  emoji over the menu.*
+- *The user's most used emoji are Akari's own count of the reactions they made, per account on
+  this Mac ([emoji-picker.md](../protocol/emoji-picker.md#recently-used-reactions)); only those
+  they may use in the channel take a place, then 💯, 😆 and 💖, each once. The official client
+  reads Discord's synced frecency.*
+- *In the message's menu Add Reaction's submenu lists up to twelve: the recently used emoji the
+  user may use there, then the three quick reactions, each once, each as its picture beside its
+  `:name:` with a checkmark on the user's own (a click takes it back), then a line and "View
+  More", which opens the picker. There is no row of emoji over the menu.*
 - *The official client's `+` on a message with keyboard focus and `+:name:` in the composer
   are left out.*
 
@@ -223,8 +234,9 @@ and follows its changes; it has no window to change it yet.
 
 - *The card's reaction is a chip of Akari's own, 20 high (the emoji at 14 and the count, the
   user's own in the brand's colors); the official client's wasn't measured.*
-- *A forum's custom default reaction is known by its ID alone, so a reaction with it is asked
-  without the emoji's name (whether Discord takes that isn't known) and its pill has no name
+- *A forum's custom default reaction is known by its ID alone: a reaction with it takes the
+  emoji's name from the user's server before the request. One from a server the user isn't in
+  is asked without a name (whether Discord takes that isn't known), and its pill has no name
   until Discord's echo brings it.*
 - *The official count takes every pill for 58 wide. Where the counts make the pills wider than
   that, fewer are shown, so that the button after them never reaches Follow.*

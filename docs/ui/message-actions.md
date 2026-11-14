@@ -70,7 +70,8 @@ say:
   needs) and whether the message has reactions at all (View Reactions, the remove items): the
   message's reactions say so.
 - The 20 distinct reactions a message takes: the server's limit (30010), unknown to the client.
-- Which emoji the picker offers (Use External Emojis, availability, Nitro): the picker's.
+- Which emoji the picker offers (Use External Emojis, availability, Nitro): the picker's
+  ([emoji-picker.md](../protocol/emoji-picker.md#the-users-servers-emoji)).
 - The user's own row in the reactors list always has its "×".
 - The setting "Show emoji reactions" (`text_and_images.render_reactions`), which hides the rows
   and every way to react: a display setting, which the apps read beside the answer
@@ -188,8 +189,8 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 
 | # | Button | When | In Akari |
 |---|---|---|---|
-| 1 | up to 3 quick reactions, then a separator | `react` | yes: 💯, 😆 and 💖 ([reactions.md](reactions.md#quick-reactions)) |
-| 2 | Add Reaction | `react` | yes: opens the quick reactions as a menu until Akari has its emoji picker |
+| 1 | up to 3 quick reactions, then a separator | `react` | yes: the user's most used, then 💯, 😆 and 💖 ([reactions.md](reactions.md#quick-reactions)) |
+| 2 | Add Reaction | `react` | yes: opens the emoji picker left of the bar ([emoji-picker.md](emoji-picker.md)) |
 | 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
 | 4 | Edit | `edit` | with editing |
 | 5 | Forward | | left out |
@@ -235,7 +236,7 @@ client's order, with what Akari has in bold:
 
 | Group | Items |
 |---|---|
-| Reactions | **Add Reaction** (its submenu: the quick reactions), **View Reactions** (a message with reactions) |
+| Reactions | **Add Reaction** (its submenu: up to twelve emoji, then "View More", the picker), **View Reactions** (a message with reactions) |
 | Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
 | Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red; today a failed send's only) |
@@ -248,7 +249,7 @@ client's order, with what Akari has in bold:
 - *A message that is still sending, and an ephemeral one, keep "Copy Text" alone: the official
   client's sending row has more, its ephemeral row no menu at all.*
 - *What a thread's starter row has is in [A thread's starter row](#a-threads-starter-row).*
-- *The quick reactions are Add Reaction's submenu, not a row over the menu
+- *There is no row of quick reactions over the menu; Add Reaction's submenu has them
   ([reactions.md](reactions.md#quick-reactions)).*
 - *Left out: Forward, Translate, Bookmark and reminders, Apps, Speak
   Message, polls' and interactions' items, Report Message, the items for a clicked image, link,

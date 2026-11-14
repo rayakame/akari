@@ -36,6 +36,9 @@ app can mirror it and Discord users can switch with zero relearning.
 - [reactions.md](reactions.md): the pills under a message, a click on one, the count's roll,
   a pill's tooltip, quick reactions, the reactions window, removing reactions, "Show emoji
   reactions", and a forum post's reactions
+- [emoji-picker.md](emoji-picker.md): the emoji picker for reacting: what opens it and where it
+  stands, the field, the strip, the grid and the footer, the sections, search, the keys and the
+  pointer, and what is left out
 - [message-actions.md](message-actions.md): what the user may do with a message: reply, edit,
   delete, pin, react, mark unread, copy its link, create or view its thread, and by which rule;
   the hover bar (size, place, buttons in order, with Shift), the message menu's groups, Mark

@@ -116,7 +116,8 @@ official client's order for the plain and the Shift-held bar and the menu's grou
 later features' places included, with Mark Unread moving the new messages line; a message's
 reactions as pills (plain and super reactions counted together), a click that adds or takes back,
 the quick reactions, a pill's tooltip names, the reactions window's emoji and users, the removals'
-question, and a forum card's and post bar's reactions), the message
+question, a forum card's and post bar's reactions, and the emoji picker's sections, search,
+selection and pick), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -160,7 +161,9 @@ Thread, Copy Text, Mark Unread and Copy Message Link in the official order, and 
 on a message marks unread from it; a message's reactions stand under it as pills (the count
 rolling in the key window, the user's own in the brand's colors, an add button at the end,
 changed in place without rebuilding the row), a click adds or takes back, the hover bar has three
-quick reactions, Add Reaction lists them as a menu until there is an emoji picker, the menu has
+quick reactions, Add Reaction (the bar's, a row's add button, a post's React to Post, the menu's
+"View More") opens the emoji picker beside it (search, a strip of sections, the grid with pinned
+headers, the arrows, Return and Shift, the row kept lit while it is open), the menu has
 View Reactions (a window with the emoji by count and who reacted, a hundred at a time, with a ✕
 where allowed) and, for moderators, Remove Reactions and Remove All Reactions after a question,
 "Show emoji reactions" off hides all of it, and forum cards and a post's bar show the post's

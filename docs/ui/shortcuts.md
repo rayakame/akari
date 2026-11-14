@@ -28,6 +28,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Enter or exit full screen | Ctrl+Cmd+F, Fn+F, the green button | Done: View > Enter Full Screen (SwiftUI's View menu had none); with the Threads browser open it goes full screen and closes the browser |
 | The media viewer's next or previous item | Right, Down or Space / Left or Up | Done; both wrap ([viewer.md](viewer.md)) |
 | Close the media viewer | Escape | Done; Cmd+W too. The app's other shortcuts are off while it shows, but Cmd+Q and Cmd+H |
+| The emoji picker's selection, a pick, a pick that keeps it open, closing it | the arrows, Return, Shift+Return, Escape in the picker | Done, from its search field ([emoji-picker.md](emoji-picker.md#keys-and-the-pointer)); Escape closes it also with a search typed |
 
 Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and
 Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
@@ -67,8 +68,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   nothing, as in the official client (**unverified**); in the message list and a message's
   text AppKit handles it as usual.
 - **Escape with something open.** A pending reply and the New Thread form take Escape first,
-  as above. Once Akari has edits and popups, Escape closes the open one first and doesn't also
-  mark the channel read, as in the official client's handler.
+  as above. The emoji picker, the media viewer and the other panels have the keyboard while
+  they show, and Escape closes them and marks nothing read, as in the official client's
+  handler. Once Akari has edits, Escape cancels one first.
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
   give the same keys. In Akari it jumps to the first unread message, as a click on the unread
