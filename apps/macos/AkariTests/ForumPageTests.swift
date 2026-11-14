@@ -361,6 +361,25 @@ struct ForumCardReactionTests {
         return (session, try #require(fakes.account), try #require(session.forum))
     }
 
+    // The chip lies over the card: the footer keeps its place, and its count starts after it.
+    @Test
+    func aListCardsFooterKeepsThePlaceOfItsChip() throws {
+        let (_, _, forum) = try forum(.list)
+        let reacted = try #require(forum.posts.first)
+        let reaction = try #require(reacted.reaction)
+        var fakes = ForumFakes()
+        fakes.untagged = true
+        fakes.posts = 1
+        let plain = try #require(fakes.session().forum?.posts.first)
+        #expect(plain.reaction == nil)
+        let width = { (card: ForumModel.Card) in
+            NSHostingView(rootView: ForumCardFooter(card: card, now: ForumFakes.now)).fittingSize.width
+        }
+        let chip = NSHostingView(rootView: ForumCardReaction(reaction: reaction)).fittingSize.width
+
+        #expect(abs(width(reacted) - width(plain) - (chip + 8)) < 0.5)
+    }
+
     // Over the card at its footer's left; the footer starts after it.
     @Test
     func aListCardsChipStandsAtTheFootersStartAndReacts() async throws {
