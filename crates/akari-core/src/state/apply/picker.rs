@@ -213,7 +213,7 @@ impl State {
 }
 
 impl State {
-    // Under the store's lock: the custom emoji the picker lists here whose name matches.
+    // Apart from the Unicode matches so that the store's lock covers only the custom emoji.
     pub(crate) fn custom_matches(
         &self,
         channel: ChannelId,

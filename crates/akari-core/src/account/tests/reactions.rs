@@ -1915,8 +1915,8 @@ async fn a_page_is_full_by_what_discord_sent_and_has_its_users_as_sent() {
     );
 }
 
-// PR D finding 9: a forum's default reaction names a custom emoji by its ID alone. The user's
-// server has its name, so the path is `name:id`, as for any custom emoji, not `null:id`.
+// A forum's default reaction names a custom emoji by its ID alone. The user's server has its
+// name, so the path is `name:id`, as for any custom emoji, not `null:id`.
 #[tokio::test]
 async fn a_nameless_custom_emoji_takes_its_name_from_the_users_server() {
     let mut online = reacting().await;

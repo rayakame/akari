@@ -201,6 +201,53 @@ fn sections_put_the_channels_server_first_and_leave_out_what_the_picker_hides() 
     );
 }
 
+const GARDEN_THREAD: u64 = 300_000_000_000_000_032;
+
+fn garden_thread() -> Value {
+    let mut thread = fixture(include_str!(
+        "../../../../tests/fixtures/thread_create.json"
+    ));
+    thread["id"] = GARDEN_THREAD.to_string().into();
+    thread["guild_id"] = G3.to_string().into();
+    thread["parent_id"] = GARDEN.to_string().into();
+    thread["member"]["id"] = GARDEN_THREAD.to_string().into();
+    thread
+}
+
+// A thread has no overwrites of its own: its parent's decide whether other servers' emoji may be
+// used there.
+#[test]
+fn in_a_thread_the_parents_overwrites_decide() {
+    let mut state = picker_state(false);
+    apply(&mut state, "THREAD_CREATE", garden_thread());
+    assert_eq!(
+        access(&state, GARDEN_THREAD, WAVE),
+        Some(EmojiAccess::External)
+    );
+
+    let mut garden = guild_create(G3)["channels"][0].clone();
+    garden["guild_id"] = G3.to_string().into();
+    garden["permission_overwrites"] = json!([{
+        "id": G3.to_string(), "type": 0, "deny": "0",
+        "allow": Permissions::USE_EXTERNAL_EMOJIS.0.to_string(),
+    }]);
+    apply(&mut state, "CHANNEL_UPDATE", garden);
+
+    assert_eq!(
+        access(&state, GARDEN_THREAD, WAVE),
+        Some(EmojiAccess::NitroLocked)
+    );
+    assert_eq!(
+        access(&state, GARDEN_THREAD, TWITCH),
+        Some(EmojiAccess::Usable)
+    );
+    let order: Vec<u64> = sections(&state, GARDEN_THREAD)
+        .iter()
+        .map(|(guild, _)| *guild)
+        .collect();
+    assert_eq!(order, [G3, G1], "the thread's own server first");
+}
+
 // Outside a server the rail's order alone.
 #[test]
 fn in_a_dm_sections_follow_the_rail() {
