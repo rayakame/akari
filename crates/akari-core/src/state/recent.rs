@@ -66,7 +66,6 @@ impl ReactionUses {
         &self.0
     }
 
-    /// The user reacted with `emoji` at `now_millis`.
     pub(crate) fn note(&mut self, emoji: &ReactionEmoji, now_millis: i64) {
         if let Some(emoji) = key(emoji) {
             self.add(ReactionUse {
@@ -77,7 +76,7 @@ impl ReactionUses {
         }
     }
 
-    /// Uses noted while the cache wasn't read yet, added to the cache's.
+    // Uses noted while the cache wasn't read yet, added to the cache's.
     pub(crate) fn merge(&mut self, cached: &Self) {
         for used in &cached.0 {
             self.add(used.clone());
@@ -121,7 +120,7 @@ impl ReactionUses {
         self.0.push(used);
     }
 
-    /// Best first.
+    // Best first.
     pub(crate) fn ranked(&self, now_millis: i64) -> Vec<&ReactionUse> {
         let mut ranked: Vec<&ReactionUse> = self.0.iter().collect();
         ranked.sort_by_key(|used| (Reverse(used.score(now_millis)), Reverse(used.last_used)));

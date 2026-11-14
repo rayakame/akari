@@ -1582,7 +1582,6 @@ mod tests {
     }
 }
 
-// One emoji the user reacted with: a custom one by `id`, a Unicode one by `name`.
 #[derive(Serialize, Deserialize)]
 pub(super) struct ReactionUseRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]

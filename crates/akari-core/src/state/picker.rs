@@ -124,7 +124,6 @@ pub(crate) fn unicode_matches(query: &Query, newest: EmojiVersion) -> Vec<Found>
         .collect()
 }
 
-// Usable before locked, then the match, then where from, then the picker's order.
 pub(crate) fn ranked(mut found: Vec<Found>, limit: usize) -> Vec<PickerEmoji> {
     found.sort_by_key(|found| {
         (

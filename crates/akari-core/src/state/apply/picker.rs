@@ -10,13 +10,11 @@ use crate::state::reactions::ReactionEmoji;
 use crate::state::settings::ServerListItem;
 use crate::state::types::GuildEmoji;
 
-// The official client's quick reactions without frequently used ones: 100, laughing,
-// sparkling_heart (research §3.8).
+// The official client's when the user has no frequently used reactions (canary 671549).
 const QUICK_DEFAULTS: [&str; 3] = ["💯", "😆", "💖"];
 const QUICK: usize = 3;
 
-// What decides a custom emoji's use in a channel (the REACTION intention of Discord's emoji
-// filter, research §2.1).
+// What Discord's emoji filter for reactions asks (canary 671549).
 pub(crate) struct Here {
     // `None` in a DM or group DM, where every server's emoji is another's.
     guild: Option<GuildId>,
@@ -100,7 +98,6 @@ impl State {
         })
     }
 
-    // The channel's own server first, then the rail's order.
     pub(crate) fn emoji_guilds(&self, here: &Here) -> Vec<GuildId> {
         let rail = self
             .entities

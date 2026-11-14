@@ -204,7 +204,7 @@ pub fn unicode_groups(newest: EmojiVersion) -> Vec<UnicodeGroup> {
     groups
 }
 
-/// How well a name matches a search, best first.
+// Best first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Match {
     Exact,
@@ -213,7 +213,6 @@ pub(crate) enum Match {
     Contains,
 }
 
-/// What the user typed into the picker's search.
 pub(crate) struct Query {
     // As typed, for codes such as `+1`.
     raw: String,
@@ -221,7 +220,7 @@ pub(crate) struct Query {
     words: String,
 }
 
-// Lowercase, words joined by `_`, other punctuation dropped: `flag: Germany` is `flag_germany`.
+// `flag: Germany` is `flag_germany`.
 pub(crate) fn search_key(name: &str) -> String {
     name.chars()
         .filter_map(|c| match c {
@@ -234,14 +233,14 @@ pub(crate) fn search_key(name: &str) -> String {
 }
 
 impl Query {
-    /// `None` for nothing to look for; colons around a name are left out (`:smile:`).
+    // Colons around a name are left out (`:smile:`).
     pub(crate) fn new(text: &str) -> Option<Self> {
         let raw = text.trim().trim_matches(':').trim().to_lowercase();
         let words = search_key(&raw);
         (!raw.is_empty() && !words.is_empty()).then_some(Self { raw, words })
     }
 
-    /// How `key`, lowercase, matches.
+    // `key` is lowercase.
     pub(crate) fn rank(&self, key: &str) -> Option<Match> {
         let raw = rank(key, &self.raw);
         if self.words == self.raw {
@@ -250,8 +249,6 @@ impl Query {
         raw.into_iter().chain(rank(key, &self.words)).min()
     }
 
-    /// How the best of a Unicode emoji's names matches: its short name, other short codes and
-    /// Unicode's name.
     pub(crate) fn rank_unicode(&self, emoji: UnicodeEmoji) -> Option<Match> {
         [emoji.name(), Cow::Owned(search_key(emoji.cldr_name()))]
             .into_iter()
@@ -278,7 +275,6 @@ fn rank(key: &str, query: &str) -> Option<Match> {
     found
 }
 
-/// The catalog's emoji in its order, without skin-toned variants.
 pub(crate) fn listed() -> impl Iterator<Item = UnicodeEmoji> {
     emojis::iter().map(UnicodeEmoji)
 }
