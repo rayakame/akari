@@ -405,9 +405,11 @@ Discord (`ReactionLocation`: `InlineButton` for a pill or the row's add button, 
 
 Both are optimistic. The store has the change at once, before Discord is asked, on
 every copy of the message, with `MessageReactionsChanged` (and `PostPreviewChanged` for a
-post's first message); Discord's echo changes nothing. A refusal puts back what Discord had
-and is the error, so a host shows its alert and reads nothing again by hand. The calls can
-wait as long as a rate limit's one retry lasts: don't block a click on them.
+post's first message). While requests for a reaction run, the store shows the user's wish:
+Discord's echoes for it change nothing, however late they come, and when the requests are
+over the store is set to what Discord has. A refusal puts back what Discord has and is the
+error, so a host shows its alert and reads nothing again by hand. The calls can wait as long
+as a rate limit's one retry lasts: don't block a click on them.
 
 One request runs per message and emoji. A call made while one runs changes what is asked
 next and answers the call before it with success (its wish was replaced; nothing failed), so

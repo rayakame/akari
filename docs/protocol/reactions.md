@@ -76,8 +76,7 @@ and the inverse when the request fails.
 
 - **At once.** The store applies the change as the user's own dispatch would, on every copy of
   the message, with the events a dispatch sends
-  ([dispatches.md](dispatches.md#reactions)). Discord's echo then finds the user's flag set
-  (or clear) and changes nothing. There is no pending look.
+  ([dispatches.md](dispatches.md#reactions)). There is no pending look.
 - **What may be asked** is the message's actions ([message-actions.md](../ui/message-actions.md)):
   `react` for an emoji the message doesn't have, `toggle_reaction` for one it has. Without it
   the call is `InvalidRequest` and nothing changes or is sent. A row is resolved to the
@@ -95,17 +94,44 @@ and the inverse when the request fails.
   is answered with success, since nothing failed for it. When the request is answered, the
   next one goes out only if Discord doesn't have what the user wants now. React, unreact,
   react in quick succession is one PUT; twenty toggles are at most the request that ran and
-  one more.
-- **A refusal** puts the store back to what Discord has: what its last answer left, or, if
-  the gateway spoke of the user's reaction since (their own add or removal from another
-  device, MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI), what the gateway
-  said. So a refused removal never puts back a reaction a moderator removed meanwhile, and
-  the undo of a deleted message's reaction changes nothing. The undo goes through the same
-  rules as a dispatch: a reaction put back sits at the row's end if its emoji had left the
-  list, as in the official client. If the user took the wish back before the refusal came,
-  nothing is undone and nothing more is asked: Discord kept what they want.
-- *Akari:* the official client has no such guard (its inverse dispatch is unconditional) and
-  no latest-wish rule (every click is its own request).
+  one more. A wish to react is met by a reaction of either kind; a wish to take one back names
+  the kind the store showed as the user's (the plain one first).
+- **While requests run, the store shows the wish.** From the first click until the requests
+  for that message and emoji are over, the user's own MESSAGE_REACTION_ADD and
+  MESSAGE_REACTION_REMOVE for that emoji change nothing on screen: they are noted as what
+  Discord has, plain and super reactions apart. So the echo of a reaction the user has taken
+  back since never shows it again, and the count never rolls back and forth. Other users'
+  reactions, other emoji, MESSAGE_REACTION_REMOVE_ALL and MESSAGE_REACTION_REMOVE_EMOJI show
+  as they come (the last two take the user's reaction with the others' and are noted too). A
+  dispatch still gives a custom emoji its name where the message's reaction has none.
+- **What Discord has** is kept per kind for as long as the requests run. It starts as the
+  store had it before the first click. The gateway's word is taken in its order, which is
+  Discord's: the user's own add or removal sets its kind, a removal of the emoji or of all
+  clears both. An answer sets what its request asked for, unless the request's echo came
+  while it ran: then the gateway already said so, and also whatever happened after (a
+  moderator's removal between the echo and the answer stands). An answer that came before its
+  echo stands in for it, so the echo, when it comes, says nothing new; a dispatch that isn't
+  the echo owed is newer knowledge and is believed.
+- **When the requests are over**, because Discord has what the user wants or refused it, the
+  store is set to what Discord has, both kinds in one change. After requests that went
+  through this usually changes nothing. After **a refusal** it puts back what the click took
+  or takes out what it added, and the call fails with the refusal; where the gateway spoke
+  since, its word stands: a refused removal never puts back a reaction a moderator removed
+  meanwhile (the call then succeeds: the reaction is gone, as wanted), a super reaction made
+  on another device shows beside the plain one a refused removal puts back, and the undo of a
+  deleted message's reaction changes nothing. A reaction put back sits at the row's end if
+  its emoji had left the list, as in the official client.
+- **A wish made while a refused request ran** is asked next unless Discord has it so already:
+  a reaction taken back before its PUT was refused asks nothing more, and a removed super
+  reaction clicked again before the DELETE was refused stays the super reaction Discord kept
+  (the plain one the click showed makes way for it). After a refusal the same request is never
+  sent again without a new click.
+- **Not covered:** an echo that comes after the requests are over is a dispatch like any
+  other. It changes nothing unless a later request's echo is late as well: a reaction taken
+  back whose two echoes both arrive after the DELETE was answered shows for the moment between
+  them.
+- *Akari:* the official client has no such guard (its inverse dispatch is unconditional), no
+  latest-wish rule (every click is its own request), and shows every echo as it comes.
 
 ## Removing others' reactions
 
