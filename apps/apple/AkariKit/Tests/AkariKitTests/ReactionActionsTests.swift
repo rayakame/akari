@@ -61,7 +61,7 @@ final class ReactionActionsTests {
 
     @Test
     func theBarsQuickReactionsGoWithAddReactionAndLeaveWithShift() {
-        #expect(model().quickReactions(for: row()).map(\.name) == ["💯", "😆", "💖"])
+        #expect(model().quickReactions(for: row()).map(\.emoji.name) == ["💯", "😆", "💖"])
         #expect(model().quickReactions(for: row(), shift: true).isEmpty)
         #expect(model().quickReactions(for: row(reacting(react: false))).isEmpty)
         #expect(model(without: true).quickReactions(for: row()).isEmpty)
@@ -154,7 +154,7 @@ final class ReactionActionsTests {
     func removeReactionsListsTheMessagesEmojiAndRemovesOne() async throws {
         let message = row(reacting(remove: true))
         let choices = model().removableReactions(for: message)
-        #expect(choices.map(\.name) == ["👍", "🎉"])
+        #expect(choices.map(\.emoji.name) == ["👍", "🎉"])
         #expect(model().removableReactions(for: row(reacting())).isEmpty)
 
         model().removeReactions(of: choices[1], on: message, shift: false)

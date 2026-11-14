@@ -30,7 +30,7 @@ struct ReactionRowsTests {
     }
 
     func pills(_ list: MessageListModel) -> [[String]?] {
-        list.rows.map { $0.reactions?.pills.map { "\($0.name) \($0.count)\($0.mine ? " mine" : "")" } }
+        list.rows.map { $0.reactions?.pills.map { "\($0.emoji.name ?? "") \($0.count)\($0.mine ? " mine" : "")" } }
     }
 
     @Test
@@ -237,7 +237,7 @@ struct ReactionRowsTests {
         let list = list(41)
 
         #expect(pills(list) == [nil, ["👀 1"]])
-        #expect(list.postBar?.reactions.map(\.name) == ["👍", "🎉"])
+        #expect(list.postBar?.reactions.map(\.emoji.name) == ["👍", "🎉"])
         #expect(list.postBar?.reacts == true)
         #expect(list.postBar?.toggles == true)
         #expect(list.postBar?.defaultReaction == nil)
