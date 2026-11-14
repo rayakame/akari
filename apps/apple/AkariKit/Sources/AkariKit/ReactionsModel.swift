@@ -5,8 +5,8 @@ import Foundation
 /// back itself when Discord refuses; nothing here waits for an answer before the pills change.
 @MainActor
 public final class ReactionsModel {
-    /// The official client's defaults, until Akari reads the user's frequently used emoji.
-    public static let quickDefaults = ["💯", "😆", "💖"]
+    /// How many emoji Add Reaction's submenu lists, as in the official client.
+    public static let menuLimit = 12
     /// How long the pointer rests on a pill before its names are asked, as the official
     /// client's tooltip opens.
     public static let tooltipDelay = Duration.milliseconds(500)
@@ -65,18 +65,55 @@ public final class ReactionsModel {
     /// react with a new emoji or the setting is off.
     public func quick(for row: MessageListModel.Row) -> [QuickReaction] {
         let own = row.message
-        guard shows, own.delivery == .sent,
-            store.messageActions(channelId: own.channelId, messageId: own.id).react
-        else {
+        guard offersReactions(on: own) else {
             return []
         }
+        let quick = store.quickReactions(channelId: own.channelId, newest: EmojiCatalog.newest)
+        return quickReactions(quick.map { pickerReaction(emoji: $0) }, on: own)
+    }
+
+    private func offersReactions(on message: Message) -> Bool {
+        shows && message.delivery == .sent
+            && store.messageActions(channelId: message.channelId, messageId: message.id).react
+    }
+
+    private func quickReactions(_ emoji: [ReactionEmoji], on message: Message) -> [QuickReaction] {
         let mine = Set(
-            ReactionPill.merged(store.reactions(channelId: own.channelId, messageId: own.id))
+            ReactionPill.merged(store.reactions(channelId: message.channelId, messageId: message.id))
                 .filter(\.mine).map(\.id))
-        return Self.quickDefaults.map { emoji in
-            let emoji = ReactionEmoji.unicode(emoji)
-            return QuickReaction(emoji: emoji, mine: mine.contains(ReactionPill.ID(emoji)))
+        return emoji.map { QuickReaction(emoji: $0, mine: mine.contains(ReactionPill.ID($0))) }
+    }
+
+    static func usable(_ emoji: PickerEmoji) -> Bool {
+        if case .custom(let custom) = emoji {
+            return custom.access == .usable
         }
+        return true
+    }
+
+    /// Add Reaction's submenu: the recently used reactions the user may use here, then the
+    /// quick reactions, each once, `menuLimit` at most; none where the bar has no quick ones.
+    public func menu(for row: MessageListModel.Row) -> [QuickReaction] {
+        let own = row.message
+        guard offersReactions(on: own) else {
+            return []
+        }
+        var seen = Set<ReactionPill.ID>()
+        let recent = store.recentReactions(channelId: own.channelId, newest: EmojiCatalog.newest)
+            .filter { Self.usable($0) }
+        let quick = store.quickReactions(channelId: own.channelId, newest: EmojiCatalog.newest)
+        let emoji = (recent + quick).map { pickerReaction(emoji: $0) }
+            .filter { seen.insert(ReactionPill.ID($0)).inserted }
+        return quickReactions(Array(emoji.prefix(Self.menuLimit)), on: own)
+    }
+
+    /// A pick from the emoji picker: the user's reaction with `emoji`, never taken back when it
+    /// is theirs already.
+    public func add(
+        _ emoji: ReactionEmoji, channelId: ChannelId, messageId: MessageId,
+        from location: ReactionLocation
+    ) async {
+        await react(emoji, channelId: channelId, messageId: messageId, from: location, takesBack: false)
     }
 
     /// A click on a pill: takes the user's reaction back, or adds it. Nothing where the pills
@@ -101,13 +138,22 @@ public final class ReactionsModel {
         _ emoji: ReactionEmoji, channelId: ChannelId, messageId: MessageId,
         from location: ReactionLocation
     ) async {
+        await react(emoji, channelId: channelId, messageId: messageId, from: location, takesBack: true)
+    }
+
+    private func react(
+        _ emoji: ReactionEmoji, channelId: ChannelId, messageId: MessageId,
+        from location: ReactionLocation, takesBack: Bool
+    ) async {
         guard shows else {
             return
         }
         let actions = store.messageActions(channelId: channelId, messageId: messageId)
         let current = ReactionPill.merged(store.reactions(channelId: channelId, messageId: messageId))
             .first { $0.id == ReactionPill.ID(emoji) }
-        guard current == nil ? actions.react : actions.toggleReaction else {
+        guard current == nil ? actions.react : actions.toggleReaction,
+            takesBack || current?.mine != true
+        else {
             return
         }
         do {

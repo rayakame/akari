@@ -242,6 +242,27 @@ final class ReactionsModelTests {
     }
 
     @Test
+    func theQuickReactionsAreTheCoresForTheChannelUpToTheEmojiThisSystemDraws() {
+        store.update { $0.quickReactions[id(11)] = [pickerEmoji(7, "wave"), pickerEmoji("😆"), pickerEmoji("💖")] }
+        react(reaction("😆", 3, me: true))
+
+        let quick = model().quick(for: row())
+
+        #expect(quick.map(\.name) == [":wave:", ":laughing:", ":sparkling_heart:"])
+        #expect(quick.map(\.mine) == [false, true, false])
+        #expect(quick[0].emoji == custom(7))
+        #expect(store.reads.contains(.quickReactions(here, EmojiCatalog.newest)))
+    }
+
+    @Test
+    func aCustomQuickReactionThatIsMineSaysSo() {
+        store.update { $0.quickReactions[id(11)] = [pickerEmoji(7, "wave")] }
+        store.update { $0.reactions[id(100)] = [Reaction(emoji: custom(7, nil), normal: 1, burst: 0, me: true, meBurst: false)] }
+
+        #expect(model().quick(for: row()).map(\.mine) == [true])
+    }
+
+    @Test
     func theQuickReactionsAreTheDefaultsAndSayWhichAreMine() {
         react(reaction("💯", 2), reaction("😆", 3, me: true))
 
@@ -252,6 +273,78 @@ final class ReactionsModelTests {
         #expect(quick.map(\.hint) == ["Click to react", "Click to remove", "Click to react"])
         #expect(quick[1].accessibilityLabel == "Click to remove laughing")
         #expect(quick[0].accessibilityLabel == "Click to react with 100")
+    }
+
+    @Test
+    func theMenuListsTheRecentlyUsedTheUserMayUseHereThenTheQuickOnesEachOnce() {
+        store.update { state in
+            state.recentReactions[id(11)] = [
+                pickerEmoji("😆"), pickerEmoji(8, "locked", access: .nitroLocked), pickerEmoji(7, "wave"),
+            ]
+            state.quickReactions[id(11)] = [pickerEmoji("😆"), pickerEmoji(7, "wave"), pickerEmoji("💯")]
+        }
+        react(reaction("💯", 1, me: true))
+
+        let menu = model().menu(for: row())
+
+        #expect(menu.map(\.name) == [":laughing:", ":wave:", ":100:"])
+        #expect(menu.map(\.mine) == [false, false, true])
+    }
+
+    @Test
+    func theMenuListsTwelveAtMost() {
+        let faces = ["😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃", "🫠", "😉", "😊", "😇"]
+        store.update { $0.recentReactions[id(11)] = faces.map(pickerEmoji) }
+
+        let menu = model().menu(for: row())
+
+        #expect(menu.map(\.emoji.name) == Array(faces.prefix(12)))
+        #expect(ReactionsModel.menuLimit == 12)
+    }
+
+    @Test
+    func withoutAnythingUsedTheMenuListsTheQuickReactions() {
+        #expect(model().menu(for: row()).map(\.emoji.name) == ["💯", "😆", "💖"])
+    }
+
+    @Test
+    func noMenuReactionsWhereTheUserMayNotReact() {
+        store.update { $0.allow(reacting(react: false), message: 100, in: 11) }
+
+        #expect(model().menu(for: row()).isEmpty)
+    }
+
+    @Test
+    func anAddNeverTakesTheUsersReactionBack() async {
+        react(reaction("👍", 2, me: true))
+        let model = model()
+
+        await model.add(.unicode("👍"), channelId: here, messageId: it, from: .picker)
+        #expect(calls.isEmpty)
+
+        await model.add(.unicode("🎉"), channelId: here, messageId: it, from: .picker)
+        #expect(calls == [.react(here, it, "🎉", .picker)])
+    }
+
+    @Test
+    func anAddJoinsAReactionWithoutThePermissionForANewEmoji() async {
+        react(reaction("👍", 2))
+        store.update { $0.allow(reacting(react: false), message: 100, in: 11) }
+        let model = model()
+
+        await model.add(.unicode("🎉"), channelId: here, messageId: it, from: .picker)
+        await model.add(.unicode("👍"), channelId: here, messageId: it, from: .picker)
+
+        #expect(calls == [.react(here, it, "👍", .picker)])
+    }
+
+    @Test
+    func anAddThatIsRefusedShowsWhatAClickShows() async {
+        account.reactionError.withLock { $0 = .TooMany }
+
+        await model().add(.unicode("🎉"), channelId: here, messageId: it, from: .picker)
+
+        #expect(failures.map(\.title) == ["We appreciate the enthusiasm, but..."])
     }
 
     @Test
