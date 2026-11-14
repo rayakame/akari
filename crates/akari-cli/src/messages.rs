@@ -77,6 +77,20 @@ pub enum SessionCommand {
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(1..=100))]
         limit: u8,
     },
+    /// What the emoji picker lists for reacting in a channel: the quick reactions, the recently
+    /// used ones and each server's emoji with whether you may use them there. With a query, what
+    /// its search finds.
+    Emoji {
+        channel_id: u64,
+        /// Search for this name.
+        query: Option<String>,
+        /// Leave out Unicode emoji newer than this version, as an app does for its font.
+        #[arg(long, value_name = "VERSION", value_parser = crate::emoji::parse_version)]
+        newest: Option<akari_core::emoji::EmojiVersion>,
+        /// How many search results, 1 to 500.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u16).range(1..=500))]
+        limit: u16,
+    },
     /// Print a channel's latest messages, then new, edited and deleted ones, reaction changes
     /// and changes to messages that replies answer, until Ctrl+C.
     Tail {
@@ -157,6 +171,19 @@ pub async fn run<S: Accounts>(
             };
             let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
             reactions::reactors(&session.account, channel, message, args).await
+        }
+        SessionCommand::Emoji {
+            channel_id,
+            query,
+            newest,
+            limit,
+        } => {
+            let args = crate::emoji::EmojiArgs {
+                query,
+                newest: newest.unwrap_or(akari_core::emoji::EmojiVersion::NEWEST),
+                limit: usize::from(limit),
+            };
+            crate::emoji::run(&session, Snowflake::new(channel_id), &args)
         }
         SessionCommand::Tail {
             flags_only,

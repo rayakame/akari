@@ -2,6 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod connect;
+mod emoji;
 mod host;
 mod image;
 mod keychain;
@@ -348,6 +349,47 @@ mod tests {
             Command::Session(SessionCommand::Unreact { emoji, .. }) if emoji == "wave:7"
         ));
         assert!(Cli::try_parse_from(["akari-cli", "react", "1", "2"]).is_err());
+    }
+
+    #[test]
+    fn the_emoji_command_takes_a_channel_and_a_query() {
+        let cli = Cli::try_parse_from(["akari-cli", "emoji", "1"]).unwrap();
+        let Command::Session(SessionCommand::Emoji {
+            channel_id,
+            query,
+            newest,
+            limit,
+        }) = cli.command
+        else {
+            panic!("expected emoji");
+        };
+        assert_eq!((channel_id, query, newest, limit), (1, None, None, 50));
+
+        let cli = Cli::try_parse_from([
+            "akari-cli",
+            "emoji",
+            "1",
+            "wave",
+            "--newest",
+            "15.1",
+            "--limit",
+            "5",
+        ])
+        .unwrap();
+        let Command::Session(SessionCommand::Emoji {
+            query,
+            newest,
+            limit,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected emoji");
+        };
+        assert_eq!(query.as_deref(), Some("wave"));
+        assert_eq!(newest, Some(akari_core::emoji::EmojiVersion::new(15, 1)));
+        assert_eq!(limit, 5);
+        assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--newest", "x"]).is_err());
+        assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--limit", "0"]).is_err());
     }
 
     #[test]
