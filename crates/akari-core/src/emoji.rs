@@ -23,7 +23,6 @@ impl EmojiVersion {
 
 /// A CLDR emoji group, the picker's categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum EmojiGroup {
     SmileysAndEmotion,
     PeopleAndBody,
@@ -190,7 +189,7 @@ pub struct UnicodeGroup {
 /// out.
 pub fn unicode_groups(newest: EmojiVersion) -> Vec<UnicodeGroup> {
     let mut groups: Vec<UnicodeGroup> = Vec::with_capacity(EmojiGroup::ALL.len());
-    for emoji in emojis::iter().map(UnicodeEmoji) {
+    for emoji in listed() {
         if emoji.version() > newest {
             continue;
         }
@@ -203,6 +202,85 @@ pub fn unicode_groups(newest: EmojiVersion) -> Vec<UnicodeGroup> {
         }
     }
     groups
+}
+
+/// How well a name matches a search, best first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Match {
+    Exact,
+    Prefix,
+    WordPrefix,
+    Contains,
+}
+
+/// What the user typed into the picker's search.
+pub(crate) struct Query {
+    // As typed, for codes such as `+1`.
+    raw: String,
+    // As names are compared: words joined by underscores.
+    words: String,
+}
+
+// Lowercase, words joined by `_`, other punctuation dropped: `flag: Germany` is `flag_germany`.
+pub(crate) fn search_key(name: &str) -> String {
+    name.chars()
+        .filter_map(|c| match c {
+            ' ' | '-' | '_' => Some('_'),
+            c if c.is_alphanumeric() => Some(c),
+            _ => None,
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+impl Query {
+    /// `None` for nothing to look for; colons around a name are left out (`:smile:`).
+    pub(crate) fn new(text: &str) -> Option<Self> {
+        let raw = text.trim().trim_matches(':').trim().to_lowercase();
+        let words = search_key(&raw);
+        (!raw.is_empty() && !words.is_empty()).then_some(Self { raw, words })
+    }
+
+    /// How `key`, lowercase, matches.
+    pub(crate) fn rank(&self, key: &str) -> Option<Match> {
+        let raw = rank(key, &self.raw);
+        if self.words == self.raw {
+            return raw;
+        }
+        raw.into_iter().chain(rank(key, &self.words)).min()
+    }
+
+    /// How the best of a Unicode emoji's names matches: its short name, other short codes and
+    /// Unicode's name.
+    pub(crate) fn rank_unicode(&self, emoji: UnicodeEmoji) -> Option<Match> {
+        [emoji.name(), Cow::Owned(search_key(emoji.cldr_name()))]
+            .into_iter()
+            .chain(emoji.shortcodes().map(Cow::Borrowed))
+            .filter_map(|key| self.rank(&key))
+            .min()
+    }
+}
+
+fn rank(key: &str, query: &str) -> Option<Match> {
+    if key == query {
+        return Some(Match::Exact);
+    }
+    if key.starts_with(query) {
+        return Some(Match::Prefix);
+    }
+    let mut found = None;
+    for (at, _) in key.match_indices(query) {
+        if key[..at].ends_with('_') {
+            return Some(Match::WordPrefix);
+        }
+        found = Some(Match::Contains);
+    }
+    found
+}
+
+/// The catalog's emoji in its order, without skin-toned variants.
+pub(crate) fn listed() -> impl Iterator<Item = UnicodeEmoji> {
+    emojis::iter().map(UnicodeEmoji)
 }
 
 #[cfg(test)]

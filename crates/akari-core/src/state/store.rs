@@ -15,7 +15,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
-use super::picker::{EmojiAccess, EmojiSection, PickerEmoji};
+use super::picker::{self, EmojiAccess, EmojiSection, PickerEmoji};
 use super::reactions::{Reaction, ReactionEmoji};
 use super::read_states::{Ack, ReadState};
 use super::replies::{ReplyTarget, ReplyTo};
@@ -33,7 +33,7 @@ use super::windows::{
     WindowLimits,
 };
 use crate::backlog::Backlog;
-use crate::emoji::EmojiVersion;
+use crate::emoji::{EmojiVersion, Query};
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -1351,6 +1351,28 @@ impl Store {
     pub fn quick_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
         let now = self.now_millis();
         self.read(|inner| inner.state.quick_reactions(channel, newest, now))
+    }
+
+    /// The emoji whose names match `query` (a Unicode emoji's short name, other short codes and
+    /// Unicode's name; a custom emoji's name; any case, colons around left out), at most `limit`,
+    /// as the picker lists them in `channel`: those the user may use first, then by how well
+    /// they match (the whole name, its start, a word's start, anywhere), then the channel's own
+    /// server, Unicode, the other servers. Unicode emoji newer than `newest` are left out. The
+    /// store's lock is held for the custom emoji only.
+    pub fn search_emoji(
+        &self,
+        channel: ChannelId,
+        query: &str,
+        newest: EmojiVersion,
+        limit: usize,
+    ) -> Vec<PickerEmoji> {
+        let Some(query) = Query::new(query) else {
+            return Vec::new();
+        };
+        let now = self.now_millis();
+        let mut found = self.read(|inner| inner.state.custom_matches(channel, &query, now));
+        found.extend(picker::unicode_matches(&query, newest));
+        picker::ranked(found, limit)
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

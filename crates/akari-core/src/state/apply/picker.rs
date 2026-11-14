@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use super::State;
-use crate::emoji::{EmojiVersion, UnicodeEmoji};
+use crate::emoji::{EmojiVersion, Query, UnicodeEmoji};
 use crate::model::{ChannelId, EmojiId, GuildId, Permissions, PremiumType};
-use crate::state::picker::{CustomEmoji, EmojiAccess, EmojiSection, PickerEmoji};
+use crate::state::picker::{CustomEmoji, EmojiAccess, EmojiSection, Found, PickerEmoji, Source};
+#[cfg(test)]
+use crate::state::picker::{ranked, unicode_matches};
 use crate::state::reactions::ReactionEmoji;
 use crate::state::settings::ServerListItem;
 use crate::state::types::GuildEmoji;
@@ -200,5 +202,68 @@ impl State {
             }
         }
         quick
+    }
+}
+
+impl State {
+    // Under the store's lock: the custom emoji the picker lists here whose name matches.
+    pub(crate) fn custom_matches(
+        &self,
+        channel: ChannelId,
+        query: &Query,
+        now_millis: i64,
+    ) -> Vec<Found> {
+        let Some(here) = self.emoji_here(channel, now_millis) else {
+            return Vec::new();
+        };
+        let mut place = 0;
+        let mut found = Vec::new();
+        for guild_id in self.emoji_guilds(&here) {
+            let Some(guild) = self.entities.guilds.get(&guild_id) else {
+                continue;
+            };
+            let source = if here.guild == Some(guild_id) {
+                Source::Here
+            } else {
+                Source::Elsewhere
+            };
+            for emoji in guild.emojis.iter() {
+                place += 1;
+                let Some(rank) = query.rank(&emoji.name.to_lowercase()) else {
+                    continue;
+                };
+                let access = self.access_of(&here, guild_id, emoji);
+                if access.listed() {
+                    found.push(Found {
+                        emoji: PickerEmoji::Custom(CustomEmoji {
+                            guild_id,
+                            emoji: emoji.clone(),
+                            access,
+                        }),
+                        rank,
+                        source,
+                        place,
+                    });
+                }
+            }
+        }
+        found
+    }
+
+    #[cfg(test)]
+    pub(crate) fn search_emoji(
+        &self,
+        channel: ChannelId,
+        query: &str,
+        newest: EmojiVersion,
+        limit: usize,
+        now_millis: i64,
+    ) -> Vec<PickerEmoji> {
+        let Some(query) = Query::new(query) else {
+            return Vec::new();
+        };
+        let mut found = self.custom_matches(channel, &query, now_millis);
+        found.extend(unicode_matches(&query, newest));
+        ranked(found, limit)
     }
 }

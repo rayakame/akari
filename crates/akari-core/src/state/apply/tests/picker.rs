@@ -383,3 +383,168 @@ fn a_picked_emoji_reacts_with_its_id_and_name() {
     );
     assert_eq!(listed[1].reaction(), ReactionEmoji::unicode("❤\u{fe0f}"));
 }
+
+fn search(state: &State, channel: u64, query: &str) -> Vec<String> {
+    shown(state.search_emoji(ChannelId::new(channel), query, ALL, 500, NOW))
+}
+
+fn position(found: &[String], name: &str) -> usize {
+    found
+        .iter()
+        .position(|found| found == name)
+        .unwrap_or_else(|| panic!("{name} not in {found:?}"))
+}
+
+// An exact name first, then names that start with the query, then a word that does, then any
+// name containing it.
+#[test]
+fn search_ranks_exact_then_prefix_then_word_prefix_then_contains() {
+    let state = picker_state(true);
+
+    let found = search(&state, GENERAL, "art");
+
+    assert_eq!(found[0], "art");
+    let prefix = position(&found, "articulated_lorry");
+    let word = position(&found, "performing_arts");
+    let contains = position(&found, "heart");
+    assert!(prefix < word && word < contains, "{found:?}");
+}
+
+#[test]
+fn search_reads_other_short_codes_and_unicodes_names() {
+    let state = picker_state(false);
+
+    assert_eq!(search(&state, GENERAL, "+1")[0], "thumbsup");
+    assert_eq!(search(&state, GENERAL, "satisfied")[0], "laughing");
+    assert_eq!(search(&state, GENERAL, "thumbs up")[0], "thumbsup");
+    assert_eq!(search(&state, GENERAL, "grinning squinting")[0], "laughing");
+    assert_eq!(search(&state, GENERAL, "flag: germany")[0], "flag_de");
+}
+
+#[test]
+fn search_ignores_case_colons_and_spaces_around() {
+    let state = picker_state(false);
+
+    assert_eq!(search(&state, GENERAL, " :Smile: ")[0], "smile");
+    assert_eq!(search(&state, GENERAL, "THUMBSUP")[0], "thumbsup");
+    assert!(search(&state, GENERAL, "").is_empty());
+    assert!(search(&state, GENERAL, " :: ").is_empty());
+}
+
+// Within a rank: the channel's own server, then Unicode, then the other servers.
+#[test]
+fn search_puts_the_channels_server_first() {
+    let mut state = picker_state(true);
+    apply(
+        &mut state,
+        "GUILD_EMOJIS_UPDATE",
+        json!({"guild_id": G3.to_string(), "emojis": [emoji(POG, "wave")]}),
+    );
+    let wave = |found: &PickerEmoji| match found {
+        PickerEmoji::Custom(custom) => custom.guild_id.get().to_string(),
+        PickerEmoji::Unicode(emoji) => emoji.as_str().to_owned(),
+    };
+    let first_three = |channel: u64| -> Vec<String> {
+        state
+            .search_emoji(ChannelId::new(channel), "wave", ALL, 3, NOW)
+            .iter()
+            .map(wave)
+            .collect()
+    };
+
+    assert_eq!(
+        first_three(GENERAL),
+        [G1.to_string(), "👋".to_owned(), G3.to_string()]
+    );
+    assert_eq!(
+        first_three(DM),
+        ["👋".to_owned(), G3.to_string(), G1.to_string()],
+        "the rail's order, the server joined last first"
+    );
+}
+
+// Discord's picker lists what the user may use first; a locked exact match comes after a usable
+// prefix.
+#[test]
+fn usable_matches_come_before_locked_ones() {
+    let state = picker_state(false);
+
+    let found = state.search_emoji(ChannelId::new(GENERAL), "dance", ALL, 500, NOW);
+
+    let locked = found
+        .iter()
+        .position(|emoji| emoji.name() == "dance")
+        .unwrap();
+    assert_eq!(found[locked].access(), EmojiAccess::NitroLocked);
+    assert!(found[..locked].iter().all(|emoji| emoji.access().usable()));
+    assert!(locked > 0, "{:?}", shown(found.clone()));
+}
+
+#[test]
+fn search_leaves_out_what_the_picker_hides_and_what_the_host_cant_draw() {
+    let state = picker_state(false);
+
+    assert!(!search(&state, GENERAL, "subs").contains(&"subs".to_owned()));
+    let garden = state.search_emoji(ChannelId::new(GARDEN), "wave", ALL, 500, NOW);
+    assert!(
+        garden
+            .iter()
+            .all(|emoji| matches!(emoji, PickerEmoji::Unicode(_))),
+        "G1's are external there"
+    );
+    let newer = state.search_emoji(
+        ChannelId::new(GENERAL),
+        "face_with_bags",
+        EmojiVersion::new(15, 1),
+        10,
+        NOW,
+    );
+    assert!(newer.is_empty());
+    assert_eq!(
+        search(&state, GENERAL, "face_with_bags"),
+        ["face_with_bags_under_eyes"]
+    );
+}
+
+#[test]
+fn a_custom_names_case_doesnt_matter() {
+    let mut state = picker_state(true);
+    apply(
+        &mut state,
+        "GUILD_EMOJIS_UPDATE",
+        json!({"guild_id": G3.to_string(), "emojis": [emoji(POG, "PartyBlob")]}),
+    );
+
+    assert_eq!(search(&state, GENERAL, "partyb"), ["PartyBlob"]);
+    assert_eq!(search(&state, GENERAL, "BLOB"), ["PartyBlob"]);
+}
+
+#[test]
+fn search_gives_at_most_the_limit() {
+    let state = picker_state(false);
+
+    let found = state.search_emoji(ChannelId::new(GENERAL), "a", ALL, 5, NOW);
+
+    assert_eq!(found.len(), 5);
+}
+
+// An unknown channel still finds Unicode emoji.
+#[test]
+fn search_in_an_unknown_channel_finds_unicode_only() {
+    let state = picker_state(true);
+
+    let found = state.search_emoji(
+        ChannelId::new(300_000_000_000_000_099),
+        "wave",
+        ALL,
+        50,
+        NOW,
+    );
+
+    assert!(!found.is_empty());
+    assert!(
+        found
+            .iter()
+            .all(|emoji| matches!(emoji, PickerEmoji::Unicode(_)))
+    );
+}

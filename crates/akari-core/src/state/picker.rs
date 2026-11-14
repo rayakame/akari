@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use super::reactions::ReactionEmoji;
 use super::types::GuildEmoji;
-use crate::emoji::UnicodeEmoji;
+use crate::emoji::{EmojiVersion, Match, Query, UnicodeEmoji, listed};
 use crate::model::GuildId;
 
 /// The most recently used reactions the account keeps, as Discord's client keeps 42 frequently
@@ -15,7 +15,6 @@ pub const RECENT_REACTIONS: usize = 42;
 /// Whether the user may react with a custom emoji in a channel, and why not, as Discord's client
 /// tells it apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum EmojiAccess {
     Usable,
     /// The server lost the boosts the emoji needs: nobody can use it.
@@ -59,7 +58,6 @@ pub struct EmojiSection {
 
 /// An emoji the picker offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum PickerEmoji {
     Unicode(UnicodeEmoji),
     Custom(CustomEmoji),
@@ -93,4 +91,52 @@ impl PickerEmoji {
             ),
         }
     }
+}
+
+// Where a match comes from: the channel's server, Unicode, then the user's other servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Source {
+    Here,
+    Unicode,
+    Elsewhere,
+}
+
+pub(crate) struct Found {
+    pub(crate) emoji: PickerEmoji,
+    pub(crate) rank: Match,
+    pub(crate) source: Source,
+    // Its place in the picker's own order.
+    pub(crate) place: usize,
+}
+
+pub(crate) fn unicode_matches(query: &Query, newest: EmojiVersion) -> Vec<Found> {
+    listed()
+        .enumerate()
+        .filter(|(_, emoji)| emoji.version() <= newest)
+        .filter_map(|(place, emoji)| {
+            Some(Found {
+                rank: query.rank_unicode(emoji)?,
+                emoji: PickerEmoji::Unicode(emoji),
+                source: Source::Unicode,
+                place,
+            })
+        })
+        .collect()
+}
+
+// Usable before locked, then the match, then where from, then the picker's order.
+pub(crate) fn ranked(mut found: Vec<Found>, limit: usize) -> Vec<PickerEmoji> {
+    found.sort_by_key(|found| {
+        (
+            !found.emoji.access().usable(),
+            found.rank,
+            found.source,
+            found.place,
+        )
+    });
+    found
+        .into_iter()
+        .take(limit)
+        .map(|found| found.emoji)
+        .collect()
 }

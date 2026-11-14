@@ -2353,3 +2353,24 @@ fn a_ready_before_the_restore_adds_the_cached_reaction_uses() {
 
     assert_eq!(quick_names(&store), ["fire", "thumbsup", "joy"]);
 }
+
+#[test]
+fn search_finds_the_users_custom_emoji_and_unicodes() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|data| {
+        data["guilds"][0]["emojis"] = json!([{"id": "700000000000000001", "name": "wave_blob"}]);
+    }))));
+
+    let found: Vec<String> = store
+        .search_emoji(general(), "wave", crate::emoji::EmojiVersion::NEWEST, 10)
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect();
+
+    assert_eq!(found[..2], ["wave".to_owned(), "wave_blob".to_owned()]);
+    assert!(
+        store
+            .search_emoji(general(), "::", crate::emoji::EmojiVersion::NEWEST, 10)
+            .is_empty()
+    );
+}
