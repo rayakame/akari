@@ -6,8 +6,8 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{
-    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State, Unread,
-    UnreadNeeds, Wanted,
+    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReactionAsk, ReadyDiff, State,
+    Unread, UnreadNeeds, Wanted,
 };
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
@@ -752,15 +752,27 @@ impl Store {
         })
     }
 
-    pub(crate) fn confirm_reaction(
+    pub(crate) fn ask_reaction(
         &self,
         channel: ChannelId,
         message: MessageId,
         emoji: &ReactionEmoji,
-    ) {
+    ) -> Option<ReactionAsk> {
         self.write("reaction", |inner, _| {
-            inner.state.confirm_reaction(channel, message, emoji);
-        });
+            inner.state.ask_reaction(channel, message, emoji)
+        })
+    }
+
+    pub(crate) fn reaction_answered(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        done: bool,
+    ) -> bool {
+        self.write("reaction", |inner, _| {
+            inner.state.reaction_answered(channel, message, emoji, done)
+        })
     }
 
     pub(crate) fn settle_reaction(
@@ -768,12 +780,9 @@ impl Store {
         channel: ChannelId,
         message: MessageId,
         emoji: &ReactionEmoji,
-        restore: Option<(bool, bool)>,
     ) {
         self.write("reaction", |inner, events| {
-            inner
-                .state
-                .settle_reaction(channel, message, emoji, restore, events);
+            inner.state.settle_reaction(channel, message, emoji, events);
         });
     }
 

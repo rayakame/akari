@@ -6,6 +6,7 @@ use tokio::sync::oneshot;
 use super::{Account, Shared};
 use crate::RequestError;
 use crate::model::{ChannelId, MessageId, UserId};
+use crate::state::apply::ReactionAsk;
 use crate::state::{ReactionEmoji, User};
 
 const TOO_MANY_REACTIONS: u32 = 30010;
@@ -98,16 +99,11 @@ impl From<RequestError> for ReactionError {
 
 type Answer = oneshot::Sender<Result<(), ReactionError>>;
 
-// What the user last wanted for one emoji on one message, while requests for it run.
+// The caller waiting for one emoji on one message, while requests for it run.
 struct Wish {
     channel: ChannelId,
     message: MessageId,
     emoji: ReactionEmoji,
-    want: bool,
-    // The removal takes the user's super reaction.
-    burst: bool,
-    // What Discord has, as far as its answers said.
-    discord: bool,
     location: ReactionLocation,
     answer: Option<Answer>,
 }
@@ -152,11 +148,7 @@ impl Shared {
                 Some(wish) => {
                     // The earlier call's wish is no longer the user's: nothing failed for it.
                     wish.answer(Ok(()));
-                    wish.want = want;
                     wish.location = location;
-                    if wanted.changed && !want {
-                        wish.burst = wanted.burst;
-                    }
                     wish.answer = Some(answer);
                 }
                 None if !wanted.changed => return Ok(()),
@@ -165,9 +157,6 @@ impl Shared {
                         channel: wanted.channel,
                         message: wanted.message,
                         emoji: wanted.emoji.clone(),
-                        want,
-                        burst: wanted.burst,
-                        discord: !want,
                         location,
                         answer: Some(answer),
                     });
@@ -186,58 +175,51 @@ impl Shared {
     // Asks Discord until it has what the user last wanted, or refuses it.
     async fn grant(&self, channel: ChannelId, message: MessageId, emoji: ReactionEmoji) {
         loop {
-            let (want, burst, location) = {
+            let (ask, location) = {
                 let mut wishes = self.wishes.0.lock().unwrap_or_else(PoisonError::into_inner);
-                let Some(index) = wishes
+                let index = wishes
                     .iter()
-                    .position(|wish| wish.is(channel, message, &emoji))
-                else {
+                    .position(|wish| wish.is(channel, message, &emoji));
+                let ask = self.store.ask_reaction(channel, message, &emoji);
+                let (Some(ask), Some(index)) = (ask, index) else {
+                    self.store.settle_reaction(channel, message, &emoji);
+                    if let Some(index) = index {
+                        wishes.swap_remove(index).answer(Ok(()));
+                    }
                     return;
                 };
-                if wishes[index].want == wishes[index].discord {
-                    let mut wish = wishes.swap_remove(index);
-                    self.store.settle_reaction(channel, message, &emoji, None);
-                    wish.answer(Ok(()));
-                    return;
-                }
-                let wish = &wishes[index];
-                (wish.want, wish.burst, wish.location)
+                (ask, wishes[index].location)
             };
             let asked = self
-                .ask_reaction(channel, message, &emoji, want, burst, location)
+                .ask_reaction(channel, message, &emoji, ask, location)
                 .await;
             tracing::debug!(
                 channel_id = channel.get(),
                 message_id = message.get(),
-                add = want,
+                add = ask.add,
                 outcome = asked.as_ref().map_or_else(RequestError::kind, |()| "done"),
                 "reaction"
             );
             let mut wishes = self.wishes.0.lock().unwrap_or_else(PoisonError::into_inner);
-            let Some(index) = wishes
+            let refused = self
+                .store
+                .reaction_answered(channel, message, &emoji, asked.is_ok());
+            let Err(err) = asked else {
+                continue;
+            };
+            self.failed(&err);
+            if !refused {
+                // The wish changed while Discord refused the one before it.
+                continue;
+            }
+            self.store.settle_reaction(channel, message, &emoji);
+            if let Some(index) = wishes
                 .iter()
                 .position(|wish| wish.is(channel, message, &emoji))
-            else {
-                return;
-            };
-            match asked {
-                Ok(()) => {
-                    wishes[index].discord = want;
-                    self.store.confirm_reaction(channel, message, &emoji);
-                }
-                Err(err) => {
-                    self.failed(&err);
-                    // A wish made since is for what Discord kept: the next round finds it so.
-                    if wishes[index].want == want {
-                        let mut wish = wishes.swap_remove(index);
-                        let restore = Some((wish.discord, wish.burst));
-                        self.store
-                            .settle_reaction(channel, message, &emoji, restore);
-                        wish.answer(Err(err.into()));
-                        return;
-                    }
-                }
+            {
+                wishes.swap_remove(index).answer(Err(err.into()));
             }
+            return;
         }
     }
 
@@ -246,18 +228,17 @@ impl Shared {
         channel: ChannelId,
         message: MessageId,
         emoji: &ReactionEmoji,
-        want: bool,
-        burst: bool,
+        ask: ReactionAsk,
         location: ReactionLocation,
     ) -> Result<(), RequestError> {
         self.unarchive_for_reaction(channel).await?;
-        if want {
+        if ask.add {
             self.rest
                 .add_reaction(channel, message, emoji, location.query())
                 .await
         } else {
             self.rest
-                .remove_reaction(channel, message, emoji, burst, None, location.query())
+                .remove_reaction(channel, message, emoji, ask.burst, None, location.query())
                 .await
         }
     }
@@ -277,14 +258,10 @@ impl Shared {
 }
 
 impl Account {
-    /// Adds the user's reaction with `emoji` to the message the row `message` of `channel`
-    /// shows. The store has it at once on every copy of the message
-    /// (`MessageReactionsChanged`), and Discord's echo changes nothing; a refusal takes it out
-    /// again, unless the gateway said otherwise meanwhile, and is the error. One request runs
-    /// per message and emoji: a call made meanwhile changes what the next one asks for, so
-    /// Discord ends with what the user wanted last, and answers the call before it with `Ok`.
-    /// Never a super reaction; `Ok` without a request when the reaction is the user's already.
-    /// `InvalidRequest`, without a request, where
+    /// Adds the user's reaction with `emoji`, never a super reaction, to the message the row
+    /// shows. The store has it at once (`MessageReactionsChanged`); an error means the store
+    /// went back to what Discord has. A call made while one runs for the same emoji replaces it,
+    /// and that one answers `Ok`. `InvalidRequest` where
     /// [`MessageActions`](crate::state::MessageActions) says no: `react` for an emoji the
     /// message doesn't have, `toggle_reaction` for one it has.
     pub async fn react(
@@ -299,9 +276,8 @@ impl Account {
             .await
     }
 
-    /// Takes the user's reaction with `emoji` back, as [`Account::react`] adds it: at once in
-    /// the store, put back on a refusal. A reaction that is the user's only as a super
-    /// reaction is removed as one. Needs `toggle_reaction`.
+    /// Takes the user's reaction with `emoji` back, as [`Account::react`] adds it; one that is
+    /// theirs only as a super reaction is removed as one. Needs `toggle_reaction`.
     pub async fn unreact(
         &self,
         channel: ChannelId,

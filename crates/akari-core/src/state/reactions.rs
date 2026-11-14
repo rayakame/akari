@@ -118,6 +118,8 @@ pub(crate) enum ReactionChange {
     },
     RemoveEmoji(ReactionEmoji),
     RemoveAll,
+    // The emoji as a dispatch has it, which may know a name the message's reaction lacks.
+    Named(ReactionEmoji),
 }
 
 impl ReactionChange {
@@ -152,18 +154,25 @@ impl ReactionChange {
                 } else {
                     (known.normal, known.me)
                 };
-                if (*mine && me) || (*only_once && !mine && count > u32::from(me)) {
+                let named = known.emoji.name.is_none() && emoji.name.is_some();
+                let counted = !((*mine && me) || (*only_once && !mine && count > u32::from(me)));
+                if !counted && !named {
                     return None;
                 }
                 let mut next = reactions.to_vec();
                 let reaction = &mut next[index];
-                let (count, me) = if *burst {
-                    (&mut reaction.burst, &mut reaction.me_burst)
-                } else {
-                    (&mut reaction.normal, &mut reaction.me)
-                };
-                *count = count.saturating_add(1);
-                *me |= mine;
+                if named {
+                    reaction.emoji.name.clone_from(&emoji.name);
+                }
+                if counted {
+                    let (count, me) = if *burst {
+                        (&mut reaction.burst, &mut reaction.me_burst)
+                    } else {
+                        (&mut reaction.normal, &mut reaction.me)
+                    };
+                    *count = count.saturating_add(1);
+                    *me |= mine;
+                }
                 Some(next)
             }
             Self::Remove { emoji, burst, mine } => {
@@ -197,6 +206,15 @@ impl ReactionChange {
                 Some(next)
             }
             Self::RemoveAll => (!reactions.is_empty()).then(Vec::new),
+            Self::Named(emoji) => {
+                let index = find(emoji)?;
+                if reactions[index].emoji.name.is_some() || emoji.name.is_none() {
+                    return None;
+                }
+                let mut next = reactions.to_vec();
+                next[index].emoji.name.clone_from(&emoji.name);
+                Some(next)
+            }
         }
     }
 }
@@ -484,6 +502,54 @@ mod tests {
 
         assert_eq!(next[0].emoji, custom(7, Some("wave")));
         assert_eq!(next[0].normal, 2);
+    }
+
+    #[test]
+    fn a_dispatch_names_an_emoji_the_message_has_without_a_name() {
+        let nameless = |normal, me| Reaction {
+            emoji: custom(7, None),
+            normal,
+            burst: 0,
+            me,
+            me_burst: false,
+        };
+        let named = |normal, me| Reaction {
+            emoji: custom(7, Some("wave")),
+            ..nameless(normal, me)
+        };
+        let add = |name, mine| ReactionChange::Add {
+            emoji: custom(7, name),
+            burst: false,
+            mine,
+            only_once: false,
+        };
+
+        assert_eq!(
+            add(Some("wave"), false).apply(&[nameless(1, true)]),
+            Some(vec![named(2, true)])
+        );
+        assert_eq!(
+            add(Some("wave"), true).apply(&[nameless(1, true)]),
+            Some(vec![named(1, true)]),
+            "the echo of the user's own counts nothing"
+        );
+        assert_eq!(add(None, true).apply(&[nameless(1, true)]), None);
+        assert_eq!(
+            ReactionChange::Named(custom(7, Some("wave"))).apply(&[nameless(1, true)]),
+            Some(vec![named(1, true)])
+        );
+        assert_eq!(
+            ReactionChange::Named(custom(7, Some("renamed"))).apply(&[named(1, true)]),
+            None
+        );
+        assert_eq!(
+            ReactionChange::Named(custom(7, None)).apply(&[nameless(1, true)]),
+            None
+        );
+        assert_eq!(
+            ReactionChange::Named(custom(8, Some("wave"))).apply(&[nameless(1, true)]),
+            None
+        );
     }
 
     #[test]

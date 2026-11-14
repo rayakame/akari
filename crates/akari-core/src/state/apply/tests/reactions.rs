@@ -1,6 +1,6 @@
 use super::*;
 use crate::state::StarterMessage;
-use crate::state::apply::Wanted;
+use crate::state::apply::{ReactionAsk, Wanted};
 use crate::state::reactions::ReactionEmoji;
 use crate::state::windows::StarterFetch;
 
@@ -1004,16 +1004,43 @@ fn want(
     (wanted, events.iter().map(describe).collect())
 }
 
-fn settle(state: &mut State, wanted: &Wanted, restore: Option<(bool, bool)>) -> Vec<String> {
+const PUT: ReactionAsk = ReactionAsk {
+    add: true,
+    burst: false,
+};
+const DELETE: ReactionAsk = ReactionAsk {
+    add: false,
+    burst: false,
+};
+
+// The request on its way now, if Discord doesn't have the user's wish.
+fn ask(state: &mut State, wanted: &Wanted) -> Option<ReactionAsk> {
+    state.ask_reaction(wanted.channel, wanted.message, &wanted.emoji)
+}
+
+// Whether Discord refused the wish as it stands.
+fn answered(state: &mut State, wanted: &Wanted, done: bool) -> bool {
+    state.reaction_answered(wanted.channel, wanted.message, &wanted.emoji, done)
+}
+
+fn settle(state: &mut State, wanted: &Wanted) -> Vec<String> {
     let mut events = Vec::new();
-    state.settle_reaction(
-        wanted.channel,
-        wanted.message,
-        &wanted.emoji,
-        restore,
-        &mut events,
-    );
+    state.settle_reaction(wanted.channel, wanted.message, &wanted.emoji, &mut events);
     events.iter().map(describe).collect()
+}
+
+// Discord refuses the request for the click.
+fn refuse(state: &mut State, wanted: &Wanted) -> Vec<String> {
+    assert!(ask(state, wanted).is_some(), "nothing to ask");
+    assert!(answered(state, wanted, false), "the wish stands");
+    settle(state, wanted)
+}
+
+fn grant(state: &mut State, wanted: &Wanted) -> Vec<String> {
+    assert!(ask(state, wanted).is_some(), "nothing to ask");
+    assert!(!answered(state, wanted, true));
+    assert_eq!(ask(state, wanted), None, "asked twice");
+    settle(state, wanted)
 }
 
 #[test]
@@ -1026,10 +1053,8 @@ fn the_users_click_shows_at_once_and_its_echo_changes_nothing() {
 
     let wanted = wanted.unwrap();
     assert!(wanted.changed);
-    assert_eq!(
-        (wanted.channel.get(), wanted.message.get(), wanted.burst),
-        (GENERAL, 10, false)
-    );
+    assert_eq!((wanted.channel.get(), wanted.message.get()), (GENERAL, 10));
+    assert_eq!(ask(&mut state, &wanted), Some(PUT));
     assert_eq!(events, [changed(GENERAL, 10)]);
     assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
     assert_eq!(add(&mut state, GENERAL, 10, ME, UP), [] as [&str; 0]);
@@ -1080,7 +1105,7 @@ fn every_copy_of_a_message_takes_the_users_click() {
         );
         assert_eq!(read(state), one(UP, 1, true), "{name}: reacted");
 
-        settle(state, &wanted, Some((false, false)));
+        refuse(state, &wanted);
         assert_eq!(read(state), [], "{name}: refused, taken back");
     }
 }
@@ -1142,7 +1167,7 @@ fn a_refused_click_goes_back_to_what_discord_had() {
     add(&mut state, GENERAL, 10, ME, FIRE);
 
     let (added, _) = want(&mut state, GENERAL, 10, UP, true);
-    let events = settle(&mut state, &added.unwrap(), Some((false, false)));
+    let events = refuse(&mut state, &added.unwrap());
     assert_eq!(events, [changed(GENERAL, 10)]);
     assert_eq!(
         reactions(&state, GENERAL, 10),
@@ -1151,7 +1176,7 @@ fn a_refused_click_goes_back_to_what_discord_had() {
 
     let (taken, _) = want(&mut state, GENERAL, 10, FIRE, false);
     assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
-    let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+    let events = refuse(&mut state, &taken.unwrap());
     assert_eq!(events, [changed(GENERAL, 10)]);
     assert_eq!(
         reactions(&state, GENERAL, 10),
@@ -1166,7 +1191,7 @@ fn a_settled_click_without_a_refusal_changes_nothing() {
     apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
 
     let (added, _) = want(&mut state, GENERAL, 10, UP, true);
-    let events = settle(&mut state, &added.unwrap(), None);
+    let events = grant(&mut state, &added.unwrap());
 
     assert_eq!(events, [] as [&str; 0]);
     assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
@@ -1197,8 +1222,11 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
         add(&mut state, GENERAL, 10, ME, UP);
 
         let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+        let taken = taken.unwrap();
+        assert_eq!(ask(&mut state, &taken), Some(DELETE));
         apply(&mut state, dispatch, data);
-        let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+        answered(&mut state, &taken, false);
+        let events = settle(&mut state, &taken);
 
         assert_eq!(events, [] as [&str; 0], "{name}");
         assert_eq!(reactions(&state, GENERAL, 10), [], "{name}: not put back");
@@ -1207,8 +1235,11 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
     let mut state = viewing(GENERAL);
     apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
     let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    let added = added.unwrap();
+    ask(&mut state, &added);
     add(&mut state, GENERAL, 10, ME, UP);
-    settle(&mut state, &added.unwrap(), Some((false, false)));
+    answered(&mut state, &added, false);
+    assert_eq!(settle(&mut state, &added), [] as [&str; 0]);
     assert_eq!(
         reactions(&state, GENERAL, 10),
         one(UP, 1, true),
@@ -1218,13 +1249,26 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
     let mut state = viewing(GENERAL);
     apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
     add(&mut state, GENERAL, 10, ME, UP);
+    apply(&mut state, "MESSAGE_CREATE", message(11, GENERAL));
+    add(&mut state, GENERAL, 11, ME, UP);
     let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
-    add(&mut state, GENERAL, 10, MIRA, FIRE);
-    remove(&mut state, GENERAL, 10, MIRA, FIRE);
-    add(&mut state, GENERAL, 10, ME, FIRE);
-    remove(&mut state, GENERAL, 10, ME, FIRE);
-    remove(&mut state, GENERAL, 11, ME, UP);
-    settle(&mut state, &taken.unwrap(), Some((true, false)));
+    let taken = taken.unwrap();
+    ask(&mut state, &taken);
+    for events in [
+        add(&mut state, GENERAL, 10, MIRA, FIRE),
+        remove(&mut state, GENERAL, 10, MIRA, FIRE),
+        add(&mut state, GENERAL, 10, ME, FIRE),
+        remove(&mut state, GENERAL, 10, ME, FIRE),
+    ] {
+        assert_eq!(events, [changed(GENERAL, 10)], "shown as it comes");
+    }
+    assert_eq!(
+        remove(&mut state, GENERAL, 11, ME, UP),
+        [changed(GENERAL, 11)],
+        "shown as it comes"
+    );
+    answered(&mut state, &taken, false);
+    settle(&mut state, &taken);
     assert_eq!(
         reactions(&state, GENERAL, 10),
         one(UP, 1, true),
@@ -1232,37 +1276,26 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
     );
 }
 
+// Kept apart: Discord has the plain one still, and the super reaction too.
 #[test]
-fn a_refused_removal_adds_nothing_to_a_super_reaction_made_meanwhile() {
+fn a_refused_removal_puts_the_plain_reaction_beside_a_super_reaction_made_meanwhile() {
     let mut state = viewing(GENERAL);
     apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
     add(&mut state, GENERAL, 10, ME, UP);
 
     let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
-    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
-    settle(&mut state, &taken.unwrap(), Some((true, false)));
+    let taken = taken.unwrap();
+    ask(&mut state, &taken);
+    let heard = apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    assert_eq!(heard, [] as [&str; 0], "the store shows the wish");
+    answered(&mut state, &taken, false);
+    let events = settle(&mut state, &taken);
 
+    assert_eq!(events, [changed(GENERAL, 10)], "one event for both");
     assert_eq!(
         reactions(&state, GENERAL, 10),
-        [(UP.to_owned(), 0, 1, false, true)],
-        "the user's on another device, not a second one"
+        [(UP.to_owned(), 1, 1, true, true)]
     );
-}
-
-#[test]
-fn an_answer_from_discord_is_newer_than_what_the_gateway_said_before_it() {
-    let mut state = viewing(GENERAL);
-    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
-
-    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
-    let added = added.unwrap();
-    add(&mut state, GENERAL, 10, ME, UP);
-    state.confirm_reaction(added.channel, added.message, &added.emoji);
-    want(&mut state, GENERAL, 10, UP, false);
-    want(&mut state, GENERAL, 10, UP, true);
-    settle(&mut state, &added, Some((false, false)));
-
-    assert_eq!(reactions(&state, GENERAL, 10), []);
 }
 
 #[test]
@@ -1277,7 +1310,7 @@ fn a_refusal_for_a_deleted_message_changes_nothing() {
         "MESSAGE_DELETE",
         json!({"id": "10", "channel_id": GENERAL.to_string()}),
     );
-    let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+    let events = refuse(&mut state, &taken.unwrap());
 
     assert_eq!(events, [] as [&str; 0]);
     assert_eq!(reactions(&state, GENERAL, 10), []);
@@ -1302,13 +1335,19 @@ fn a_super_reaction_of_the_users_is_taken_back_as_one_and_never_added() {
 
     let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
     let taken = taken.unwrap();
-    assert!(taken.burst && taken.changed);
+    assert!(taken.changed);
     assert_eq!(
         reactions(&state, GENERAL, 10),
         [(UP.to_owned(), 0, 1, false, false)]
     );
+    let burst = ReactionAsk {
+        add: false,
+        burst: true,
+    };
+    assert_eq!(ask(&mut state, &taken), Some(burst));
+    answered(&mut state, &taken, false);
 
-    settle(&mut state, &taken, Some((true, true)));
+    settle(&mut state, &taken);
     assert_eq!(
         reactions(&state, GENERAL, 10),
         [(UP.to_owned(), 0, 2, false, true)],
@@ -1316,9 +1355,9 @@ fn a_super_reaction_of_the_users_is_taken_back_as_one_and_never_added() {
     );
 
     let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
-    settle(&mut state, &taken.unwrap(), None);
+    grant(&mut state, &taken.unwrap());
     let (added, _) = want(&mut state, GENERAL, 10, UP, true);
-    assert!(!added.unwrap().burst);
+    assert_eq!(ask(&mut state, &added.unwrap()), Some(PUT));
     assert_eq!(
         reactions(&state, GENERAL, 10),
         [(UP.to_owned(), 1, 1, true, false)],
@@ -1371,4 +1410,507 @@ fn a_click_on_a_message_the_store_doesnt_have_is_refused() {
 
     assert_eq!(want(&mut state, GENERAL, 99, UP, true).0, None);
     assert_eq!(want(&mut state, GENERAL, 99, UP, false).0, None);
+}
+
+fn on_ten() -> State {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    state
+}
+
+fn click(state: &mut State, wanted: bool) -> Wanted {
+    want(state, GENERAL, 10, UP, wanted).0.unwrap()
+}
+
+const NOTHING: [&str; 0] = [];
+
+#[test]
+fn the_users_own_dispatches_wait_while_a_request_runs() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, MIRA, UP);
+
+    let added = click(&mut state, true);
+    assert_eq!(ask(&mut state, &added), Some(PUT));
+    click(&mut state, false);
+    answered(&mut state, &added, true);
+    assert_eq!(ask(&mut state, &added), Some(DELETE));
+
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+    answered(&mut state, &added, true);
+    assert_eq!(ask(&mut state, &added), None);
+    assert_eq!(settle(&mut state, &added), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+
+    let taken = {
+        add(&mut state, GENERAL, 10, ME, UP);
+        click(&mut state, false)
+    };
+    assert_eq!(ask(&mut state, &taken), Some(DELETE));
+    click(&mut state, true);
+    answered(&mut state, &taken, true);
+    assert_eq!(ask(&mut state, &taken), Some(PUT));
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
+    answered(&mut state, &taken, true);
+    assert_eq!(ask(&mut state, &taken), None);
+    assert_eq!(settle(&mut state, &taken), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
+}
+
+#[test]
+fn a_settled_reaction_takes_dispatches_like_any_other() {
+    let mut state = on_ten();
+    let added = click(&mut state, true);
+    grant(&mut state, &added);
+
+    assert_eq!(ask(&mut state, &added), None, "no request without a click");
+    assert_eq!(
+        remove(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)]
+    );
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+    assert_eq!(settle(&mut state, &added), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+// What another device did while the request ran shows when the requests are over.
+#[test]
+fn settling_shows_what_the_gateway_said_of_the_users_reaction() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    let added = click(&mut state, true);
+    ask(&mut state, &added);
+    add(&mut state, GENERAL, 10, ME, UP);
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
+    assert!(!answered(&mut state, &added, true), "not refused");
+
+    assert_eq!(ask(&mut state, &added), Some(PUT), "the wish stands");
+    answered(&mut state, &added, false);
+    assert_eq!(settle(&mut state, &added), [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+}
+
+// Each answer stands in for its echo until the echo comes: an echo that is late by a whole
+// request is not taken for the next request's.
+#[test]
+fn echoes_later_than_the_next_answer_say_nothing_new() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    assert_eq!(ask(&mut state, &wish), Some(PUT));
+    click(&mut state, false);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+    click(&mut state, true);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(PUT));
+
+    add(&mut state, GENERAL, 10, ME, UP);
+    remove(&mut state, GENERAL, 10, ME, UP);
+    answered(&mut state, &wish, true);
+
+    assert_eq!(ask(&mut state, &wish), None, "Discord has it by its answer");
+    assert_eq!(settle(&mut state, &wish), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING);
+}
+
+// The gateway's order is Discord's: a dispatch that is not the echo owed is newer knowledge,
+// and so is what follows it.
+#[test]
+fn a_dispatch_out_of_the_answers_order_is_believed() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    answered(&mut state, &wish, true);
+
+    remove(&mut state, GENERAL, 10, ME, UP);
+    assert_eq!(ask(&mut state, &wish), Some(PUT), "removed elsewhere");
+    add(&mut state, GENERAL, 10, ME, UP);
+    answered(&mut state, &wish, false);
+
+    assert_eq!(settle(&mut state, &wish), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+}
+
+#[test]
+fn an_answer_after_its_echo_says_nothing_of_what_came_between() {
+    let removals: [(&str, Value); 3] = [
+        (
+            "MESSAGE_REACTION_REMOVE_ALL",
+            json!({"channel_id": GENERAL.to_string(), "message_id": "10"}),
+        ),
+        (
+            "MESSAGE_REACTION_REMOVE_EMOJI",
+            json!({
+                "channel_id": GENERAL.to_string(), "message_id": "10",
+                "emoji": {"id": null, "name": UP},
+            }),
+        ),
+        ("MESSAGE_REACTION_REMOVE", reaction(GENERAL, 10, ME, UP)),
+    ];
+    for (name, data) in removals {
+        let mut state = on_ten();
+        let wish = click(&mut state, true);
+        ask(&mut state, &wish);
+        click(&mut state, false);
+        add(&mut state, GENERAL, 10, ME, UP);
+        apply(&mut state, name, data);
+        answered(&mut state, &wish, true);
+
+        assert_eq!(ask(&mut state, &wish), None, "{name}: nothing to take back");
+        assert_eq!(settle(&mut state, &wish), NOTHING, "{name}");
+        assert_eq!(reactions(&state, GENERAL, 10), [], "{name}");
+    }
+}
+
+// The removal's answer may be older than a reaction made elsewhere after a moderator's sweep.
+#[test]
+fn a_removal_swept_by_a_moderator_is_told_already() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    let wish = click(&mut state, false);
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_ALL",
+        json!({"channel_id": GENERAL.to_string(), "message_id": "10"}),
+    );
+    add(&mut state, GENERAL, 10, ME, UP);
+    answered(&mut state, &wish, true);
+
+    assert_eq!(ask(&mut state, &wish), Some(DELETE), "asked again");
+    answered(&mut state, &wish, false);
+    assert_eq!(settle(&mut state, &wish), [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+}
+
+#[test]
+fn a_sweep_while_a_reaction_is_asked_is_older_than_its_answer() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    let events = apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_ALL",
+        json!({"channel_id": GENERAL.to_string(), "message_id": "10"}),
+    );
+    assert_eq!(events, [changed(GENERAL, 10)], "the others' go at once");
+    answered(&mut state, &wish, true);
+
+    assert_eq!(ask(&mut state, &wish), None);
+    assert_eq!(settle(&mut state, &wish), [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+}
+
+// The store may show the wish already (a sweep took the optimistic reaction): the wish counts.
+#[test]
+fn a_click_that_changes_nothing_shown_still_changes_the_wish() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_ALL",
+        json!({"channel_id": GENERAL.to_string(), "message_id": "10"}),
+    );
+    let (taken, events) = want(&mut state, GENERAL, 10, UP, false);
+    assert!(!taken.unwrap().changed);
+    assert_eq!(events, NOTHING);
+    answered(&mut state, &wish, true);
+
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), None);
+    assert_eq!(settle(&mut state, &wish), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+#[test]
+fn a_click_without_a_request_running_that_changes_nothing_opens_nothing() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+
+    let again = click(&mut state, true);
+
+    assert!(!again.changed);
+    assert_eq!(ask(&mut state, &again), None);
+    assert_eq!(
+        remove(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "dispatches aren't held back"
+    );
+}
+
+#[test]
+fn the_two_kinds_of_the_users_reaction_are_heard_apart() {
+    let burst_removal =
+        |state: &mut State| apply(state, "MESSAGE_REACTION_REMOVE", burst_reaction(ME));
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+
+    let taken = click(&mut state, false);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 0, 1, false, true)]
+    );
+    assert_eq!(ask(&mut state, &taken), Some(DELETE));
+    assert_eq!(burst_removal(&mut state), NOTHING);
+    answered(&mut state, &taken, false);
+    assert_eq!(settle(&mut state, &taken), [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    let taken = click(&mut state, false);
+    ask(&mut state, &taken);
+    assert_eq!(burst_removal(&mut state), NOTHING);
+    answered(&mut state, &taken, true);
+    assert_eq!(
+        ask(&mut state, &taken),
+        None,
+        "a super reaction's removal is no echo"
+    );
+    assert_eq!(settle(&mut state, &taken), [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+#[test]
+fn a_refused_removal_puts_back_the_kind_it_took() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    let both = [(UP.to_owned(), 1, 1, true, true)];
+
+    let taken = click(&mut state, false);
+    refuse(&mut state, &taken);
+    assert_eq!(reactions(&state, GENERAL, 10), both);
+
+    let plain = click(&mut state, false);
+    let burst = click(&mut state, false);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+    assert_eq!(plain, burst, "one emoji, one request at a time");
+    let asked = ask(&mut state, &burst).unwrap();
+    assert!(!asked.add && asked.burst, "the latest wish");
+    answered(&mut state, &burst, false);
+    settle(&mut state, &burst);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        both,
+        "at its place, both back"
+    );
+}
+
+// The click showed a plain reaction; Discord kept the super reaction.
+#[test]
+fn a_reaction_made_again_is_the_one_discord_kept() {
+    let mut state = on_ten();
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    add(&mut state, GENERAL, 10, MIRA, FIRE);
+
+    let wish = click(&mut state, false);
+    ask(&mut state, &wish);
+    click(&mut state, true);
+    add(&mut state, GENERAL, 10, MIRA, "🎉");
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(FIRE, 1, false), one(UP, 1, true), one("🎉", 1, false)].concat(),
+        "the click's, a new one"
+    );
+    answered(&mut state, &wish, false);
+
+    assert_eq!(ask(&mut state, &wish), None, "the user's already");
+    assert_eq!(settle(&mut state, &wish), [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [
+            one(FIRE, 1, false)[0].clone(),
+            (UP.to_owned(), 0, 1, false, true),
+            one("🎉", 1, false)[0].clone()
+        ],
+        "at its place"
+    );
+}
+
+#[test]
+fn a_batch_with_the_users_own_reaction_keeps_the_others() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    let taken = click(&mut state, false);
+    ask(&mut state, &taken);
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD_MANY",
+        json!({
+            "channel_id": GENERAL.to_string(), "message_id": "10",
+            "reactions": [
+                {"users": [ME.to_string(), MIRA.to_string()], "emoji": {"id": null, "name": UP}},
+                {"users": [ME.to_string()], "emoji": {"id": null, "name": FIRE}},
+            ],
+        }),
+    );
+
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(UP, 1, false), one(FIRE, 1, true)].concat()
+    );
+    answered(&mut state, &taken, true);
+    assert_eq!(
+        ask(&mut state, &taken),
+        None,
+        "no echo before it: removed after"
+    );
+    assert_eq!(settle(&mut state, &taken), NOTHING);
+}
+
+#[test]
+fn the_echo_names_a_custom_emoji_the_click_had_no_name_for() {
+    let mut state = on_ten();
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+    let now = state.now_millis();
+    let wish = state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &nameless,
+            true,
+            now,
+            &mut Vec::new(),
+        )
+        .unwrap();
+    assert_eq!(wish.emoji.name, None);
+    ask(&mut state, &wish);
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD",
+        custom(GENERAL, 10, ME, 7, json!("wave")),
+    );
+
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [("wave".to_owned(), 1, 0, true, false)]
+    );
+    answered(&mut state, &wish, true);
+    settle(&mut state, &wish);
+    let named = ReactionEmoji::custom(Snowflake::new(7), Some("wave"), false);
+    let again = state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &nameless,
+            false,
+            now,
+            &mut Vec::new(),
+        )
+        .unwrap();
+    assert_eq!(again.emoji, named);
+}
+
+#[test]
+fn a_reaction_put_back_has_the_name_its_echo_brought() {
+    let mut state = on_ten();
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+    let now = state.now_millis();
+    let click = |state: &mut State, want| {
+        state
+            .want_reaction(
+                Snowflake::new(GENERAL),
+                Snowflake::new(10),
+                &nameless,
+                want,
+                now,
+                &mut Vec::new(),
+            )
+            .unwrap()
+    };
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD",
+        custom(GENERAL, 10, ME, 7, json!("wave")),
+    );
+    click(&mut state, false);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+    answered(&mut state, &wish, true);
+    ask(&mut state, &wish);
+
+    assert!(answered(&mut state, &wish, false));
+    settle(&mut state, &wish);
+
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [("wave".to_owned(), 1, 0, true, false)]
+    );
+}
+
+#[test]
+fn a_click_names_an_emoji_the_message_has_without_a_name() {
+    let mut state = on_ten();
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD",
+        custom(GENERAL, 10, MIRA, 7, Value::Null),
+    );
+    let named = ReactionEmoji::custom(Snowflake::new(7), Some("wave"), false);
+    let now = state.now_millis();
+
+    let wish = state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &named,
+            true,
+            now,
+            &mut Vec::new(),
+        )
+        .unwrap();
+
+    assert_eq!(wish.emoji, named);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [("wave".to_owned(), 2, 0, true, false)]
+    );
+}
+
+// Discord is never asked the same thing again after refusing it, whatever the clicks between.
+#[test]
+fn a_refusal_ends_the_requests_unless_the_wish_is_another() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    click(&mut state, false);
+    click(&mut state, true);
+    assert!(answered(&mut state, &wish, false), "the same wish again");
+
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    click(&mut state, false);
+    assert!(!answered(&mut state, &wish, false), "taken back meanwhile");
+    assert_eq!(ask(&mut state, &wish), None);
+
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    let wish = click(&mut state, false);
+    ask(&mut state, &wish);
+    click(&mut state, true);
+    assert!(!answered(&mut state, &wish, false));
+    click(&mut state, false);
+    assert_eq!(ask(&mut state, &wish), Some(DELETE), "a new wish is asked");
+    assert!(answered(&mut state, &wish, false));
+
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    assert!(!answered(&mut state, &wish, false), "nothing was asked");
+    ask(&mut state, &wish);
+    assert!(!answered(&mut state, &wish, true));
+    settle(&mut state, &wish);
+    assert!(!answered(&mut state, &wish, false), "no request runs");
 }

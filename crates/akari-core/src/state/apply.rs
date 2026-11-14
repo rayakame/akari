@@ -2303,7 +2303,7 @@ mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
-pub(crate) use reactions::Wanted;
+pub(crate) use reactions::{ReactionAsk, Wanted};
 pub(crate) use reading::{Unread, UnreadNeeds};
 
 #[cfg(test)]

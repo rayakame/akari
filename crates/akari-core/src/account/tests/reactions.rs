@@ -688,16 +688,14 @@ async fn a_refused_removal_never_puts_back_what_a_moderator_removed_meanwhile() 
         release.send(()).unwrap();
         let outcome = taken.await;
 
-        assert!(
-            matches!(outcome, Err(ReactionError::Forbidden)),
-            "{removal}"
-        );
+        outcome.unwrap_or_else(|err| panic!("{removal}: gone as the user wanted, {err}"));
         assert_eq!(online.shown(), [], "{removal}");
     }
 }
 
+// No echo came before the removal, so the reaction reached Discord after it.
 #[tokio::test]
-async fn a_reaction_removed_by_a_moderator_while_it_is_asked_stays_out_until_its_echo() {
+async fn a_reaction_asked_while_a_moderator_removes_all_shows_once_discord_answers() {
     let mut online = reacting().await;
     let (arrived, release) = online.hold(204).await;
 
@@ -717,14 +715,16 @@ async fn a_reaction_removed_by_a_moderator_while_it_is_asked_stays_out_until_its
         .await;
     online.seq += 1;
     sync(&mut online.connection, &online.subscription, online.seq).await;
+    assert_eq!(online.shown(), [], "removed with all the others");
     release.send(()).unwrap();
     added.await.unwrap();
 
-    assert_eq!(online.shown(), [], "the gateway's word stands");
+    assert_eq!(online.shown(), one(HEART, 1, true));
+    online.events().await;
     online
         .reaction("MESSAGE_REACTION_ADD", ME_ID, HEART, 0)
         .await;
-    assert_eq!(changes(&online.events().await), 1);
+    assert_eq!(online.events().await, [] as [&str; 0], "the echo");
     assert_eq!(online.shown(), one(HEART, 1, true));
 }
 
@@ -1197,4 +1197,285 @@ async fn a_starter_rows_reactors_are_those_of_the_message_it_shows() {
         online.lines().await,
         [format!("GET {BASE}/{HEART_PATH}?limit=3&type=0")]
     );
+}
+
+// The gateway's side of `Online`, to tell it something while calls on the account wait.
+struct Wire<'a> {
+    connection: &'a mut FakeConnection,
+    subscription: &'a Subscription,
+    seq: &'a mut u64,
+}
+
+impl Wire<'_> {
+    // The events since the last call, once `name` is applied.
+    async fn tell(&mut self, name: &str, data: Value) -> Vec<String> {
+        *self.seq += 1;
+        self.connection
+            .send(json!({"op": 0, "s": *self.seq, "t": name, "d": data}))
+            .await;
+        self.events().await
+    }
+
+    async fn events(&mut self) -> Vec<String> {
+        *self.seq += 1;
+        sync(self.connection, self.subscription, *self.seq).await
+    }
+
+    // The user's own reaction with the heart, as a dispatch.
+    async fn own(&mut self, name: &str, kind: u8) -> Vec<String> {
+        let data = json!({
+            "channel_id": GENERAL.to_string(), "message_id": TARGET.to_string(),
+            "user_id": ME_ID.to_string(), "emoji": {"id": null, "name": HEART}, "type": kind,
+        });
+        self.tell(name, data).await
+    }
+
+    async fn removal(&mut self, name: &str) -> Vec<String> {
+        let data = json!({
+            "channel_id": GENERAL.to_string(), "message_id": TARGET.to_string(),
+            "emoji": {"id": null, "name": HEART},
+        });
+        self.tell(name, data).await
+    }
+}
+
+impl Online {
+    fn wire(&mut self) -> (&Account, &MockServer, Wire<'_>) {
+        let wire = Wire {
+            connection: &mut self.connection,
+            subscription: &self.subscription,
+            seq: &mut self.seq,
+        };
+        (&self.account, &self.server, wire)
+    }
+}
+
+fn shown_by(account: &Account) -> Shown {
+    account
+        .store()
+        .reactions(general(), target())
+        .iter()
+        .map(|reaction| {
+            (
+                reaction.emoji.name.as_deref().unwrap_or("").to_owned(),
+                reaction.normal,
+                reaction.burst,
+                reaction.me,
+                reaction.me_burst,
+            )
+        })
+        .collect()
+}
+
+// The call with its change in the store, waiting for Discord.
+async fn begun<T>(call: impl Future<Output = T>) -> std::pin::Pin<Box<impl Future<Output = T>>> {
+    let mut call = Box::pin(call);
+    assert!(
+        timeout(Duration::from_millis(1), &mut call).await.is_err(),
+        "answered before Discord"
+    );
+    call
+}
+
+async fn requests(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path().contains(REACTIONS))
+        .map(|request| request.method.to_string())
+        .collect()
+}
+
+const ADD: &str = "MESSAGE_REACTION_ADD";
+const REMOVE: &str = "MESSAGE_REACTION_REMOVE";
+
+#[tokio::test]
+async fn the_late_echo_of_a_reaction_taken_back_never_shows_it_again() {
+    let mut online = reacting().await;
+    let (put, answer_put) = online.hold(204).await;
+    let (delete, answer_delete) = online.hold(204).await;
+    let (account, _, mut wire) = online.wire();
+    let emoji = heart();
+
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    arrival(&put).await;
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    answer_put.send(()).unwrap();
+    arrival(&delete).await;
+    assert_eq!(changes(&wire.events().await), 2, "the two clicks");
+
+    let echo = wire.own(ADD, 0).await;
+    assert_eq!(echo, [] as [&str; 0], "the reaction's echo");
+    assert_eq!(shown_by(account), []);
+
+    answer_delete.send(()).unwrap();
+    added.await.unwrap();
+    taken.await.unwrap();
+    assert_eq!(wire.own(REMOVE, 0).await, [] as [&str; 0]);
+    assert_eq!(shown_by(account), []);
+}
+
+#[tokio::test]
+async fn the_late_echo_of_a_removal_taken_back_never_hides_the_reaction() {
+    let mut online = reacting().await;
+    online.added_by(MIRA, HEART).await;
+    online.added_by(ME_ID, HEART).await;
+    let (delete, answer_delete) = online.hold(204).await;
+    let (put, answer_put) = online.hold(204).await;
+    let (account, _, mut wire) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    answer_delete.send(()).unwrap();
+    arrival(&put).await;
+    wire.events().await;
+
+    assert_eq!(wire.own(REMOVE, 0).await, [] as [&str; 0]);
+    assert_eq!(shown_by(account), one(HEART, 2, true));
+
+    answer_put.send(()).unwrap();
+    taken.await.unwrap();
+    added.await.unwrap();
+    assert_eq!(wire.own(ADD, 0).await, [] as [&str; 0]);
+    assert_eq!(shown_by(account), one(HEART, 2, true));
+}
+
+// Discord has no reaction of the user's left, whatever the removal's answer says.
+#[tokio::test]
+async fn a_reaction_made_again_after_a_moderator_removed_all_is_asked() {
+    let mut online = reacting().await;
+    online.added_by(ME_ID, HEART).await;
+    let (delete, answer_delete) = online.hold(403).await;
+    online.answer(204).await;
+    let (account, server, mut wire) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    wire.removal("MESSAGE_REACTION_REMOVE_ALL").await;
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    answer_delete.send(()).unwrap();
+
+    taken.await.unwrap();
+    added.await.unwrap();
+    assert_eq!(requests(server).await, ["DELETE", "PUT"]);
+    assert_eq!(shown_by(account), one(HEART, 1, true));
+}
+
+#[tokio::test]
+async fn a_refused_removal_of_a_super_reaction_the_user_made_again_keeps_it_a_super_reaction() {
+    let mut online = reacting().await;
+    online.reaction(ADD, ME_ID, HEART, 1).await;
+    online.events().await;
+    let (delete, answer_delete) = online.hold(403).await;
+    online.answer(204).await;
+    let (account, server, mut wire) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    assert_eq!(shown_by(account), one(HEART, 1, true), "the click, at once");
+    answer_delete.send(()).unwrap();
+
+    taken.await.unwrap();
+    added.await.unwrap();
+    assert_eq!(requests(server).await, ["DELETE"], "Discord kept it");
+    assert_eq!(
+        shown_by(account),
+        [(HEART.to_owned(), 0, 1, false, true)],
+        "as Discord has it"
+    );
+    wire.events().await;
+    let again = account.unreact(general(), target(), &emoji, INLINE).await;
+    again.unwrap();
+    let lines = online.lines().await;
+    assert!(
+        lines[1].contains("/1/@me?") && lines[1].ends_with("burst=true"),
+        "{lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_super_reaction_removed_elsewhere_says_nothing_of_the_plain_one() {
+    let mut online = reacting().await;
+    online.added_by(ME_ID, HEART).await;
+    online.reaction(ADD, ME_ID, HEART, 1).await;
+    online.events().await;
+    let (delete, answer_delete) = online.hold(403).await;
+    let (account, _, mut wire) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    wire.own(REMOVE, 1).await;
+    answer_delete.send(()).unwrap();
+
+    let outcome = taken.await;
+    assert!(
+        matches!(outcome, Err(ReactionError::Forbidden)),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        shown_by(account),
+        one(HEART, 1, true),
+        "the plain one is back"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_removal_puts_the_plain_reaction_back_beside_a_super_reaction() {
+    let mut online = reacting().await;
+    online.added_by(ME_ID, HEART).await;
+    online.reaction(ADD, ME_ID, HEART, 1).await;
+    online.events().await;
+    online.answer_with(refusal(403, 50013)).await;
+
+    let outcome = online.unreact().await;
+
+    assert!(
+        matches!(outcome, Err(ReactionError::Forbidden)),
+        "{outcome:?}"
+    );
+    assert_eq!(online.shown(), [(HEART.to_owned(), 1, 1, true, true)]);
+}
+
+// The reaction reached Discord (its echo), then a moderator removed it, then the answer came.
+#[tokio::test]
+async fn an_answer_never_brings_back_what_a_moderator_removed_after_the_echo() {
+    for removal in [
+        "MESSAGE_REACTION_REMOVE_ALL",
+        "MESSAGE_REACTION_REMOVE_EMOJI",
+        REMOVE,
+    ] {
+        let mut online = reacting().await;
+        let (put, answer_put) = online.hold(204).await;
+        online.answer_with(refusal(403, 50013)).await;
+        let (account, server, mut wire) = online.wire();
+        let emoji = heart();
+
+        let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+        arrival(&put).await;
+        let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+        wire.own(ADD, 0).await;
+        if removal == REMOVE {
+            wire.own(REMOVE, 0).await;
+        } else {
+            wire.removal(removal).await;
+        }
+        answer_put.send(()).unwrap();
+
+        added.await.unwrap();
+        let _ = taken.await;
+        assert_eq!(shown_by(account), [], "{removal}");
+        assert_eq!(
+            requests(server).await,
+            ["PUT"],
+            "{removal}: nothing left to take back"
+        );
+    }
 }
