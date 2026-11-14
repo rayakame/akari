@@ -49,8 +49,11 @@ call like a refusal.
 - A custom emoji is `name:id` with the colon as it is: `blob_wave:700000000000000001`. An
   animated one has no prefix. For an emoji the message already has, Akari sends the name the
   message has it under, whatever the caller gave.
-- A custom emoji whose name is gone (a deleted emoji still on a message) goes as `null:id`,
-  which is what the official client's template makes of a missing name.
+- A custom emoji the caller and the message name without a name (a forum's default reaction
+  is its ID alone) takes its name from the user's server that has it (`Guild::emojis`). Only one
+  whose name is gone everywhere (a deleted emoji still on a message) goes as `null:id`, which
+  is what the official client's template makes of a missing name; whether Discord takes it
+  isn't observed.
 
 The official client puts the raw string into the URL and leaves the encoding to the browser.
 Akari encodes each byte outside `A-Z a-z 0-9 - _ . ! ~ * ' ( )`, which is the same for every
