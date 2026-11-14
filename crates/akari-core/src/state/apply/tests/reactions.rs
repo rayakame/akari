@@ -1183,6 +1183,7 @@ fn a_refused_click_goes_back_to_what_discord_had() {
         [one(UP, 1, false), one(FIRE, 1, true)].concat(),
         "back at the end of the row"
     );
+    assert!(state.reacting.is_empty(), "nothing kept once it is over");
 }
 
 #[test]
@@ -1195,6 +1196,7 @@ fn a_settled_click_without_a_refusal_changes_nothing() {
 
     assert_eq!(events, [] as [&str; 0]);
     assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+    assert!(state.reacting.is_empty(), "nothing kept once it is over");
 }
 
 // What the gateway said while the request ran is newer than what Discord had before it.
@@ -1274,6 +1276,151 @@ fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
         one(UP, 1, true),
         "others' reactions, other emoji and other messages say nothing of it"
     );
+
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    apply(&mut state, "MESSAGE_CREATE", message(11, GENERAL));
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    let added = added.unwrap();
+    ask(&mut state, &added);
+    for events in [
+        add(&mut state, GENERAL, 10, MIRA, FIRE),
+        remove(&mut state, GENERAL, 10, MIRA, FIRE),
+        add(&mut state, GENERAL, 10, ME, FIRE),
+        remove(&mut state, GENERAL, 10, ME, FIRE),
+    ] {
+        assert_eq!(events, [changed(GENERAL, 10)], "shown as it comes");
+    }
+    assert_eq!(
+        add(&mut state, GENERAL, 11, ME, UP),
+        [changed(GENERAL, 11)],
+        "shown as it comes"
+    );
+    answered(&mut state, &added, false);
+    settle(&mut state, &added);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [],
+        "the refused reaction taken out: nothing else said it is the user's"
+    );
+}
+
+// Each case: the user's request is refused while the gateway tells of someone else's
+// reaction or another emoji, which goes to the store as it comes.
+#[test]
+fn the_gateway_on_others_or_other_emoji_never_counts_as_the_users_own() {
+    let mut state = on_ten();
+    let added = click(&mut state, true);
+    ask(&mut state, &added);
+    assert_eq!(
+        add(&mut state, GENERAL, 10, MIRA, UP),
+        [changed(GENERAL, 10)]
+    );
+    refuse(&mut state, &added);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(UP, 1, false),
+        "Mira's add"
+    );
+
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    add(&mut state, GENERAL, 10, ME, UP);
+    let taken = click(&mut state, false);
+    ask(&mut state, &taken);
+    assert_eq!(
+        remove(&mut state, GENERAL, 10, MIRA, UP),
+        [changed(GENERAL, 10)]
+    );
+    refuse(&mut state, &taken);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(UP, 1, true),
+        "Mira's removal"
+    );
+
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, MIRA, FIRE);
+    add(&mut state, GENERAL, 10, ME, UP);
+    let taken = click(&mut state, false);
+    ask(&mut state, &taken);
+    let fire = json!({
+        "channel_id": GENERAL.to_string(), "message_id": "10",
+        "emoji": {"id": null, "name": FIRE},
+    });
+    assert_eq!(
+        apply(&mut state, "MESSAGE_REACTION_REMOVE_EMOJI", fire),
+        [changed(GENERAL, 10)]
+    );
+    refuse(&mut state, &taken);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(UP, 1, true),
+        "another emoji swept"
+    );
+
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    let taken = click(&mut state, false);
+    ask(&mut state, &taken);
+    let events = apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD_MANY",
+        json!({
+            "channel_id": GENERAL.to_string(), "message_id": "10",
+            "reactions": [
+                {"users": [MIRA.to_string()], "emoji": {"id": null, "name": FIRE}},
+                {"users": [ME.to_string()], "emoji": {"id": null, "name": UP}},
+            ],
+        }),
+    );
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(FIRE, 1, false),
+        "the user's own, second in the batch, waits"
+    );
+    refuse(&mut state, &taken);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(FIRE, 1, false), one(UP, 1, true)].concat()
+    );
+}
+
+#[test]
+fn each_message_and_emoji_has_its_own_wish() {
+    let mut state = on_ten();
+    apply(&mut state, "MESSAGE_CREATE", message(11, GENERAL));
+    add(&mut state, GENERAL, 10, ME, FIRE);
+    add(&mut state, GENERAL, 11, ME, UP);
+    let up = click(&mut state, true);
+    let (fire, _) = want(&mut state, GENERAL, 10, FIRE, false);
+    let (elsewhere, _) = want(&mut state, GENERAL, 11, UP, false);
+    let (fire, elsewhere) = (fire.unwrap(), elsewhere.unwrap());
+
+    assert_eq!(ask(&mut state, &up), Some(PUT));
+    assert_eq!(ask(&mut state, &fire), Some(DELETE));
+    assert_eq!(ask(&mut state, &elsewhere), Some(DELETE));
+    assert!(answered(&mut state, &up, false), "the thumb refused");
+    assert_eq!(settle(&mut state, &up), [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [],
+        "the fire still taken back"
+    );
+    assert_eq!(
+        reactions(&state, GENERAL, 11),
+        [],
+        "and the other message's"
+    );
+    for wish in [&fire, &elsewhere] {
+        assert!(!answered(&mut state, wish, true));
+        assert_eq!(ask(&mut state, wish), None);
+        assert_eq!(settle(&mut state, wish), NOTHING);
+    }
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+    assert_eq!(reactions(&state, GENERAL, 11), []);
+    assert!(state.reacting.is_empty(), "nothing kept once all are over");
 }
 
 // Kept apart: Discord has the plain one still, and the super reaction too.

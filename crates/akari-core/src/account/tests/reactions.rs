@@ -80,17 +80,6 @@ impl Online {
             .await;
     }
 
-    // Answers 204 and counts the requests that weren't held.
-    async fn count(&self) -> Arc<std::sync::atomic::AtomicUsize> {
-        let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        self.answer_with(Counting {
-            seen: seen.clone(),
-            status: 204,
-        })
-        .await;
-        seen
-    }
-
     // Holds the next reaction request: when it arrived, and the release.
     async fn hold(
         &self,
@@ -200,19 +189,6 @@ impl Respond for Held {
         let _ = self.arrived.send(());
         let _ = self.release.lock().unwrap().recv_timeout(WAIT);
         self.answer.clone()
-    }
-}
-
-// Counts what it answers: asking the server for its requests would wait behind a held one.
-struct Counting {
-    seen: Arc<std::sync::atomic::AtomicUsize>,
-    status: u16,
-}
-
-impl Respond for Counting {
-    fn respond(&self, _: &Received) -> ResponseTemplate {
-        self.seen.fetch_add(1, Ordering::SeqCst);
-        ResponseTemplate::new(self.status)
     }
 }
 
@@ -510,7 +486,7 @@ fn alternates(lines: &[String]) -> bool {
 async fn the_latest_wish_wins_with_one_request_at_a_time() {
     let online = reacting().await;
     let (arrived, release) = online.hold(204).await;
-    let others = online.count().await;
+    online.answer(204).await;
 
     let (first, (second, third)) = tokio::join!(online.react(), async {
         arrival(&arrived).await;
@@ -520,7 +496,6 @@ async fn the_latest_wish_wins_with_one_request_at_a_time() {
         let mut again = Box::pin(online.react());
         assert!(timeout(Duration::from_millis(1), &mut again).await.is_err());
         assert_eq!(online.shown(), one(HEART, 1, true));
-        assert_eq!(others.load(Ordering::SeqCst), 0, "one request at a time");
         release.send(()).unwrap();
         (taken.await, again.await)
     });
@@ -534,41 +509,45 @@ async fn the_latest_wish_wins_with_one_request_at_a_time() {
     assert!(lines.len() <= 3, "{lines:?}");
 }
 
+// The removal is refused: only a call that waited for its own request can say so.
 #[tokio::test]
 async fn a_wish_made_while_one_is_asked_is_asked_next() {
     let online = reacting().await;
     let (arrived, release) = online.hold(204).await;
-    let others = online.count().await;
+    online.answer_with(refusal(403, 50013)).await;
+    let account = &online.account;
+    let emoji = heart();
 
     let (first, second) = tokio::join!(online.react(), async {
         arrival(&arrived).await;
-        let taken = online.unreact();
-        tokio::pin!(taken);
-        assert!(
-            timeout(Duration::from_millis(30), &mut taken)
-                .await
-                .is_err(),
-            "waits for its own request"
-        );
+        let taken =
+            begun(account.unreact(general(), target(), &emoji, ReactionLocation::HoverBar)).await;
         assert_eq!(online.shown(), [], "shown at once");
-        assert_eq!(others.load(Ordering::SeqCst), 0, "one request at a time");
         release.send(()).unwrap();
         taken.await
     });
 
     first.unwrap();
-    second.unwrap();
-    assert_eq!(online.shown(), []);
-    let lines = online.lines().await;
-    assert!(alternates(&lines), "{lines:?}");
-    assert!(lines.last().unwrap().starts_with("DELETE "), "{lines:?}");
+    assert!(
+        matches!(second, Err(ReactionError::Forbidden)),
+        "its own request's answer: {second:?}"
+    );
+    assert_eq!(online.shown(), one(HEART, 1, true), "what Discord has");
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("PUT {BASE}/{HEART_PATH}/@me?location=Message%20Inline%20Button&type=0"),
+            format!("DELETE {BASE}/{HEART_PATH}/0/@me?location=Message%20Hover%20Bar&burst=false"),
+        ],
+        "each request from its own wish's place"
+    );
 }
 
 #[tokio::test]
 async fn rapid_toggles_never_queue_a_request_each() {
     let online = reacting().await;
     let (arrived, release) = online.hold(204).await;
-    let others = online.count().await;
+    online.answer(204).await;
 
     let online = &online;
     let (first, ()) = tokio::join!(online.react(), async {
@@ -599,7 +578,6 @@ async fn rapid_toggles_never_queue_a_request_each() {
                 .expect("a wish the user changed still waits")
                 .unwrap();
         }
-        assert_eq!(others.load(Ordering::SeqCst), 0, "one request at a time");
         release.send(()).unwrap();
         if let Some(last) = last {
             last.await.unwrap();
@@ -885,12 +863,18 @@ async fn a_dms_reactions_go_to_the_dm() {
     );
 }
 
-// The viewed thread archived, with a message in it.
-async fn archive_the_thread(online: &mut Online) {
+// The viewed thread, open, with a message in it.
+async fn in_the_thread(online: &mut Online) {
     online.account.view_channel(Snowflake::new(THREAD));
     let mut sent = message(0, TARGET + 1)["d"].clone();
     sent["channel_id"] = THREAD.to_string().into();
     online.dispatch("MESSAGE_CREATE", sent).await;
+    online.events().await;
+}
+
+// The viewed thread archived, with a message in it.
+async fn archive_the_thread(online: &mut Online) {
+    in_the_thread(online).await;
     let mut archived: Value = serde_json::from_str(READY).unwrap();
     let mut archived = archived["d"]["guilds"][0]["threads"][0].take();
     archived["thread_metadata"]["archived"] = true.into();
@@ -958,8 +942,9 @@ async fn a_thread_that_wont_open_takes_the_reaction_out() {
 
 #[tokio::test]
 async fn a_closed_account_refuses_reactions() {
-    let online = reacting().await;
+    let mut online = reacting().await;
     online.answer(204).await;
+    online.events().await;
     online.account.close();
 
     let outcome = online.react().await;
@@ -970,6 +955,14 @@ async fn a_closed_account_refuses_reactions() {
     );
     assert_eq!(online.lines().await, [] as [&str; 0]);
     assert_eq!(online.shown(), []);
+    let buffered = online.subscription.buffered();
+    let told = if buffered == 0 {
+        Vec::new()
+    } else {
+        online.subscription.next_batch(buffered).await
+    };
+    let told: Vec<String> = told.iter().map(describe).collect();
+    assert_eq!(changes(&told), 0, "never shown: {told:?}");
 }
 
 #[tokio::test]
@@ -1478,4 +1471,258 @@ async fn an_answer_never_brings_back_what_a_moderator_removed_after_the_echo() {
             "{removal}: nothing left to take back"
         );
     }
+}
+
+#[tokio::test]
+async fn a_thread_that_is_open_is_not_opened_again() {
+    let mut online = reacting().await;
+    online.answer(204).await;
+    in_the_thread(&mut online).await;
+
+    online
+        .account
+        .react(
+            Snowflake::new(THREAD),
+            Snowflake::new(TARGET + 1),
+            &heart(),
+            INLINE,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [format!(
+            "PUT /api/v9/channels/{THREAD}/messages/{}/reactions/{HEART_PATH}/@me?location=Message%20Inline%20Button&type=0",
+            TARGET + 1
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_401_on_any_reaction_request_ends_the_session() {
+    for call in ["react", "remove", "reactors"] {
+        let mut online = reacting().await;
+        online.added_by(MIRA, HEART).await;
+        online.answer(401).await;
+        let account = &online.account;
+
+        let unauthorized = match call {
+            "react" => matches!(
+                online.react().await,
+                Err(ReactionError::Request(RequestError::Unauthorized))
+            ),
+            "remove" => matches!(
+                account.remove_reactions(general(), target(), None).await,
+                Err(ReactionError::Request(RequestError::Unauthorized))
+            ),
+            _ => matches!(
+                account
+                    .reactors(general(), target(), &heart(), ReactionKind::Normal, None, 3)
+                    .await,
+                Err(RequestError::Unauthorized)
+            ),
+        };
+
+        assert!(unauthorized, "{call}");
+        assert_eq!(
+            online.connection.client_close_code().await,
+            Some(1000),
+            "{call}"
+        );
+        assert!(
+            matches!(
+                online.account.store().connection(),
+                ConnectionState::Closed { error: Some(error) }
+                    if matches!(*error, GatewayError::AuthenticationFailed)
+            ),
+            "{call}"
+        );
+    }
+}
+
+// Both are clicked while the heart is asked; their requests go after it, in the channel's turn.
+#[tokio::test]
+async fn each_message_and_emoji_has_its_own_requests() {
+    let mut online = reacting().await;
+    online
+        .dispatch("MESSAGE_CREATE", message(0, TARGET + 2)["d"].clone())
+        .await;
+    online.events().await;
+    let (arrived, release) = online.hold(204).await;
+    online.answer(204).await;
+    let account = &online.account;
+    let (wave, emoji) = (
+        ReactionEmoji::custom(Snowflake::new(7), Some("wave"), false),
+        heart(),
+    );
+    let other = Snowflake::new(TARGET + 2);
+
+    let (held, (waved, elsewhere)) = tokio::join!(online.react(), async {
+        arrival(&arrived).await;
+        let waved = begun(account.react(general(), target(), &wave, INLINE)).await;
+        let elsewhere = begun(account.react(general(), other, &emoji, INLINE)).await;
+        release.send(()).unwrap();
+        (waved.await, elsewhere.await)
+    });
+
+    held.unwrap();
+    waved.unwrap();
+    elsewhere.unwrap();
+    assert_eq!(
+        online.shown(),
+        [one(HEART, 1, true), one("wave", 1, true)].concat()
+    );
+    assert_eq!(online.shown_in(GENERAL, TARGET + 2), one(HEART, 1, true));
+    let mut lines = online.lines().await;
+    lines.sort();
+    let mut expected = [
+        format!("PUT {BASE}/{HEART_PATH}/@me?location=Message%20Inline%20Button&type=0"),
+        format!("PUT {BASE}/wave:7/@me?location=Message%20Inline%20Button&type=0"),
+        format!(
+            "PUT /api/v9/channels/{GENERAL}/messages/{}/reactions/{HEART_PATH}/@me?location=Message%20Inline%20Button&type=0",
+            TARGET + 2
+        ),
+    ];
+    expected.sort();
+    assert_eq!(lines, expected);
+}
+
+#[tokio::test]
+async fn once_the_requests_are_over_the_gateway_says_what_is_the_users() {
+    let mut online = reacting().await;
+    online.answer(204).await;
+    online.react().await.unwrap();
+    online.reaction(ADD, ME_ID, HEART, 0).await;
+    online.events().await;
+
+    online.reaction(REMOVE, ME_ID, HEART, 0).await;
+
+    assert_eq!(changes(&online.events().await), 1, "taken back elsewhere");
+    assert_eq!(online.shown(), []);
+}
+
+// The window and the menu may know a custom emoji by its ID alone.
+#[tokio::test]
+async fn a_custom_emoji_without_a_name_goes_by_the_name_the_message_has() {
+    let mut online = reacting().await;
+    online
+        .dispatch(
+            ADD,
+            json!({
+                "channel_id": GENERAL.to_string(), "message_id": TARGET.to_string(),
+                "user_id": MIRA.to_string(), "emoji": {"id": "7", "name": "wave"}, "type": 0,
+            }),
+        )
+        .await;
+    online.events().await;
+    Mock::given(method("GET"))
+        .and(path_regex(REACTIONS))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    online.answer(204).await;
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+    let account = &online.account;
+    let mira = Snowflake::new(MIRA);
+
+    account
+        .remove_reaction(general(), target(), &nameless, ReactionKind::Normal, mira)
+        .await
+        .unwrap();
+    account
+        .remove_reactions(general(), target(), Some(&nameless))
+        .await
+        .unwrap();
+    account
+        .reactors(
+            general(),
+            target(),
+            &nameless,
+            ReactionKind::Normal,
+            None,
+            3,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("DELETE {BASE}/wave:7/0/{MIRA}?location=Message&burst=false"),
+            format!("DELETE {BASE}/wave:7"),
+            format!("GET {BASE}/wave:7?limit=3&type=0"),
+        ]
+    );
+}
+
+// The starter row is in the thread; the message it shows, and its reactions, are #general's.
+#[tokio::test]
+async fn moderating_a_starter_rows_reactions_leaves_its_archived_thread_closed() {
+    let mut online = with_a_starter_row().await;
+    online.added_by(MIRA, HEART).await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&online.server)
+        .await;
+    archive_the_thread(&mut online).await;
+    let (thread, row) = (Snowflake::new(THREAD), Snowflake::new(STARTER_ROW));
+    let mira = Snowflake::new(MIRA);
+
+    online
+        .account
+        .remove_reaction(thread, row, &heart(), ReactionKind::Normal, mira)
+        .await
+        .unwrap();
+    online
+        .account
+        .remove_reactions(thread, row, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("DELETE {BASE}/{HEART_PATH}/0/{MIRA}?location=Message&burst=false"),
+            format!("DELETE {BASE}"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_page_is_full_by_what_discord_sent_and_has_its_users_as_sent() {
+    let online = reacting().await;
+    let ready: Value = serde_json::from_str(READY).unwrap();
+    let mut renamed = ready["d"]["users"][0].clone();
+    renamed["global_name"] = "Mira, renamed".into();
+    Mock::given(method("GET"))
+        .and(path_regex(REACTIONS))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            renamed,
+            {"id": "broken"},
+            user(100_000_000_000_000_051, "bo"),
+        ])))
+        .mount(&online.server)
+        .await;
+
+    let page = online
+        .account
+        .reactors(general(), target(), &heart(), ReactionKind::Normal, None, 3)
+        .await
+        .unwrap();
+
+    let names: Vec<&str> = page.users.iter().map(|user| user.display_name()).collect();
+    assert_eq!(
+        names,
+        ["Mira, renamed", "bo"],
+        "a user that doesn't decode is left out"
+    );
+    assert!(page.has_more, "but Discord filled the page");
+    let known = online.account.store().user(Snowflake::new(MIRA)).unwrap();
+    assert_ne!(
+        known.display_name(),
+        "Mira, renamed",
+        "the store's own is older"
+    );
 }

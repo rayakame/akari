@@ -328,8 +328,21 @@ async fn a_refusal_is_not_asked_again() {
     }
 }
 
-// Hangs up on the first `failures` connections, then answers 204.
+const EMPTY_LIST: &[u8] =
+    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]";
+const BAD_GATEWAY: &[u8] =
+    b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+
+// Hangs up on the first `failures` connections, then answers an empty list.
 async fn flaky(failures: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    flaky_then(failures, EMPTY_LIST).await
+}
+
+// Hangs up on the first `failures` connections, then answers `answer`.
+async fn flaky_then(
+    failures: usize,
+    answer: &'static [u8],
+) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -345,9 +358,7 @@ async fn flaky(failures: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>)
             }
             let seen = counter.fetch_add(1, Ordering::SeqCst);
             if seen >= failures {
-                let _ = stream
-                    .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
-                    .await;
+                let _ = stream.write_all(answer).await;
             }
         }
     });
@@ -355,32 +366,52 @@ async fn flaky(failures: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>)
 }
 
 fn rest_at(api: String) -> AccountRest {
+    rest_waiting(api, Duration::from_millis(10))
+}
+
+fn rest_waiting(api: String, retry_delay: Duration) -> AccountRest {
     AccountRest::new(
         client_with("ws://127.0.0.1:9/".to_owned(), api),
         Token::new(TOKEN.to_owned()),
-        Duration::from_millis(10),
+        retry_delay,
     )
 }
 
-#[tokio::test]
-async fn a_reaction_is_asked_once_more_after_a_connection_that_broke() {
-    let (api, asked) = flaky(1).await;
-    let (dead, dead_asked) = flaky(usize::MAX).await;
+const CALLS: [&str; 6] = [
+    "add",
+    "remove the user's own",
+    "remove someone's",
+    "remove all",
+    "remove an emoji's",
+    "reactors",
+];
 
-    let recovered = rest_at(api)
-        .add_reaction(channel(), target(), &unicode(HEART), "Message")
-        .await;
-    let failed = rest_at(dead)
-        .add_reaction(channel(), target(), &unicode(HEART), "Message")
-        .await;
-
-    assert!(recovered.is_ok(), "{recovered:?}");
-    assert_eq!(asked.load(Ordering::SeqCst), 2);
-    assert!(
-        matches!(failed, Err(RequestError::Network(_))),
-        "{failed:?}"
-    );
-    assert_eq!(dead_asked.load(Ordering::SeqCst), 2, "never a third time");
+async fn call(rest: &AccountRest, which: &str) -> Result<(), RequestError> {
+    let heart = unicode(HEART);
+    let mira = Some(Snowflake::new(100_000_000_000_000_002));
+    match which {
+        "add" => {
+            rest.add_reaction(channel(), target(), &heart, "Message")
+                .await
+        }
+        "remove the user's own" => {
+            rest.remove_reaction(channel(), target(), &heart, false, None, "Message")
+                .await
+        }
+        "remove someone's" => {
+            rest.remove_reaction(channel(), target(), &heart, false, mira, "Message")
+                .await
+        }
+        "remove all" => rest.remove_reactions(channel(), target(), None).await,
+        "remove an emoji's" => {
+            rest.remove_reactions(channel(), target(), Some(&heart))
+                .await
+        }
+        _ => rest
+            .reactors(channel(), target(), &heart, false, None, 100)
+            .await
+            .map(|_| ()),
+    }
 }
 
 #[tokio::test]
@@ -396,4 +427,103 @@ async fn a_message_load_is_not_asked_again_after_a_connection_that_broke() {
         "{failed:?}"
     );
     assert_eq!(asked.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn every_reaction_request_is_asked_once_more_after_a_429_and_never_a_third_time() {
+    for which in CALLS {
+        let limited = MockServer::start().await;
+        Mock::given(path_regex("/reactions"))
+            .respond_with(rate_limited(Some(0.02)))
+            .mount(&limited)
+            .await;
+
+        let failed = call(&rest(&limited).await, which).await;
+
+        assert!(
+            matches!(failed, Err(RequestError::RateLimited { .. })),
+            "{which}: {failed:?}"
+        );
+        assert_eq!(requests(&limited).await.len(), 2, "{which}");
+    }
+}
+
+#[tokio::test]
+async fn every_reaction_request_is_asked_once_more_after_a_connection_that_broke() {
+    for which in CALLS {
+        let (api, asked) = flaky(1).await;
+        let (dead, dead_asked) = flaky(usize::MAX).await;
+
+        let recovered = call(&rest_at(api), which).await;
+        let failed = call(&rest_at(dead), which).await;
+
+        assert!(recovered.is_ok(), "{which}: {recovered:?}");
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "{which}");
+        assert!(
+            matches!(failed, Err(RequestError::Network(_))),
+            "{which}: {failed:?}"
+        );
+        assert_eq!(dead_asked.load(Ordering::SeqCst), 2, "{which}");
+    }
+}
+
+#[tokio::test]
+async fn a_connection_that_broke_is_the_one_retry_a_502_would_have_had() {
+    let (api, asked) = flaky_then(1, BAD_GATEWAY).await;
+
+    let failed = rest_at(api)
+        .add_reaction(channel(), target(), &unicode(HEART), "Message")
+        .await;
+
+    assert!(
+        matches!(failed, Err(RequestError::ServerError { status: 502 })),
+        "{failed:?}"
+    );
+    assert_eq!(asked.load(Ordering::SeqCst), 2, "never a third time");
+}
+
+#[tokio::test]
+async fn a_reaction_asked_again_after_a_connection_that_broke_waits_first() {
+    let (api, _) = flaky(1).await;
+    let delay = Duration::from_millis(300);
+    let started = std::time::Instant::now();
+
+    rest_waiting(api, delay)
+        .add_reaction(channel(), target(), &unicode(HEART), "Message")
+        .await
+        .unwrap();
+
+    assert!(started.elapsed() >= delay, "{:?}", started.elapsed());
+}
+
+// Each answer leaves its route without requests for a minute: longer than any request waits.
+#[tokio::test]
+async fn each_kind_of_reaction_request_has_its_own_rate_limit() {
+    let server = MockServer::start().await;
+    Mock::given(path_regex("/reactions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([]))
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "60"),
+        )
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+
+    for which in CALLS {
+        let outcome = call(&rest, which).await;
+        assert!(
+            outcome.is_ok(),
+            "{which}: held by another's limit: {outcome:?}"
+        );
+    }
+    for which in CALLS {
+        let again = call(&rest, which).await;
+        assert!(
+            matches!(again, Err(RequestError::RateLimited { .. })),
+            "{which}: its own limit: {again:?}"
+        );
+    }
+    assert_eq!(requests(&server).await.len(), CALLS.len());
 }
