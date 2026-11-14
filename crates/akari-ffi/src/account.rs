@@ -152,13 +152,12 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// Adds the user's reaction with `emoji` (its `id`, or its `name` for a Unicode one; `key`
-    /// isn't read) to the message the row shows. The store has it at once
-    /// (`MessageReactionsChanged`); an error means it already went back. One request runs per
-    /// message and emoji: a call made meanwhile changes what is asked next and answers the call
-    /// before it without an error. Never a super reaction; nothing is asked when the reaction is
-    /// the user's already. `InvalidRequest`, before asking, where `MessageActions` says no:
-    /// `react` for an emoji the message doesn't have, `toggle_reaction` for one it has.
+    /// Adds the user's reaction with `emoji` (by its `id`, or its `name` for a Unicode one), never
+    /// a super reaction, to the message the row shows. The store has it at once
+    /// (`MessageReactionsChanged`); an error means the store went back to what Discord has. A call
+    /// made while one runs for the same emoji replaces it, and that one returns without an error.
+    /// `InvalidRequest` where `MessageActions` says no: `react` for an emoji the message doesn't
+    /// have, `toggle_reaction` for one it has.
     pub async fn react(
         &self,
         channel_id: ChannelId,
