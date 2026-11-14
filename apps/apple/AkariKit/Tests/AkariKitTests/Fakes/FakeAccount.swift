@@ -485,6 +485,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let holdReactors = Locked(false)
     // Every page says Discord filled it, as when it skips entries it can't read.
     let reactorsFull = Locked(false)
+    // The next pages asked after a user start from the first, as if Discord ignored `after`.
+    let reactorsIgnoringAfter = Locked(0)
     let reactorReplies = AsyncQueue<Void>()
 
     static func path(_ emoji: ReactionEmoji) -> String {
@@ -583,7 +585,16 @@ final class FakeAccount: Account, @unchecked Sendable {
             throw error
         }
         let all = reactorLists.current[Self.reactorsKey(emoji, kind)] ?? []
-        let rest = after.map { after in all.filter { $0.id > after } } ?? all
+        let ignored =
+            after != nil
+            && reactorsIgnoringAfter.withLock { left in
+                guard left > 0 else {
+                    return false
+                }
+                left -= 1
+                return true
+            }
+        let rest = after.map { after in ignored ? all : all.filter { $0.id > after } } ?? all
         let page = Array(rest.prefix(Int(limit)))
         return ReactorsPage(users: page, hasMore: page.count == Int(limit) || reactorsFull.current)
     }

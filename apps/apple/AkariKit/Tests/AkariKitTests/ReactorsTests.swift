@@ -392,6 +392,46 @@ final class ReactorsTests {
         #expect(!model.loading)
     }
 
+    // A Discord that answered every `after` with the first page would be asked forever.
+    @Test
+    func aPageThatEndsOnTheUserItWasAskedAfterEndsTheList() async {
+        react(reaction("👍", 150))
+        people(2...101)
+        let model = window()
+        await model.open()
+        #expect(model.hasMore)
+        account.reactorsIgnoringAfter.withLock { $0 = 1 }
+        store.log.forget()
+
+        await model.loadMore()
+
+        #expect(calls == [.reactors(here, it, "👍", .normal, after: id(101), limit: 100)])
+        #expect(ids(model) == Array(2...101))
+        #expect(!model.hasMore)
+        #expect(!model.loading)
+    }
+
+    @Test
+    func aRefreshStopsAtAPageThatEndsOnTheUserItWasAskedAfter() async throws {
+        react(reaction("👍", 150))
+        people(2...151)
+        let model = window()
+        await model.open()
+        await model.loadMore()
+        account.reactorsIgnoringAfter.withLock { $0 = 1 }
+        react(reaction("👍", 151))
+        store.log.forget()
+
+        model.apply(changed())
+
+        try await eventually { self.calls.count >= 2 && !model.loading }
+        #expect(
+            calls == [
+                .reactors(here, it, "👍", .normal, after: nil, limit: 100),
+                .reactors(here, it, "👍", .normal, after: id(101), limit: 100),
+            ])
+    }
+
     // The user's own ✕ changes the store at once: the list is asked again before Discord has
     // removed anything.
     @Test

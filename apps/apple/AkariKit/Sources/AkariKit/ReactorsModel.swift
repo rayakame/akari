@@ -44,9 +44,10 @@ public final class ReactorsModel: Identifiable {
         mutating func add(_ page: ReactorsPage) {
             let known = Set(users.map(\.id))
             users += page.users.filter { !known.contains($0.id) }
+            let asked = after
             after = page.users.last?.id ?? after
-            // An empty page has no user to ask on from.
-            done = !page.hasMore || page.users.isEmpty
+            // An empty page, or one that ends where the last one did, has no user to ask on from.
+            done = !page.hasMore || after == asked
         }
     }
 
