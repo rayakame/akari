@@ -24,6 +24,8 @@ uniffi.workspace = true
 [dev-dependencies]
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
 base64.workspace = true
+# The skin-toned variants the name check walks.
+emojis.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
