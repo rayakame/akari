@@ -178,19 +178,6 @@ struct ReactionPostBarTests {
     }
 
     @Test
-    func theQuickReactionsOpenUnderTheBarsButton() throws {
-        list.actions.quick[1] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
-        let cell = try show(bar([pill("👍", 2)]))
-        var views: [NSView] = []
-        list.controller.popUp = { _, _, view in views.append(view) }
-
-        cell.react.performClick(nil)
-
-        #expect(views.count == 1)
-        #expect(views.first === cell.react)
-    }
-
-    @Test
     func theBarsPillsTakeTheListsImages() throws {
         let cache = ImageCache(source: FakeImageSource.stalling())
 

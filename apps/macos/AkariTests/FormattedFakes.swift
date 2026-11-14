@@ -129,6 +129,14 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     }
     override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
+    override func recentReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] { [] }
+    override func quickReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] {
+        ["💯", "😆", "💖"].map(pickerEmoji)
+    }
+    override func customEmojiSections(channelId: ChannelId) -> [EmojiSection] { [] }
+    override func searchEmoji(
+        channelId: ChannelId, query: String, newest: EmojiVersion, limit: UInt32
+    ) async -> [PickerEmoji] { [] }
 
     static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
     static let threadId = ChannelId(rawValue: 1003)

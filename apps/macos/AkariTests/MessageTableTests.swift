@@ -1311,7 +1311,8 @@ struct MessageTableTests {
         /// A pill's tooltip by its emoji's name, as if its names had arrived.
         var names: [String: String] = [:]
         var rested: [String] = []
-        /// The row each reaction call was last handed: "quick", "react", "remove", "tooltip".
+        /// The row each reaction call was last handed: "quick", "react", "picker", "remove",
+        /// "tooltip".
         var handed: [String: MessageListModel.Row] = [:]
 
         func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] {
@@ -1337,6 +1338,7 @@ struct MessageTableTests {
         }
 
         func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel? {
+            handed["picker"] = row
             calls.append("picker for \(row.message.id.rawValue) from \(location)")
             return picking?.openPicker(for: row, from: location)
         }

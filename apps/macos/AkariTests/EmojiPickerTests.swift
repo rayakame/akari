@@ -648,12 +648,15 @@ struct EmojiPickerListTests {
         cell.reactions?.layoutSubtreeIfNeeded()
         let button = screen(add)
         #expect(button.minX - 8 - 432 >= list.window.frame.minX + 8)
+        try list.hover(1)
 
         add.performClick(nil)
 
         #expect(list.actions.calls.contains("picker for 2 from inlineButton"))
         let panel = try #require(presenter.windows.panel)
         #expect(panel.frame.minX == button.maxX + 8)
+        // Its top at the button's, unless that would take it below the window.
+        #expect(panel.frame.maxY == button.maxY || panel.frame.minY == list.window.frame.minY + 8)
         #expect(add.isSelected)
         #expect(list.hovered == [2])
         #expect(presenter.model?.location == .inlineButton)

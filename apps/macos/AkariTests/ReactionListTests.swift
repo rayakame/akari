@@ -472,21 +472,16 @@ struct ReactionListTests {
     // MARK: The row as it is now
 
     @Test
-    func theTooltipAndTheAddMenuAfterAChangeInPlaceGoWithTheRowAsItIsNow() throws {
-        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+    func theTooltipAndThePickerAfterAChangeInPlaceGoWithTheRowAsItIsNow() throws {
         list.show(rows(reactions(pill("👍", 2))))
         let changed = reactions(pill("👍", 3, mine: true))
         list.show(rows(changed))
         let row = try pills(2)
-        var menus: [NSMenu] = []
-        list.controller.popUp = { menu, _, _ in menus.append(menu) }
 
         _ = row.tooltip(try #require(row.pills[0].pill))
         #expect(list.actions.handed["tooltip"]?.reactions == changed)
         row.add.performClick(nil)
-        #expect(list.actions.handed["quick"]?.reactions == changed)
-        try #require(menus.first).performActionForItem(at: 0)
-        #expect(list.actions.handed["react"]?.reactions == changed)
+        #expect(list.actions.handed["picker"]?.reactions == changed)
     }
 
     @Test
@@ -503,19 +498,15 @@ struct ReactionListTests {
     }
 
     @Test
-    func aSystemLinesAddButtonReactsFromTheInlineButton() throws {
-        list.actions.quick[5] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+    func aSystemLinesAddButtonOpensThePickerFromTheInlineButton() throws {
         let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
         list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
         let shown = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions)
-        var menus: [NSMenu] = []
-        list.controller.popUp = { menu, _, _ in menus.append(menu) }
         list.actions.calls = []
 
         shown.add.performClick(nil)
-        try #require(menus.first).performActionForItem(at: 0)
 
-        #expect(list.actions.calls == ["react 💯 on 5 from inlineButton"])
+        #expect(list.actions.calls == ["picker for 5 from inlineButton"])
     }
 
     @Test
@@ -523,34 +514,12 @@ struct ReactionListTests {
         let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
         list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
         let wave = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions?.pills.first)
-        #expect(wave.toolTip == "👋 reacted by 4 people")
-        list.actions.names["👋"] = "👋 reacted by Ann, Bo, Cy, and 1 other"
+        #expect(wave.toolTip == ":wave: reacted by 4 people")
+        list.actions.names[":wave:"] = ":wave: reacted by Ann, Bo, Cy, and 1 other"
 
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 5))
 
-        #expect(wave.toolTip == "👋 reacted by Ann, Bo, Cy, and 1 other")
-    }
-
-    // The add menu stands 4 under its button, and its row stays lit while it is open.
-    @Test
-    func theAddMenuOpensUnderItsButtonWithItsRowLit() throws {
-        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
-        list.show(rows(reactions(pill("👍"))))
-        try list.hover(1)
-        let add = try pills(2).add
-        var opened: [(point: NSPoint, view: NSView, lit: [UInt64])] = []
-        list.controller.popUp = { [list] menu, point, view in
-            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
-            opened.append((point, view, list.hovered))
-            NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
-        }
-
-        add.performClick(nil)
-
-        let menu = try #require(opened.first)
-        #expect(menu.view === add)
-        #expect(menu.point == NSPoint(x: 0, y: add.isFlipped ? add.bounds.maxY + 4 : -4))
-        #expect(menu.lit == [2])
+        #expect(wave.toolTip == ":wave: reacted by Ann, Bo, Cy, and 1 other")
     }
 
     // MARK: System lines
@@ -980,7 +949,7 @@ struct ReactionBarTests {
         let add = try #require(items.first { $0.title == "Add Reaction" }?.submenu)
         #expect(add.items.map(\.title) == [":100:", ":laughing:", ":sparkling_heart:"])
         #expect(add.items.map(\.state) == [.off, .on, .off])
-        #expect(add.items[1].accessibilityLabel() == "Click to remove 😆")
+        #expect(add.items[1].accessibilityLabel() == "Click to remove laughing")
         let remove = try #require(items.first { $0.title == "Remove Reactions" }?.submenu)
         #expect(remove.items.map(\.title) == [":thumbsup:  2", ":tada:  12"])
         #expect(items.first { $0.title == "View Reactions" }?.submenu == nil)
@@ -994,6 +963,7 @@ struct ReactionBarTests {
     @Test
     func theMenusReactionsAfterAChangeInPlaceGoWithTheRowAsItIsNow() throws {
         show()
+        list.actions.menuEmoji[2] = quick
         list.actions.removable[2] = [pill("👍", 2)]
         list.controller.actions = ReactionMenuActions(list.actions, groups: groups())
         let changed = reactions(pill("👍", 3, mine: true))
@@ -1004,11 +974,15 @@ struct ReactionBarTests {
         let cell = try #require(try list.cell(of: 2) as? MessageCell)
 
         let items = cell.menuItems()
-        try #require(items.first { $0.title == "Add Reaction" }?.submenu).performActionForItem(at: 0)
+        let add = try #require(items.first { $0.title == "Add Reaction" }?.submenu)
+        add.performActionForItem(at: 0)
         try #require(items.first { $0.title == "Remove Reactions" }?.submenu).performActionForItem(at: 0)
+        #expect(add.items.last?.title == "View More")
+        add.performActionForItem(at: add.items.count - 1)
 
         #expect(list.actions.handed["react"]?.reactions == changed)
         #expect(list.actions.handed["remove"]?.reactions == changed)
+        #expect(list.actions.handed["picker"]?.reactions == changed)
     }
 
     @Test

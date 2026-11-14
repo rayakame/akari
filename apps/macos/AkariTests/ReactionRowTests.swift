@@ -231,7 +231,7 @@ struct ReactionRowViewTests {
         row.configure(nil, offer: .unicode("🔥"), more: 0, animated: false)
 
         #expect(!row.offer.isHidden)
-        #expect(row.offer.accessibilityLabel() == "🔥, press to react")
+        #expect(row.offer.accessibilityLabel() == "fire, press to react")
     }
 
     @Test
