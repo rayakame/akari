@@ -420,6 +420,95 @@ final class ReactorsTests {
         #expect(!model.loading)
     }
 
+    // The first page's answer comes after the second asked: a page asked twice would show.
+    @Test
+    func morePagesAskedForWhileOneLoadsAskNothing() async throws {
+        react(reaction("👍", 250))
+        people(2...251)
+        account.holdReactors.withLock { $0 = true }
+        let model = window()
+        let first = Task { await model.open() }
+        await account.reactorReplies.pulled(1)
+
+        let second = Task { await model.loadMore() }
+        account.reactorReplies.send(())
+        await first.value
+        account.reactorReplies.send(())
+        await second.value
+
+        #expect(calls == [.reactors(here, it, "👍", .normal, after: nil, limit: 100)])
+        #expect(ids(model) == Array(2...101))
+    }
+
+    @Test
+    func aChangeDuringAPageIsAskedAfterIt() async throws {
+        react(reaction("👍", 3))
+        people(2...4)
+        account.holdReactors.withLock { $0 = true }
+        let model = window()
+        let opening = Task { await model.open() }
+        await account.reactorReplies.pulled(1)
+        people(3...5)
+        react(reaction("👍", 3, me: true))
+
+        model.apply(changed())
+        account.reactorReplies.send(())
+        await account.reactorReplies.pulled(2)
+        account.reactorReplies.send(())
+        await opening.value
+
+        #expect(ids(model) == [3, 4, 5])
+    }
+
+    @Test
+    func aRefreshOfAnEmojiTheWindowLeftIsDropped() async throws {
+        react(reaction("👍", 2), reaction("🎉", 1))
+        people(2...3)
+        people(7...7, emoji: "🎉")
+        let model = window(on: "👍")
+        await model.open()
+        account.holdReactors.withLock { $0 = true }
+        people(2...4)
+        react(reaction("👍", 3), reaction("🎉", 1))
+
+        model.apply(changed())
+        await account.reactorReplies.pulled(1)
+        let chosen = Task { await model.select(ReactionPill.ID(.unicode("🎉"))) }
+        await account.reactorReplies.pulled(2)
+        account.reactorReplies.send(())
+        account.reactorReplies.send(())
+        await chosen.value
+
+        #expect(ids(model) == [7])
+    }
+
+    @Test
+    func aKindWhoseCountWentIsDroppedByTheRefresh() async throws {
+        react(reaction("👍", 1, burst: 1))
+        people(2...2)
+        people(3...3, kind: .burst)
+        let model = window()
+        await model.open()
+        await model.loadMore()
+        #expect(ids(model) == [2, 3])
+        react(reaction("👍", 1))
+
+        model.apply(changed())
+
+        try await eventually { self.ids(model) == [2] }
+    }
+
+    @Test
+    func aMessageThatArrivesWholeAgainRereadsTheTabs() {
+        react(reaction("👍", 1))
+        let model = window()
+        react(reaction("👍", 1), reaction("🎉", 2))
+
+        model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
+
+        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+    }
+
     @Test
     func aPageThatShowsNoOneNewGoesOnToTheNext() async {
         react(reaction("👍", 100, burst: 2))
