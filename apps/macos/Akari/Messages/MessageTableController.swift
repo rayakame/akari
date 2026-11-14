@@ -802,7 +802,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             let cell = rowView.view(atColumn: 0)
             switch timeline.items[index] {
-            case .message(let row, _) where row.shown.id == message:
+            case .message(let row, _) where row.message.id == message:
                 (cell as? MessageCell)?.reactions?.refreshTooltips()
                 (cell as? NoticeCell)?.reactions?.refreshTooltips()
             case .postBar(let bar, _) where bar.post == message:

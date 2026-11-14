@@ -334,6 +334,25 @@ struct ReactionListTests {
         #expect(thumbs.toolTip == "👍 reacted by Ann, Bo, and Cy")
     }
 
+    // The model keeps a row's names under the row's own ID, a thread's starter row's too.
+    @Test
+    func aStarterRowsNamesArriveUnderTheRowsOwnID() throws {
+        let original = row(5, by: ray, at: list.noon, content: "the original").message
+        let first = row(31, by: ray, at: list.noon, kind: .threadStarterMessage, content: "")
+        let starter = MessageListModel.Row(
+            id: first.id, message: first.message, starter: .loaded(original)
+        ).reacting(reactions(pill("👍", 3)))
+        list.show([starter])
+        let thumbs = try pills(31).pills[0]
+        list.actions.names["👍"] = "👍 reacted by Ann, Bo, and Cy"
+
+        list.controller.reactionNamesArrived(for: MessageId(rawValue: 5))
+        #expect(thumbs.toolTip == "👍 reacted by 3 people")
+
+        list.controller.reactionNamesArrived(for: MessageId(rawValue: 31))
+        #expect(thumbs.toolTip == "👍 reacted by Ann, Bo, and Cy")
+    }
+
     @Test
     func thePointerRestingOnAPillAsksForItsNamesAndLeavingEndsIt() throws {
         list.show(rows(reactions(pill("👍"), pill("🎉"))))
