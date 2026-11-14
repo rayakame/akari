@@ -468,6 +468,56 @@ final class ReactorsTests {
     }
 
     @Test
+    func aRemovedRowStaysOutWhileNoListAskedAfterTheAnswerHasCome() async throws {
+        react(reaction("👍", 3, me: true))
+        people(1...3)
+        let model = window()
+        await model.open()
+        account.holdReactions.withLock { $0 = true }
+        account.holdReactors.withLock { $0 = true }
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        react(reaction("👍", 2))
+        model.apply(changed())
+        await account.reactorReplies.pulled(1)
+        account.reactionReplies.send(())
+        await removal.value
+        account.reactorReplies.send(())
+        await account.reactorReplies.pulled(2)
+        account.reactorsError.withLock { $0 = .Network(kind: .other) }
+        account.reactorReplies.send(())
+
+        try await eventually { !model.loading }
+        #expect(ids(model) == [2, 3])
+    }
+
+    // The user reacted again meanwhile: Discord's list has them.
+    @Test
+    func aRemovalAnsweredDuringARefreshHidesNothingOnceTheEmojiIsChosenAgain() async throws {
+        react(reaction("👍", 3, me: true), reaction("🎉", 1))
+        people(1...3)
+        people(7...7, emoji: "🎉")
+        let model = window(on: "👍")
+        await model.open()
+        account.holdReactions.withLock { $0 = true }
+        account.holdReactors.withLock { $0 = true }
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        model.apply(changed())
+        await account.reactorReplies.pulled(1)
+        account.reactionReplies.send(())
+        await removal.value
+        account.holdReactors.withLock { $0 = false }
+        await model.select(ReactionPill.ID(.unicode("🎉")))
+        account.reactorReplies.send(())
+        await model.select(ReactionPill.ID(.unicode("👍")))
+
+        #expect(ids(model) == [1, 2, 3])
+    }
+
+    @Test
     func aRemovalHidesItsRowUnderItsEmojiOnly() async throws {
         react(reaction("👍", 2, me: true), reaction("🎉", 2, me: true))
         people(1...2)
