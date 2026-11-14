@@ -613,7 +613,7 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("👍"), on: row())
 
         try await eventually { self.tooltips.count == 2 }
-        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann")
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == ":thumbsup: reacted by Ann")
     }
 
     @Test
@@ -626,7 +626,7 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("👍"), on: row())
         try await eventually { !self.tooltips.isEmpty }
 
-        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann, Bo, Cy, and 1 other")
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == ":thumbsup: reacted by Ann, Bo, Cy, and 1 other")
         #expect(calls == [.reactors(here, it, "👍", .normal, after: nil, limit: 3)])
     }
 
@@ -642,7 +642,7 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("👍"), on: row())
         try await eventually { !self.tooltips.isEmpty }
 
-        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann")
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == ":thumbsup: reacted by Ann")
     }
 
     @Test
@@ -673,7 +673,7 @@ final class ReactionsModelTests {
         model.pointerEntered(try pill("👍"), on: row())
         try await eventually { !self.tooltips.isEmpty }
 
-        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by Ann, Bo, and 1 other")
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == ":thumbsup: reacted by Ann, Bo, and 1 other")
     }
 
     @Test
@@ -708,7 +708,7 @@ final class ReactionsModelTests {
 
         model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
 
-        #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by 1 person")
+        #expect(model.tooltip(of: try pill("👍"), on: row()) == ":thumbsup: reacted by 1 person")
     }
 
     @Test

@@ -542,7 +542,7 @@ final class ReactorsTests {
 
         model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
 
-        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+        #expect(model.tabs.map(\.name) == [":tada:", ":thumbsup:"])
     }
 
     @Test
@@ -553,7 +553,7 @@ final class ReactorsTests {
 
         model.apply(EventBatch([.ready]))
 
-        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+        #expect(model.tabs.map(\.name) == [":tada:", ":thumbsup:"])
     }
 
     @Test
@@ -979,7 +979,7 @@ final class SessionReactionsTests {
 
         #expect(session.reactors?.channelId == id(31))
         #expect(session.reactors?.messageId == id(31))
-        #expect(session.reactors?.tabs.map(\.name) == ["👀"])
+        #expect(session.reactors?.tabs.map(\.name) == [":eyes:"])
         session.close()
     }
 

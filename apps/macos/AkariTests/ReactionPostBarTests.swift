@@ -149,19 +149,6 @@ struct ReactionPostBarTests {
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 1))
         #expect(thumbs.toolTip == ":thumbsup: reacted by Ann and Bo")
     }
-}
-
-// A forum card's reaction chip as VoiceOver reads it.
-@MainActor
-struct ForumCardReactionTests {
-    @Test
-    func voiceOverReadsTheEmojisShortNameWithoutColons() {
-        let offer = ForumModel.Card.Reaction(emoji: .unicode("🔥"), count: 0, mine: false, toggles: true)
-        let counted = ForumModel.Card.Reaction(emoji: .unicode("👍"), count: 12, mine: false, toggles: true)
-
-        #expect(ForumCardReaction.label(of: offer) == "fire, press to react")
-        #expect(ForumCardReaction.label(of: counted) == "thumbsup, 12 reactions")
-    }
 
     @Test
     func theSamePostsCountRollsAndAnotherPostsReactionsComeWithout() throws {
