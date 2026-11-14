@@ -483,6 +483,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let reactorLists = Locked<[String: [User]]>([:])
     let reactorsError = Locked<RequestError?>(nil)
     let holdReactors = Locked(false)
+    // Every page says Discord filled it, as when it skips entries it can't read.
+    let reactorsFull = Locked(false)
     let reactorReplies = AsyncQueue<Void>()
 
     static func path(_ emoji: ReactionEmoji) -> String {
@@ -573,7 +575,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(
             .reactors(channelId, messageId, Self.path(emoji), kind, after: after, limit: limit))
         if holdReactors.current {
-            _ = await reactorReplies.next()
+            // The bindings' async calls aren't cancelled with their task: the answer still comes.
+            let replies = reactorReplies
+            await Task { _ = await replies.next() }.value
         }
         if let error = reactorsError.current {
             throw error
@@ -581,7 +585,7 @@ final class FakeAccount: Account, @unchecked Sendable {
         let all = reactorLists.current[Self.reactorsKey(emoji, kind)] ?? []
         let rest = after.map { after in all.filter { $0.id > after } } ?? all
         let page = Array(rest.prefix(Int(limit)))
-        return ReactorsPage(users: page, hasMore: page.count == Int(limit))
+        return ReactorsPage(users: page, hasMore: page.count == Int(limit) || reactorsFull.current)
     }
 
     let membershipError = Locked<RequestError?>(nil)

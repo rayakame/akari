@@ -65,6 +65,14 @@ struct ReactionPillTests {
     }
 
     @Test
+    func aPillThatOnlyShowsPromisesNoPress() {
+        let pill = ReactionPill(emoji: .unicode("👍"), normal: 2, mine: true)
+
+        #expect(pill.accessibilityLabel(toggles: false) == "👍, 2 reactions")
+        #expect(pill.accessibilityLabel(toggles: true) == pill.accessibilityLabel)
+    }
+
+    @Test
     func theMostReactionsComeFirstAndTiesKeepTheirOrder() {
         let pills = ReactionPill.merged([
             reaction("a", 1), reaction("b", 3), reaction("c", 1, burst: 2), reaction("d", 2),
@@ -456,8 +464,9 @@ final class ReactionsModelTests {
         #expect(model.tooltip(of: try pill("👍"), on: row()) == "👍 reacted by 1 person")
     }
 
+    // A thread's list hears of its starter row by the row's own IDs.
     @Test
-    func aStarterRowsNamesAreKeptUnderTheMessageItShows() async throws {
+    func aStarterRowsNamesAreKeptUnderTheRowAndDroppedWhenItChanges() async throws {
         react(reaction("👍", 1), on: 7)
         store.update { $0.reactions[id(31)] = [reaction("👍", 1)] }
         people("Ann")
@@ -468,10 +477,63 @@ final class ReactionsModelTests {
         let shown = ReactionPill(reaction("👍", 1))
 
         model.pointerEntered(shown, on: starter)
-        try await eventually { self.tooltips == ["7 👍"] }
+        try await eventually { self.tooltips == ["31 👍"] }
         #expect(calls == [.reactors(id(31), id(31), "👍", .normal, after: nil, limit: 3)])
+        #expect(model.tooltip(of: shown, on: starter) == "👍 reacted by Ann")
 
-        model.apply(EventBatch([.messageReactionsChanged(channelId: here, messageId: id(7))]))
+        model.apply(EventBatch([.messageReactionsChanged(channelId: id(31), messageId: id(31))]))
         #expect(model.tooltip(of: shown, on: starter) == "👍 reacted by 1 person")
+    }
+
+    // The first ask goes on to the super reactions after the second began: its pulls tell
+    // where each is.
+    @Test
+    func namesAskedBeforeAChangeNeverTakeThePlaceOfThoseAskedAfterIt() async throws {
+        react(reaction("👍", 1, burst: 1))
+        people("Ann")
+        people("Cy", kind: .burst)
+        account.holdReactors.withLock { $0 = true }
+        let model = model()
+        model.pointerEntered(try pill("👍"), on: row())
+        await account.reactorReplies.pulled(1)
+
+        model.apply(EventBatch([.messageReactionsChanged(channelId: here, messageId: it)]))
+        model.pointerLeft()
+        model.pointerEntered(try pill("👍"), on: row())
+        await account.reactorReplies.pulled(2)
+        account.reactorReplies.send(())
+        await account.reactorReplies.pulled(3)
+        people("Bo")
+        account.reactorReplies.send(())
+        await account.reactorReplies.pulled(4)
+        account.reactorReplies.send(())
+        account.reactorReplies.send(())
+
+        try await eventually {
+            (try? self.pill("👍")).map { model.tooltip(of: $0, on: self.row()) }
+                == "👍 reacted by Bo and Cy"
+        }
+        #expect(tooltips == ["100 👍"])
+    }
+
+    @Test
+    func namesAreKeptForAsManyPillsAsTheCapOnly() async throws {
+        let cap = UInt64(ReactionsModel.namesKept)
+        people("Ann")
+        let model = model()
+        let rows = (0...cap).map { MessageListModel.Row(id: id(200 + $0), message: message(200 + $0, in: 11)) }
+        let shown = ReactionPill(reaction("👍", 1))
+        for (index, row) in rows.enumerated() {
+            model.pointerEntered(shown, on: row)
+            try await eventually { self.tooltips.count == index + 1 }
+        }
+        store.log.forget()
+
+        #expect(model.tooltip(of: shown, on: rows[0]) == "👍 reacted by 1 person", "the oldest went")
+        #expect(model.tooltip(of: shown, on: rows[1]) == "👍 reacted by Ann")
+        model.pointerEntered(shown, on: try #require(rows.last))
+        model.pointerEntered(shown, on: rows[0])
+        try await eventually { self.tooltips.count == rows.count + 1 }
+        #expect(calls == [.reactors(here, id(200), "👍", .normal, after: nil, limit: 3)])
     }
 }

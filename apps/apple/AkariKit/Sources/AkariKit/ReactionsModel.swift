@@ -10,6 +10,8 @@ public final class ReactionsModel {
     /// How long the pointer rests on a pill before its names are asked, as the official
     /// client's tooltip opens.
     public static let tooltipDelay = Duration.milliseconds(500)
+    /// How many pills' names are kept: the ones asked longest ago go first.
+    public static let namesKept = 64
 
     private struct NamesKey: Hashable {
         let message: MessageId
@@ -28,8 +30,10 @@ public final class ReactionsModel {
     public var refused: () -> Void = {}
     /// A pill's names arrived: its tooltip reads differently now.
     public var tooltipChanged: (MessageId, ReactionPill.ID) -> Void = { _, _ in }
-    private var names: [NamesKey: [String]] = [:]
-    private var asking: Set<NamesKey> = []
+    // With the number of the ask that brought them: the lowest goes first.
+    private var names: [NamesKey: (names: [String], ask: Int)] = [:]
+    private var asking: [NamesKey: Int] = [:]
+    private var asks = 0
     private var resting: (key: NamesKey, task: Task<Void, Never>)?
 
     public init(store: Store, account: Account, tooltipDelay: Duration = ReactionsModel.tooltipDelay) {
@@ -133,20 +137,20 @@ public final class ReactionsModel {
     /// A pill's tooltip as it reads now: with the names once they arrived, else how many
     /// people reacted.
     public func tooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String? {
-        let known = names[NamesKey(message: row.shown.id, pill: pill.id)] ?? []
+        let known = names[NamesKey(message: row.message.id, pill: pill.id)]?.names ?? []
         return ReactionWords.tooltip(emoji: pill.name, names: known, count: pill.count)
     }
 
     /// The pointer rests on a pill: its first three names are asked once, after the tooltip's
-    /// delay, and kept until the message's reactions change.
+    /// delay, and kept until the row's reactions change.
     public func pointerEntered(_ pill: ReactionPill, on row: MessageListModel.Row) {
-        let key = NamesKey(message: row.shown.id, pill: pill.id)
+        let key = NamesKey(message: row.message.id, pill: pill.id)
         guard resting?.key != key else {
             return
         }
         resting?.task.cancel()
         resting = nil
-        guard names[key] == nil, !asking.contains(key) else {
+        guard names[key] == nil, asking[key] == nil else {
             return
         }
         let (channel, message) = (row.message.channelId, row.message.id)
@@ -168,7 +172,9 @@ public final class ReactionsModel {
     private func ask(
         _ key: NamesKey, _ pill: ReactionPill, channelId: ChannelId, messageId: MessageId
     ) async {
-        asking.insert(key)
+        asks += 1
+        let ask = asks
+        asking[key] = ask
         var found: [String] = []
         for kind in [ReactionKind.normal, .burst] where found.count < 3 {
             guard (kind == .normal ? pill.normal : pill.burst) > 0 else {
@@ -182,10 +188,17 @@ public final class ReactionsModel {
             }
         }
         // The reactions changed meanwhile: these names are of the ones before.
-        guard asking.remove(key) != nil, !found.isEmpty else {
+        guard asking[key] == ask else {
             return
         }
-        names[key] = Array(found.prefix(3))
+        asking[key] = nil
+        guard !found.isEmpty else {
+            return
+        }
+        names[key] = (Array(found.prefix(3)), ask)
+        if names.count > Self.namesKept, let oldest = names.min(by: { $0.value.ask < $1.value.ask }) {
+            names[oldest.key] = nil
+        }
         tooltipChanged(key.message, key.pill)
     }
 
@@ -204,7 +217,7 @@ public final class ReactionsModel {
         }
         let stale = { (key: NamesKey) in changed?.contains(key.message) ?? true }
         names = names.filter { !stale($0.key) }
-        asking = asking.filter { !stale($0) }
+        asking = asking.filter { !stale($0.key) }
         if let resting, stale(resting.key) {
             resting.task.cancel()
             self.resting = nil

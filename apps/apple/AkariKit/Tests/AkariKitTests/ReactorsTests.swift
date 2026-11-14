@@ -17,6 +17,7 @@ final class ReactorsTests {
         store.update { state in
             state.add(guild(1))
             state.list([channel(11)], in: 1)
+            state.show(message(100, in: 11, by: user(2)))
             state.allow(reacting(), message: 100, in: 11)
         }
     }
@@ -221,8 +222,9 @@ final class ReactorsTests {
         account.reactionReplies.send(())
         await removal.value
 
-        #expect(calls == [.removeReaction(here, it, "👍", .burst, id(3))])
         #expect(ids(model) == [2])
+        await model.loadMore()
+        #expect(calls == [.removeReaction(here, it, "👍", .burst, id(3))], "nothing asked again")
     }
 
     @Test
@@ -272,24 +274,260 @@ final class ReactorsTests {
         #expect(model.tabs.map(\.mine) == [true])
     }
 
+    // A new first page says nothing of who is past it.
     @Test
-    func aRefreshKeepsWhatWasLoadedPastTheFirstPage() async throws {
-        react(reaction("👍", 150))
-        people(2...151)
+    func aRefreshAsksEveryLoadedPageAgain() async throws {
+        react(reaction("👍", 250))
+        people(2...251)
         let model = window()
         await model.open()
         await model.loadMore()
-        #expect(model.reactors.count == 150)
-        people(3...152)
-        react(reaction("👍", 149))
+        #expect(model.reactors.count == 200)
+        account.reactorLists.withLock {
+            $0[FakeAccount.reactorsKey(.unicode("👍"), .normal)]?.removeAll { $0.id == id(150) }
+        }
+        react(reaction("👍", 249))
         store.log.forget()
 
         model.apply(changed())
 
-        try await eventually { self.ids(model).first == 3 }
-        #expect(ids(model) == Array(3...151))
-        #expect(calls == [.reactors(here, it, "👍", .normal, after: nil, limit: 100)])
+        try await eventually { !self.ids(model).contains(150) }
+        #expect(ids(model) == Array(2...149) + Array(151...202))
+        #expect(
+            calls == [
+                .reactors(here, it, "👍", .normal, after: nil, limit: 100),
+                .reactors(here, it, "👍", .normal, after: id(101), limit: 100),
+            ])
+        #expect(model.hasMore)
+    }
+
+    @Test
+    func aRefreshThatFailsKeepsTheList() async throws {
+        react(reaction("👍", 3))
+        people(2...4)
+        let model = window()
+        await model.open()
+        account.reactorsError.withLock { $0 = .Network(kind: .other) }
+        react(reaction("👍", 2))
+        store.log.forget()
+
+        model.apply(changed())
+
+        try await eventually { self.calls.count == 1 && !model.loading }
+        #expect(ids(model) == [2, 3, 4])
+        #expect(!model.failed)
+    }
+
+    // Reaction events name no user: one leaving and one coming leave the count as it was.
+    @Test
+    func aReactionEventThatLeavesEveryCountAsksAgain() async throws {
+        react(reaction("👍", 2), reaction("🎉", 1))
+        people(2...3)
+        let model = window(on: "👍")
+        await model.open()
+        people(3...4)
+
+        model.apply(changed())
+
+        try await eventually { self.ids(model) == [3, 4] }
+    }
+
+    @Test
+    func aPageAskedForDuringARefreshIsLoadedAfterIt() async throws {
+        react(reaction("👍", 150))
+        people(2...151)
+        let model = window()
+        await model.open()
+        account.holdReactors.withLock { $0 = true }
+        react(reaction("👍", 151))
+        people(2...152)
+
+        model.apply(changed())
+        await account.reactorReplies.pulled(1)
+        await model.loadMore()
+        #expect(model.reactors.count == 100)
+        account.reactorReplies.send(())
+        account.reactorReplies.send(())
+
+        try await eventually { self.ids(model) == Array(2...152) }
         #expect(!model.hasMore)
+        #expect(!model.loading)
+    }
+
+    @Test
+    func aPageThatShowsNoOneNewGoesOnToTheNext() async {
+        react(reaction("👍", 100, burst: 2))
+        people(2...101)
+        people(200...201, kind: .burst)
+        let model = window()
+        await model.open()
+        #expect(model.hasMore)
+
+        await model.loadMore()
+
+        #expect(ids(model) == Array(2...101) + [200, 201])
+        #expect(!model.hasMore)
+        #expect(
+            calls.suffix(2) == [
+                .reactors(here, it, "👍", .normal, after: id(101), limit: 100),
+                .reactors(here, it, "👍", .burst, after: nil, limit: 100),
+            ])
+    }
+
+    @Test
+    func aFullPageWithNoOneOnItEndsTheList() async {
+        react(reaction("👍", 2))
+        people(2...3)
+        account.reactorsFull.withLock { $0 = true }
+        let model = window()
+        await model.open()
+        #expect(model.hasMore)
+        store.log.forget()
+
+        await model.loadMore()
+
+        #expect(calls == [.reactors(here, it, "👍", .normal, after: id(3), limit: 100)])
+        #expect(ids(model) == [2, 3])
+        #expect(!model.hasMore)
+        #expect(!model.loading)
+    }
+
+    // The user's own ✕ changes the store at once: the list is asked again before Discord has
+    // removed anything.
+    @Test
+    func aRefreshAskedBeforeARemovalWasAnsweredNeverBringsTheRowBack() async throws {
+        react(reaction("👍", 3, me: true))
+        people(1...3)
+        let model = window()
+        await model.open()
+        account.holdReactions.withLock { $0 = true }
+        account.holdReactors.withLock { $0 = true }
+        store.log.forget()
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        react(reaction("👍", 2))
+        model.apply(changed())
+        await account.reactorReplies.pulled(1)
+        account.reactionReplies.send(())
+        await removal.value
+        account.reactorReplies.send(())
+
+        await account.reactorReplies.pulled(2)
+        #expect(ids(model) == [2, 3], "the list from before the removal, without its row")
+        people(2...3)
+        account.reactorReplies.send(())
+        try await eventually { !model.loading }
+        #expect(ids(model) == [2, 3])
+
+        react(reaction("👍", 3, me: true))
+        people(1...3)
+        account.holdReactors.withLock { $0 = false }
+        model.apply(changed())
+        try await eventually { self.ids(model) == [1, 2, 3] }
+    }
+
+    @Test
+    func aRemovalHidesItsRowUnderItsEmojiOnly() async throws {
+        react(reaction("👍", 2, me: true), reaction("🎉", 2, me: true))
+        people(1...2)
+        people(1...1, emoji: "🎉")
+        account.reactorLists.withLock {
+            $0[FakeAccount.reactorsKey(.unicode("🎉"), .normal)]?.append(user(3, name: "user 3"))
+        }
+        let model = window(on: "👍")
+        await model.open()
+        account.holdReactions.withLock { $0 = true }
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        await model.select(ReactionPill.ID(.unicode("🎉")))
+        #expect(ids(model) == [1, 3])
+        account.reactionReplies.send(())
+        await removal.value
+
+        #expect(ids(model) == [1, 3], "another emoji's list")
+        await model.select(ReactionPill.ID(.unicode("👍")))
+        #expect(ids(model) == [1, 2], "asked after the answer: as Discord has it")
+    }
+
+    @Test
+    func aRemovalTakesOneKindAndLeavesTheUsersOther() async throws {
+        react(reaction("👍", 2, burst: 1))
+        people(2...3)
+        people(2...2, kind: .burst)
+        store.update { $0.allow(reacting(remove: true), message: 100, in: 11) }
+        let model = window()
+        await model.open()
+        await model.loadMore()
+        #expect(ids(model) == [2, 3])
+        account.holdReactions.withLock { $0 = true }
+
+        let removal = Task { await model.remove(model.reactors[0]) }
+        await account.reactionReplies.pulled(1)
+        #expect(ids(model) == [3, 2], "the super reaction is theirs still")
+        #expect(model.reactors.map(\.kind) == [.normal, .burst])
+        account.reactionReplies.send(())
+        await removal.value
+
+        #expect(ids(model) == [3, 2])
+        #expect(model.reactors.map(\.kind) == [.normal, .burst])
+    }
+
+    @Test
+    func theSettingTurnedOffEmptiesTheWindow() {
+        react(reaction("👍", 1))
+        let model = window()
+        store.update { $0.displaySettings.renderReactions = false }
+
+        model.apply(EventBatch([.displaySettingsChanged]))
+
+        #expect(model.isEmpty)
+    }
+
+    // A reload after a reconnect may let go of the message for a moment.
+    @Test
+    func aMessageTheStoreLetGoOfKeepsItsWindow() async throws {
+        react(reaction("👍", 2), reaction("🎉", 1))
+        people(2...3)
+        let model = window()
+        await model.open()
+        let held = store.messages(channelId: here, ids: [it])
+        store.update { state in
+            state.messages[id(100)] = nil
+            state.reactions[id(100)] = nil
+        }
+        store.log.forget()
+
+        model.apply(EventBatch([.ready]))
+
+        #expect(model.tabs.map(\.name) == ["👍", "🎉"])
+        #expect(ids(model) == [2, 3])
+        #expect(calls.isEmpty)
+
+        store.update { state in
+            state.messages[id(100)] = held.first
+            state.reactions[id(100)] = [reaction("👍", 3)]
+        }
+        people(2...4)
+        model.apply(EventBatch([.messageInserted(channelId: here, messageId: it)]))
+
+        #expect(model.tabs.map(\.count) == [3])
+        try await eventually { self.ids(model) == [2, 3, 4] }
+    }
+
+    @Test
+    func aDeletedMessageEmptiesTheWindow() {
+        react(reaction("👍", 2))
+        let model = window()
+        store.update { state in
+            state.messages[id(100)] = nil
+            state.reactions[id(100)] = nil
+        }
+
+        model.apply(EventBatch([.messageDeleted(channelId: here, messageId: it)]))
+
+        #expect(model.isEmpty)
     }
 
     @Test
@@ -394,6 +632,22 @@ final class SessionReactionsTests {
 
         session.apply(EventBatch([.messageReactionsChanged(channelId: id(11), messageId: id(100))]))
 
+        #expect(session.reactors == nil)
+        session.close()
+    }
+
+    @Test
+    func theWindowStaysOverAReconnect() throws {
+        session.viewReactions(of: try row())
+        store.update { state in
+            state.messages[id(100)] = nil
+            state.reactions[id(100)] = nil
+        }
+
+        session.apply(EventBatch([.ready]))
+        #expect(session.reactors?.tabs.map(\.count) == [2])
+
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(100))]))
         #expect(session.reactors == nil)
         session.close()
     }

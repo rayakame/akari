@@ -43,10 +43,16 @@ public struct ReactionPill: Equatable, Sendable, Identifiable {
     }
 
     /// The official client's words for a pill, as VoiceOver reads it.
-    public var accessibilityLabel: String {
+    public var accessibilityLabel: String { accessibilityLabel(toggles: true) }
+
+    /// Without the press where the pill only shows.
+    public func accessibilityLabel(toggles: Bool) -> String {
         let spoken = name.replacingOccurrences(of: ":", with: " ")
             .replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
         let reactions = count == 1 ? "1 reaction" : "\(count) reactions"
+        guard toggles else {
+            return "\(spoken), \(reactions)"
+        }
         return "\(spoken), \(reactions), press to \(mine ? "remove your reaction" : "react")"
     }
 
