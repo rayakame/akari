@@ -1311,8 +1311,11 @@ struct MessageTableTests {
         /// A pill's tooltip by its emoji's name, as if its names had arrived.
         var names: [String: String] = [:]
         var rested: [String] = []
+        /// The row each reaction call was last handed: "quick", "react", "remove", "tooltip".
+        var handed: [String: MessageListModel.Row] = [:]
 
         func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] {
+            handed["quick"] = row
             if let model {
                 return model.quickReactions(for: row, shift: shift)
             }
@@ -1320,6 +1323,7 @@ struct MessageTableTests {
         }
 
         func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {
+            handed["react"] = row
             calls.append("react \(quick.name) on \(row.message.id.rawValue) from \(location)")
         }
 
@@ -1336,12 +1340,14 @@ struct MessageTableTests {
         }
 
         func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool) {
+            handed["remove"] = row
             calls.append(
                 "remove \(pill?.name ?? "all") from \(row.message.id.rawValue)\(shift ? " shift" : "")")
         }
 
         func reactionTooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String? {
-            names[pill.name] ?? ReactionWords.tooltip(emoji: pill.name, names: [], count: pill.count)
+            handed["tooltip"] = row
+            return names[pill.name] ?? ReactionWords.tooltip(emoji: pill.name, names: [], count: pill.count)
         }
 
         func reactionHovered(_ pill: ReactionPill?, on row: MessageListModel.Row?) {

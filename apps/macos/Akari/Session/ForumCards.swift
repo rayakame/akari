@@ -490,14 +490,14 @@ struct ForumCardReaction: View {
         .onHover { hovered = $0 }
         .background(CursorArea(reaction.toggles ? .pointingHand : .operationNotAllowed))
         .help(reaction.name)
-        .accessibilityLabel(label)
+        .accessibilityLabel(Self.label(of: reaction))
     }
 
     private var fill: NSColor {
         hovered && reaction.toggles ? Palette.interactiveBackgroundActive : Palette.hoverBackground
     }
 
-    private var label: String {
+    static func label(of reaction: ForumModel.Card.Reaction) -> String {
         if reaction.count == 0 {
             return "\(reaction.name), press to react"
         }

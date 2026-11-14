@@ -71,6 +71,43 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     override func markGuildsRead(guildIds: [GuildId]) {
         markedGuildsRead.withLock { $0.append(guildIds) }
     }
+    /// The reaction calls, as "react 👍 from contextMenu", "remove 👍 of 2", "reactors 👍".
+    let reactionCalls = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+    /// Set: Discord refuses every reaction with it.
+    let reactionError = OSAllocatedUnfairLock<ReactionError?>(initialState: nil)
+
+    override func react(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, location: ReactionLocation
+    ) async throws {
+        reactionCalls.withLock { $0.append("react \(emoji.name ?? "") from \(location)") }
+        if let error = reactionError.withLock({ $0 }) {
+            throw error
+        }
+    }
+
+    override func unreact(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, location: ReactionLocation
+    ) async throws {
+        reactionCalls.withLock { $0.append("unreact \(emoji.name ?? "") from \(location)") }
+    }
+
+    override func removeReactions(channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji?)
+        async throws
+    {
+        reactionCalls.withLock {
+            $0.append("remove \(emoji?.name ?? "all") of \(messageId.rawValue)")
+        }
+    }
+
+    override func reactors(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, kind: ReactionKind,
+        after: UserId?, limit: UInt8
+    ) async throws -> ReactorsPage {
+        reactionCalls.withLock { $0.append("reactors \(emoji.name ?? "")") }
+        return ReactorsPage(users: [person(5, "Ann", "ann")], hasMore: false)
+    }
+
     override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
         formattedStore.channel(id: threadId) != nil
     }
@@ -82,7 +119,14 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
-    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    /// Every message's reactions; while `reactable`, the user may react, take a reaction back
+    /// and remove others'.
+    let shownReactions = OSAllocatedUnfairLock<[Reaction]>(initialState: [])
+    let reactable = OSAllocatedUnfairLock(initialState: false)
+
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] {
+        shownReactions.withLock { $0 }
+    }
     override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
@@ -321,9 +365,14 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     let answerable = OSAllocatedUnfairLock(initialState: false)
 
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
-        testMessageActions(
+        var actions = testMessageActions(
             createThread: canStartThread(channelId: channelId, messageId: messageId),
             reply: answerable.withLock { $0 })
+        let reacts = reactable.withLock { $0 }
+        actions.react = reacts
+        actions.toggleReaction = reacts
+        actions.removeReactions = reacts
+        return actions
     }
 
     /// Set: a thread can be started from every message.

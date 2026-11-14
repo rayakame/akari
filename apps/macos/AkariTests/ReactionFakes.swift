@@ -41,6 +41,12 @@ nonisolated final class ReactionsAccount: Account, @unchecked Sendable {
     /// Who reacted, by the emoji's name.
     let people: [String: [User]]
     let removed = OSAllocatedUnfairLock<[UserId]>(initialState: [])
+    /// Each page asked for, by the user it was asked after.
+    let asked = OSAllocatedUnfairLock<[UserId?]>(initialState: [])
+    /// Set: no page comes.
+    let fails = OSAllocatedUnfairLock(initialState: false)
+    /// Set: Discord says there is more after every page, as with more people than it sent.
+    let more = OSAllocatedUnfairLock(initialState: false)
 
     init(_ reactions: [Reaction], people: [String: [User]], moderates: Bool = false) {
         reactionsStore = ReactionsStore(reactions, moderates: moderates)
@@ -61,10 +67,14 @@ nonisolated final class ReactionsAccount: Account, @unchecked Sendable {
         channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, kind: ReactionKind,
         after: UserId?, limit: UInt8
     ) async throws -> ReactorsPage {
+        asked.withLock { $0.append(after) }
+        if fails.withLock({ $0 }) {
+            throw RequestError.Network(kind: .other)
+        }
         let all = kind == .normal ? people[emoji.name ?? ""] ?? [] : []
         let rest = after.map { after in all.filter { $0.id > after } } ?? all
         let page = Array(rest.prefix(Int(limit)))
-        return ReactorsPage(users: page, hasMore: page.count == Int(limit))
+        return ReactorsPage(users: page, hasMore: page.count == Int(limit) || more.withLock { $0 })
     }
 
     override func removeReaction(

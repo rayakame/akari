@@ -1,6 +1,10 @@
 import AkariKit
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var refusalSound: @MainActor () -> Void = { NSSound.beep() }
+}
+
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
     var warning: AppModel.Warning?
@@ -10,6 +14,7 @@ struct SessionView<MessageArea: View>: View {
     @State var hover = ThreadsHover()
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
+    @Environment(\.refusalSound) private var refusalSound
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,7 +116,7 @@ struct SessionView<MessageArea: View>: View {
             Text(question.message)
         }
         // Akari's stand-in for the official client's shake when Discord refuses a reaction.
-        .onChange(of: session.refusedReactions) { NSSound.beep() }
+        .onChange(of: session.refusedReactions) { refusalSound() }
     }
 
     private var threadMenu: ThreadMenu? {

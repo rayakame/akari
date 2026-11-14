@@ -87,6 +87,91 @@ struct ReactionListTests {
         #expect(cell.bounds.height - top == 3)
     }
 
+    // Discord's accessories are 4 apart: under attachments, embeds and the line for what Akari
+    // can't show, as under stickers.
+    @Test(arguments: ["attachment", "embed", "extras"])
+    func underTheOtherAccessoriesTheReactionsStandTwoLower(_ accessory: String) throws {
+        let shown = switch accessory {
+        case "attachment": row(2, by: ray, at: list.noon + 10, content: "second", attachments: ["a.zip"])
+        case "embed": row(2, by: ray, at: list.noon + 10, content: "second", embeds: [embed()])
+        default: row(2, by: ray, at: list.noon + 10, content: "second", componentsV2: true)
+        }
+        list.show([row(1, by: ray, at: list.noon, content: "first"), shown])
+        let plain = rowHeight(2)
+
+        list.show([row(1, by: ray, at: list.noon, content: "first"), shown.reacting(reactions(pill("👍")))])
+
+        #expect(rowHeight(2) == plain + 37)
+        let cell = try cell(2)
+        let first = try pills(2).pills[0]
+        let frame = cell.convert(first.bounds, from: first)
+        let top = cell.isFlipped ? frame.maxY : cell.bounds.height - frame.minY
+        #expect(cell.bounds.height - top == 3)
+    }
+
+    // A thread started from a message that has reactions: its box comes under them.
+    @Test
+    func theThreadBoxStandsUnderTheReactions() throws {
+        list.show(rows(reactions(pill("👍"))))
+        let box = ThreadBox(
+            threadId: ChannelId(rawValue: 20), name: "t1", link: "See Thread ›", bottom: .noMessages,
+            time: nil)
+        let threaded = row(
+            2, by: ray, at: list.noon + 10, content: "second", hasThread: true, threadBox: box)
+
+        list.show([
+            row(1, by: ray, at: list.noon, content: "first"),
+            threaded.reacting(reactions(pill("👍"))),
+            row(3, by: ray, at: list.noon + 20, content: "third"),
+        ])
+
+        let cell = try cell(2)
+        let pills = try pills(2)
+        let boxView = try #require(ThreadBoxViewTests.boxView(in: cell))
+        let reacted = cell.convert(pills.bounds, from: pills)
+        let started = cell.convert(boxView.bounds, from: boxView)
+        #expect(cell.isFlipped ? reacted.maxY <= started.minY : reacted.minY >= started.maxY)
+        #expect(abs(cell.fittingSize.height - rowHeight(2)) < 0.5)
+    }
+
+    @Test
+    func pillsTakeTheListsImagesAndItsSayOnAnimation() throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        var state = MessageTableState(rows: rows(reactions(customPill(7))), reachedOldest: true)
+        state.images = ImageCacheRef(cache, placeholders: nil)
+        list.controller.show(state)
+        list.window.layoutIfNeeded()
+        let cell = try cell(2)
+        #expect(try pills(2).pills.map { $0.images === cache } == [true])
+
+        state.rows = rows(reactions(customPill(7), customPill(8)))
+        list.controller.show(state)
+        #expect(try pills(2).pills.map { $0.images === cache } == [true, true])
+
+        let later = ImageCache(source: FakeImageSource.stalling())
+        cell.images = later
+        #expect(try pills(2).pills.map { $0.images === later } == [true, true])
+        cell.animatesEmoji = true
+        #expect(try pills(2).pills.map(\.animates) == [true, true])
+    }
+
+    @Test
+    func aRowOfReactionsMadeLaterTakesTheCellsImagesAndSay() throws {
+        list.show(rows(nil))
+        let cell = try cell(2)
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        cell.images = cache
+        cell.animatesEmoji = true
+
+        cell.showReactions(reactions(customPill(7)))
+        cell.layoutSubtreeIfNeeded()
+
+        let row = try #require(cell.reactions)
+        #expect(row.images === cache)
+        #expect(row.animatesEmoji)
+        #expect(row.pills.map { $0.images === cache && $0.animates } == [true])
+    }
+
     @Test
     func aMessageWithoutReactionsHasNoRow() throws {
         list.show(rows(nil))
@@ -369,14 +454,123 @@ struct ReactionListTests {
 
     @Test
     func aCountRollsOnlyInTheKeyWindowWithMotion() throws {
-        list.show(rows(reactions(pill("👍", 2))))
-        let thumbs = try pills(2).pills[0]
+        list.controller.reducesMotion = { false }
+        list.show(rows(reactions(pill("👍", 2), pill("🎉", 1), pill("👀", 1))))
+        let row = try pills(2)
         #expect(!list.window.isKeyWindow)
+        list.show(rows(reactions(pill("👍", 3), pill("🎉", 1), pill("👀", 1))))
+        #expect(row.pills[0].countText == "3")
+        #expect(!row.pills[0].isRolling, "not in a window that isn't key")
 
-        list.show(rows(reactions(pill("👍", 3))))
+        let key = list.keyWindow()
+        defer { key.orderOut(nil) }
+        list.controller.reducesMotion = { true }
+        list.show(rows(reactions(pill("👍", 3), pill("🎉", 2), pill("👀", 1))))
+        #expect(row.pills[1].countText == "2")
+        #expect(!row.pills[1].isRolling, "not with motion reduced")
 
-        #expect(thumbs.countText == "3")
-        #expect(thumbs.countLayer.animation(forKey: ReactionPillButton.rollKey) == nil)
+        list.controller.reducesMotion = { false }
+        list.show(rows(reactions(pill("👍", 3), pill("🎉", 2), pill("👀", 2))))
+        #expect(row.pills[2].isRolling)
+    }
+
+    @Test
+    func aSystemLinesCountRollsAsAMessagesDoes() throws {
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+        list.controller.reducesMotion = { false }
+        list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
+        let key = list.keyWindow()
+        defer { key.orderOut(nil) }
+        let wave = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions?.pills.first)
+
+        list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 5)))])
+
+        #expect(wave.countText == "5")
+        #expect(wave.isRolling)
+    }
+
+    // MARK: The row as it is now
+
+    @Test
+    func theTooltipAndTheAddMenuAfterAChangeInPlaceGoWithTheRowAsItIsNow() throws {
+        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        list.show(rows(reactions(pill("👍", 2))))
+        let changed = reactions(pill("👍", 3, mine: true))
+        list.show(rows(changed))
+        let row = try pills(2)
+        var menus: [NSMenu] = []
+        list.controller.popUp = { menu, _, _ in menus.append(menu) }
+
+        _ = row.tooltip(try #require(row.pills[0].pill))
+        #expect(list.actions.handed["tooltip"]?.reactions == changed)
+        row.add.performClick(nil)
+        #expect(list.actions.handed["quick"]?.reactions == changed)
+        try #require(menus.first).performActionForItem(at: 0)
+        #expect(list.actions.handed["react"]?.reactions == changed)
+    }
+
+    @Test
+    func aSystemLinesTooltipAfterAChangeInPlaceGoesWithTheLineAsItIsNow() throws {
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+        list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
+        let changed = reactions(pill("👋", 5, mine: true))
+        list.show([row(1, by: ray, at: list.noon), join.reacting(changed)])
+        let shown = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions)
+
+        _ = shown.tooltip(try #require(shown.pills.first?.pill))
+
+        #expect(list.actions.handed["tooltip"]?.reactions == changed)
+    }
+
+    @Test
+    func aSystemLinesAddButtonReactsFromTheInlineButton() throws {
+        list.actions.quick[5] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+        list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
+        let shown = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions)
+        var menus: [NSMenu] = []
+        list.controller.popUp = { menu, _, _ in menus.append(menu) }
+        list.actions.calls = []
+
+        shown.add.performClick(nil)
+        try #require(menus.first).performActionForItem(at: 0)
+
+        #expect(list.actions.calls == ["react 💯 on 5 from inlineButton"])
+    }
+
+    @Test
+    func aSystemLinesNamesReachItsPills() throws {
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+        list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
+        let wave = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions?.pills.first)
+        #expect(wave.toolTip == "👋 reacted by 4 people")
+        list.actions.names["👋"] = "👋 reacted by Ann, Bo, Cy, and 1 other"
+
+        list.controller.reactionNamesArrived(for: MessageId(rawValue: 5))
+
+        #expect(wave.toolTip == "👋 reacted by Ann, Bo, Cy, and 1 other")
+    }
+
+    // The add menu stands 4 under its button, and its row stays lit while it is open.
+    @Test
+    func theAddMenuOpensUnderItsButtonWithItsRowLit() throws {
+        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        list.show(rows(reactions(pill("👍"))))
+        try list.hover(1)
+        let add = try pills(2).add
+        var opened: [(point: NSPoint, view: NSView, lit: [UInt64])] = []
+        list.controller.popUp = { [list] menu, point, view in
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+            opened.append((point, view, list.hovered))
+            NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        }
+
+        add.performClick(nil)
+
+        let menu = try #require(opened.first)
+        #expect(menu.view === add)
+        #expect(menu.point == NSPoint(x: 0, y: add.isFlipped ? add.bounds.maxY + 4 : -4))
+        #expect(menu.lit == [2])
     }
 
     // MARK: System lines
@@ -405,6 +599,77 @@ struct ReactionListTests {
         list.show([row(1, by: ray, at: list.noon), join])
         #expect(rowHeight(5) == plain)
         #expect(cell.reactions?.isHidden == true)
+    }
+
+    @Test
+    func aSystemLinesPillsWrapAtItsTextsColumn() throws {
+        let many = (0..<10).map { pill(String(UnicodeScalar(UInt8(65 + $0))), 2) }
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+            .reacting(ReactionRow(pills: many, adds: true, toggles: true))
+        list.show([row(1, by: ray, at: list.noon), join])
+
+        let cell = try #require(try list.cell(of: 5) as? NoticeCell)
+        let shown = try #require(cell.reactions)
+        shown.layoutSubtreeIfNeeded()
+
+        #expect(Set(shown.pills.map(\.frame.minY)).count == 2, "two lines")
+        #expect(abs(cell.fittingSize.height - rowHeight(5)) < 0.5)
+    }
+
+    @Test
+    func aSystemLineTakesTheListsImagesAndSayAndLetsItsPillsGo() throws {
+        let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
+        list.show([row(1, by: ray, at: list.noon), join])
+        let cell = try #require(try list.cell(of: 5) as? NoticeCell)
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        cell.images = cache
+        cell.animatesEmoji = true
+
+        cell.showReactions(reactions(customPill(7)))
+        let shown = try #require(cell.reactions)
+        #expect(shown.images === cache && shown.animatesEmoji)
+        let later = ImageCache(source: FakeImageSource.stalling())
+        cell.images = later
+        cell.animatesEmoji = false
+        #expect(shown.pills.map { $0.images === later && !$0.animates } == [true])
+
+        cell.showReactions(nil)
+        #expect(shown.isHidden)
+        #expect(shown.pills.isEmpty)
+    }
+
+    // A "started a thread" line: the text, its reactions, then the thread's box.
+    @Test
+    func aSystemLinesThreadBoxStandsUnderItsReactions() throws {
+        let box = ThreadBox(
+            threadId: ChannelId(rawValue: 20), name: "t1", link: "See Thread ›", bottom: .noMessages,
+            time: nil)
+        let started = row(
+            5, by: author(4, "Kim"), at: list.noon + 700, kind: .threadCreated, content: "t1",
+            reference: MessageReference(
+                messageId: nil, channelId: ChannelId(rawValue: 20), guildId: GuildId(rawValue: 1)),
+            threadBox: box)
+        list.show([row(1, by: ray, at: list.noon), started])
+        let plain = rowHeight(5)
+        list.show([row(1, by: ray, at: list.noon), started.reacting(reactions(pill("👋", 4)))])
+
+        let cell = try #require(try list.cell(of: 5) as? NoticeCell)
+        let shown = try #require(cell.reactions)
+        let boxView = try #require(ThreadBoxViewTests.boxView(in: cell))
+        let reacted = cell.convert(shown.bounds, from: shown)
+        let under = cell.convert(boxView.bounds, from: boxView)
+        #expect(cell.isFlipped ? reacted.maxY <= under.minY : reacted.minY >= under.maxY)
+        #expect(abs(cell.fittingSize.height - rowHeight(5)) < 0.5)
+
+        list.show([row(1, by: ray, at: list.noon), started])
+        cell.layoutSubtreeIfNeeded()
+        #expect(rowHeight(5) == plain)
+        #expect(abs(cell.fittingSize.height - plain) < 0.5, "the box right under the line again")
+
+        cell.configure(
+            started.message, notice: try #require(started.noticeParts), time: "", fullDate: "")
+        cell.layoutSubtreeIfNeeded()
+        #expect(cell.fittingSize.height < plain - 30, "a hidden box takes no room")
     }
 
     @Test
@@ -456,10 +721,86 @@ struct ReactionBarTests {
     }
 
     @Test
+    func voiceOverReachesTheQuickReactionsBeforeTheButtons() throws {
+        show()
+        try list.hover(2)
+
+        let children = list.bar.accessibilityChildren()?.compactMap { $0 as? NSView } ?? []
+
+        #expect(children.count == 5)
+        #expect(children.prefix(3).elementsEqual(list.bar.quickButtons as [NSView], by: ===))
+    }
+
+    // The emoji at 20 in the middle of the button's 28.
+    @Test
+    func aQuickReactionsEmojiStandsInTheMiddleOfItsButton() throws {
+        show()
+        try list.hover(2)
+        let button = list.bar.quickButtons[0]
+        button.layoutSubtreeIfNeeded()
+
+        let glyph = try #require(button.subviews.first { $0 is EmojiGlyphView })
+
+        #expect(glyph.frame == NSRect(x: 4, y: 4, width: 20, height: 20))
+    }
+
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theQuickReactionUnderThePointerIsFilledAndTheLineIsSubtle(_ name: NSAppearance.Name) throws {
+        list.window.appearance = NSAppearance(named: name)
+        show()
+        try list.hover(2)
+        let button = list.bar.quickButtons[0]
+        #expect(button.layer?.backgroundColor == nil)
+
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: button))
+
+        var fill = CGColor.clear
+        var line = CGColor.clear
+        NSAppearance(named: name)?.performAsCurrentDrawingAppearance {
+            fill = NSColor(hex: "#97979f", alpha: 0.12).cgColor
+            line = NSColor(hex: "#97979f", alpha: name == .darkAqua ? 31 / 255 : 71 / 255).cgColor
+        }
+        #expect(HoverBarTests.parts(button.layer?.backgroundColor) == HoverBarTests.parts(fill))
+        #expect(HoverBarTests.parts(list.bar.separator.layer?.backgroundColor) == HoverBarTests.parts(line))
+    }
+
+    // The list scrolls under a still pointer and the bar goes to another row with the same
+    // quick reactions: only one the pointer is over is lit.
+    @Test
+    func aScrollLightsOnlyTheQuickReactionUnderThePointer() throws {
+        let list = BarList(height: 300)
+        let rows = list.many(40)
+        for row in rows {
+            list.actions.quick[row.id.rawValue] = quick
+        }
+        list.show(rows)
+        try list.hover(39)
+        let first = list.bar.quickButtons[0]
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: first))
+        #expect(first.isHovered)
+        var away = 0
+
+        for _ in 1...12 {
+            list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY - 17))
+            list.controller.scrollView.reflectScrolledClipView(list.clip)
+            list.controller.pointerMoved()
+
+            let point = list.table.convert(try #require(list.pointer.location), from: nil)
+            let under = list.bar.quickButtons.filter { list.table.convert($0.bounds, from: $0).contains(point) }
+            #expect(list.bar.quickButtons.filter(\.isHovered) == under)
+            away += under.isEmpty ? 1 : 0
+        }
+
+        #expect(away > 0, "the bar lay away from the pointer")
+    }
+
+    @Test
     func aRowWithoutQuickReactionsHasNoLine() throws {
         show()
+        try list.hover(2)
         try list.hover(1)
 
+        #expect(!list.bar.subviews.contains { $0 is QuickReactionButton }, "the last row's went")
         #expect(list.bar.quickButtons.isEmpty)
         #expect(list.bar.separator.isHidden)
         #expect(abs(list.bar.frame.width - (2 * 28 + 6)) < 0.01)
@@ -577,6 +918,7 @@ struct ReactionBarTests {
         let add = try #require(items.first { $0.title == "Add Reaction" }?.submenu)
         #expect(add.items.map(\.title) == ["💯", "😆", "💖"])
         #expect(add.items.map(\.state) == [.off, .on, .off])
+        #expect(add.items[1].accessibilityLabel() == "Click to remove 😆")
         let remove = try #require(items.first { $0.title == "Remove Reactions" }?.submenu)
         #expect(remove.items.map(\.title) == ["👍  2", "🎉  12"])
         #expect(items.first { $0.title == "View Reactions" }?.submenu == nil)
@@ -584,6 +926,27 @@ struct ReactionBarTests {
         add.performActionForItem(at: 1)
         remove.performActionForItem(at: 0)
         #expect(ran == ["react 😆", "remove 👍"])
+    }
+
+    // The menu's items were made with the row of the moment the cell was made.
+    @Test
+    func theMenusReactionsAfterAChangeInPlaceGoWithTheRowAsItIsNow() throws {
+        show()
+        list.actions.removable[2] = [pill("👍", 2)]
+        list.controller.actions = ReactionMenuActions(list.actions, groups: groups())
+        let changed = reactions(pill("👍", 3, mine: true))
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second").reacting(changed),
+        ])
+        let cell = try #require(try list.cell(of: 2) as? MessageCell)
+
+        let items = cell.menuItems()
+        try #require(items.first { $0.title == "Add Reaction" }?.submenu).performActionForItem(at: 0)
+        try #require(items.first { $0.title == "Remove Reactions" }?.submenu).performActionForItem(at: 0)
+
+        #expect(list.actions.handed["react"]?.reactions == changed)
+        #expect(list.actions.handed["remove"]?.reactions == changed)
     }
 
     @Test
@@ -652,4 +1015,22 @@ final class ReactionMenuActions: MessageListActions {
     func jump(to message: MessageId) {}
     func openGuild(_ id: GuildId) {}
     func openLink(_ url: URL, masked: Bool) {}
+}
+
+extension BarList {
+    // The list moved into a window that says it is key, as the user's is.
+    func keyWindow() -> NSWindow {
+        let key = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 400)),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false))
+        key.contentView = controller.scrollView
+        key.orderFront(nil)
+        key.layoutIfNeeded()
+        return key
+    }
+}
+
+extension ReactionPillButton {
+    var isRolling: Bool { countLayer.animation(forKey: Self.rollKey) != nil }
 }

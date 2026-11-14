@@ -45,6 +45,9 @@ nonisolated struct ForumFakes {
     var firstTitle: String?
     var canPost = true
     var requiresTag = false
+    /// Every first message's reactions, and whether the user may react and take one back.
+    var reactions: [Reaction] = []
+    var reacts = false
     private(set) var account: ForumAccount?
 
     @MainActor
@@ -97,6 +100,15 @@ nonisolated final class ForumAccount: Account, @unchecked Sendable {
     override func requestPostPreviews(forumId: ChannelId, postIds: [ChannelId]) {
         previewRequests.withLock { $0.append(postIds) }
     }
+
+    /// The reactions asked for, as "👍 on 41 from forumToolbar".
+    let reacted = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+    override func react(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionEmoji, location: ReactionLocation
+    ) async throws {
+        reacted.withLock { $0.append("\(emoji.name ?? "") on \(messageId.rawValue) from \(location)") }
+    }
     override func viewChannel(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
 
@@ -148,7 +160,7 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
     }
 
     override func displaySettings() -> DisplaySettings { displayDefaults() }
-    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { fakes.reactions }
     override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
     override func connection() -> ConnectionState { .online }
@@ -168,7 +180,10 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
         ThreadCreation(public: false, private: false)
     }
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
-        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+        var actions = testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+        actions.react = fakes.reacts
+        actions.toggleReaction = fakes.reacts
+        return actions
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }

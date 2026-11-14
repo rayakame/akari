@@ -11,20 +11,21 @@ struct ReactionPostBarTests {
 
     func bar(
         _ pills: [ReactionPill] = [], offer: ReactionEmoji? = nil, reacts: Bool = true,
-        toggles: Bool = true
+        toggles: Bool = true, post: UInt64 = 1
     ) -> PostBar {
         PostBar(
-            post: MessageId(rawValue: 1), following: false, canFollow: true, invites: false,
+            post: MessageId(rawValue: post), following: false, canFollow: true, invites: false,
             reactions: pills, defaultReaction: offer, reacts: reacts, toggles: toggles)
     }
 
-    func show(_ bar: PostBar) throws -> PostBarCell {
+    func show(_ bar: PostBar, images: ImageCache? = nil) throws -> PostBarCell {
         var state = MessageTableState(rows: [
             row(1, by: author(2, "Ray"), at: list.noon, content: "the post"),
             row(2, by: author(3), at: list.noon + 600, content: "an answer"),
         ])
         state.reachedOldest = true
         state.postBar = bar
+        state.images = ImageCacheRef(images, placeholders: nil)
         list.controller.show(state)
         list.window.layoutIfNeeded()
         let index = try #require(list.controller.timeline.items.firstIndex { $0.id == .postBar })
@@ -161,5 +162,54 @@ struct ReactionPostBarTests {
         list.actions.names["👍"] = "👍 reacted by Ann and Bo"
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 1))
         #expect(thumbs.toolTip == "👍 reacted by Ann and Bo")
+    }
+
+    @Test
+    func theSamePostsCountRollsAndAnotherPostsReactionsComeWithout() throws {
+        list.controller.reducesMotion = { false }
+        let cell = try show(bar([pill("👍", 2)]))
+        let key = list.keyWindow()
+        defer { key.orderOut(nil) }
+        let thumbs = cell.reactions.pills[0]
+
+        _ = try show(bar([pill("👍", 3)]))
+        #expect(thumbs.isRolling)
+
+        thumbs.countLayer.removeAllAnimations()
+        let other = try show(bar([pill("👍", 7)], post: 9))
+        #expect(other.reactions.pills.map(\.countText) == ["7"])
+        #expect(!other.reactions.pills[0].isRolling)
+    }
+
+    @Test
+    func reactToPostIsReadAsItsWordsAndTheSymbolAloneAsAddReaction() throws {
+        let cell = try show(bar())
+        #expect(cell.react.accessibilityLabel() == "React to Post")
+
+        let reacted = try show(bar([pill("👍", 2)]))
+        #expect(reacted.react.accessibilityLabel() == "Add Reaction")
+        #expect(reacted.react.frame.width == PostBarButton.height)
+    }
+
+    @Test
+    func theQuickReactionsOpenUnderTheBarsButton() throws {
+        list.actions.quick[1] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        let cell = try show(bar([pill("👍", 2)]))
+        var views: [NSView] = []
+        list.controller.popUp = { _, _, view in views.append(view) }
+
+        cell.react.performClick(nil)
+
+        #expect(views.count == 1)
+        #expect(views.first === cell.react)
+    }
+
+    @Test
+    func theBarsPillsTakeTheListsImages() throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+
+        let cell = try show(bar([customPill(7)]), images: cache)
+
+        #expect(cell.reactions.pills.map { $0.images === cache } == [true])
     }
 }
