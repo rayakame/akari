@@ -172,6 +172,48 @@ async fn reacting_and_taking_it_back_cross_with_their_event() {
 }
 
 #[tokio::test]
+async fn every_place_crosses_to_the_wire_as_itself() {
+    let reacting = reacting().await;
+    reacting.answer(ResponseTemplate::new(204)).await;
+    let places = [
+        (ReactionLocation::Message, "Message"),
+        (ReactionLocation::InlineButton, "Message%20Inline%20Button"),
+        (ReactionLocation::HoverBar, "Message%20Hover%20Bar"),
+        (ReactionLocation::ContextMenu, "Message%20Context%20Menu"),
+        (ReactionLocation::Picker, "Message%20Reaction%20Picker"),
+        (ReactionLocation::ForumToolbar, "Forum%20Toolbar"),
+    ];
+
+    for (index, (location, _)) in places.iter().enumerate() {
+        let id = EmojiId::new(index as u64 + 1);
+        let emoji = ReactionEmoji {
+            id: Some(id),
+            name: Some(format!("e{index}")),
+            animated: false,
+            key: None,
+        };
+        reacting
+            .account
+            .react(GENERAL, MESSAGE, emoji, *location)
+            .await
+            .unwrap();
+    }
+
+    let expected: Vec<String> = places
+        .iter()
+        .enumerate()
+        .map(|(index, (_, query))| {
+            format!(
+                "PUT {BASE}/e{index}:{}/@me?location={query}&type=0",
+                index + 1
+            )
+        })
+        .collect();
+    assert_eq!(reacting.lines().await, expected);
+    reacting.account.close();
+}
+
+#[tokio::test]
 async fn a_refused_reaction_crosses_as_its_own_error() {
     let cases = [
         (refusal(403, 30010), ReactionError::TooMany),
