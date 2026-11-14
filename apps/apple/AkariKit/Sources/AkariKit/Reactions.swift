@@ -125,6 +125,8 @@ public struct QuickReaction: Equatable, Sendable, Identifiable {
 public enum ReactionWords {
     public static let add = "Add Reaction"
     public static let reactToPost = "React to Post"
+    /// Add Reaction's submenu's last item: the emoji picker.
+    public static let viewMore = "View More"
     public static let window = "Reactions"
     public static let remove = "Remove Reaction"
     public static let tooManyTitle = "We appreciate the enthusiasm, but..."
