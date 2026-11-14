@@ -90,13 +90,18 @@ public final class MessageListModel {
         public let reply: ReplyLine?
         /// A failed reply that Discord refused because the message it answers was deleted.
         public let replyRefused: Bool
+        /// The reactions under `shown`; `nil` without any, while the setting hides them, and on
+        /// a forum post's first message, whose reactions are in the post's bar.
+        public let reactions: ReactionRow?
 
         public init(
             id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
             noticeContext: Message.NoticeContext = .init(), authorName: String? = nil,
-            threadBox: ThreadBox? = nil, reply: ReplyLine? = nil, replyRefused: Bool = false
+            threadBox: ThreadBox? = nil, reply: ReplyLine? = nil, replyRefused: Bool = false,
+            reactions: ReactionRow? = nil
         ) {
             self.replyRefused = replyRefused
+            self.reactions = reactions
             self.id = id
             self.message = message
             self.starter = starter
@@ -135,6 +140,14 @@ public final class MessageListModel {
         /// A system message Discord shows no line for; the timeline leaves it out.
         public var isHidden: Bool {
             noticeParts?.isEmpty == true
+        }
+
+        /// The row with other reactions and nothing else changed.
+        public func reacting(_ reactions: ReactionRow?) -> Row {
+            Row(
+                id: id, message: message, starter: starter, threadLinked: threadLinked,
+                noticeContext: noticeContext, authorName: authorName, threadBox: threadBox,
+                reply: reply, replyRefused: replyRefused, reactions: reactions)
         }
     }
 
@@ -187,6 +200,8 @@ public final class MessageListModel {
     public private(set) var failedLoads: [Load: RequestError] = [:]
     /// The channel's composer; created with the model.
     public let composer: ComposerModel
+    /// What a click on a reaction does, and the names in a pill's tooltip.
+    public let reactions: ReactionsModel
     /// The message the pending reply answers: its row is tinted meanwhile.
     public var replyingTo: MessageId? { composer.reply?.messageId }
     /// The last finished load; changes with the rows it brought.
@@ -314,6 +329,7 @@ public final class MessageListModel {
         ownerId = channel?.thread?.ownerId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
+        reactions = ReactionsModel(store: store, account: account)
         readStoredPosition()
         readOwner()
         readHiddenDownloads()
@@ -706,6 +722,7 @@ public final class MessageListModel {
         }
         let updated = (batch.updatedMessages[channelId] ?? []).union(repliers(to: batch))
         let hadRows = hasMessages
+        reactions.apply(batch)
         // How attachments show and what covers them come with the records; a new session
         // brings new settings and conversations.
         let everyRow = batch.everythingChanged || namesChanged(batch) || batch.displaySettingsChanged
@@ -715,6 +732,9 @@ public final class MessageListModel {
             reread(Set(rows.map(\.message.id)))
         } else if !updated.isEmpty {
             reread(updated)
+        }
+        if !everyRow, !batch.reactionsChanged.isEmpty {
+            rereadReactions(batch.reactionsChanged.values.reduce(into: Set()) { $0.formUnion($1) })
         }
         // The cache's copy comes stale, before the page that refreshes it.
         if !hadRows, hasMessages, isStale, openedFrom == .network, lastLoad == nil {
@@ -754,14 +774,24 @@ public final class MessageListModel {
         else {
             return
         }
+        let forum = post.parentId.flatMap { store.channel(id: $0) }
+        let first = MessageId(rawValue: channelId.rawValue)
+        let loaded = rows.contains { $0.id == first }
+        let allowed =
+            loaded && reactions.shows
+            ? store.messageActions(channelId: channelId, messageId: first) : nil
         let bar = PostBar(
-            post: MessageId(rawValue: channelId.rawValue), following: info.joined,
+            post: first, following: info.joined,
             canFollow: !info.archived,
-            invites: composer.canSend == true && !composer.locked && info.ownerId != userId)
+            invites: composer.canSend == true && !composer.locked && info.ownerId != userId,
+            reactions: allowed == nil
+                ? [] : ReactionPill.merged(store.reactions(channelId: channelId, messageId: first)),
+            defaultReaction: allowed?.react == true
+                ? forum?.forum?.defaultReaction.map(ReactionEmoji.init) : nil,
+            reacts: allowed?.react ?? false, toggles: allowed?.toggleReaction ?? false)
         if bar != postBar {
             postBar = bar
         }
-        let forum = post.parentId.flatMap { store.channel(id: $0) }
         let moderates =
             forum.flatMap { store.permissions(channelId: $0.id) }?.contains(.manageThreads) == true
         let available = forum?.forum?.tags ?? []
@@ -921,8 +951,9 @@ public final class MessageListModel {
         var held = Dictionary(rows.map { ($0.message.id, $0) }) { first, _ in first }
         let unread = ids.filter { held[$0] == nil || changed.contains($0) }
         if !unread.isEmpty {
+            let reacted = reactionRows(of: unread)
             for message in store.messages(channelId: channelId, ids: unread) {
-                held[message.id] = row(message.id, message)
+                held[message.id] = row(message.id, message, reactions: reacted[message.id])
             }
         }
         let shown = Set(ids)
@@ -1026,13 +1057,60 @@ public final class MessageListModel {
         let fresh = Dictionary(
             store.messages(channelId: channelId, ids: ids).map { ($0.id, $0) }
         ) { first, _ in first }
+        let reacted = reactionRows(of: ids)
         rows = rows.map { row in
-            fresh[row.message.id].map { self.row(row.id, $0) } ?? row
+            fresh[row.message.id].map {
+                self.row(row.id, $0, reactions: reacted[row.message.id])
+            } ?? row
         }
         nameOwner()
     }
 
-    private func row(_ id: MessageId, _ message: Message) -> Row {
+    // The reactions of the messages among `ids` that show some; asked with the rows' own IDs,
+    // a starter row answers for the message it shows.
+    private func reactionRows(of ids: [MessageId]) -> [MessageId: ReactionRow] {
+        guard reactions.shows else {
+            return [:]
+        }
+        var found: [MessageId: ReactionRow] = [:]
+        for entry in store.messageReactions(channelId: channelId, messageIds: ids)
+        where !isPostStart(entry.messageId) {
+            found[entry.messageId] = reactions.row(
+                channelId: channelId, messageId: entry.messageId, reactions: entry.reactions)
+        }
+        return found
+    }
+
+    // A forum post's first message has its post's ID; its reactions are the post bar's.
+    private func isPostStart(_ message: MessageId) -> Bool {
+        place == .forumPost && message.rawValue == channelId.rawValue
+    }
+
+    // A reaction changed and nothing else: the rows keep everything but their pills. An event
+    // names the message a row shows, which a starter row holds under its own ID.
+    private func rereadReactions(_ changed: Set<MessageId>) {
+        let ids = rows.filter { changed.contains($0.message.id) || changed.contains($0.shown.id) }
+            .map(\.message.id)
+        guard !ids.isEmpty else {
+            return
+        }
+        let reacted = reactionRows(of: ids)
+        let touched = Set(ids)
+        var next = rows
+        var differs = false
+        for index in next.indices where touched.contains(next[index].message.id) {
+            let now = reacted[next[index].message.id]
+            if next[index].reactions != now {
+                next[index] = next[index].reacting(now)
+                differs = true
+            }
+        }
+        if differs {
+            rows = next
+        }
+    }
+
+    private func row(_ id: MessageId, _ message: Message, reactions: ReactionRow?) -> Row {
         let thread = message.kind == .threadCreated ? message.reference?.channelId : nil
         let starter = starter(of: message)
         // A loaded starter draws the original, which is worded for its own kind.
@@ -1046,14 +1124,15 @@ public final class MessageListModel {
             authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author),
             threadBox: ThreadBox.of(message, in: store, name: name(of:)),
             reply: ReplyLine.of(shown, in: store),
-            replyRefused: composer.replyWasRefused(message.id))
+            replyRefused: composer.replyWasRefused(message.id), reactions: reactions)
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
         Row(
             id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
             noticeContext: held.noticeContext, authorName: held.authorName,
-            threadBox: held.threadBox, reply: held.reply, replyRefused: held.replyRefused)
+            threadBox: held.threadBox, reply: held.reply, replyRefused: held.replyRefused,
+            reactions: held.reactions)
     }
 
     // One rule for headers and system lines; server nicknames come with the member milestone.

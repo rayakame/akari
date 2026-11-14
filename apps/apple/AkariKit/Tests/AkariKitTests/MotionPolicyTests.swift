@@ -7,7 +7,7 @@ import Testing
 struct MotionPolicyTests {
     let defaults = DisplaySettings(
         renderSpoilers: .onClick, viewImageDescriptions: false, inlineAttachmentMedia: true,
-        inlineEmbedMedia: true, gifAutoPlay: true, renderEmbeds: true, animateEmoji: true,
+        inlineEmbedMedia: true, gifAutoPlay: true, renderEmbeds: true, renderReactions: true, animateEmoji: true,
         animateStickers: .always, explicitContentFilter: .nonFriends,
         explicitContent: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),
         gore: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),

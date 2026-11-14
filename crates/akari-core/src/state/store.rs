@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{
     Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State, Unread,
-    UnreadNeeds,
+    UnreadNeeds, Wanted,
 };
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
@@ -15,7 +15,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
-use super::reactions::Reaction;
+use super::reactions::{Reaction, ReactionEmoji};
 use super::read_states::{Ack, ReadState};
 use super::replies::{ReplyTarget, ReplyTo};
 use super::send::Slowmode;
@@ -733,6 +733,78 @@ impl Store {
     ) -> bool {
         self.write("undo", |inner, events| {
             inner.state.undo_ack(channel, undo, after, events)
+        })
+    }
+
+    // `None` when the message's actions don't offer it.
+    pub(crate) fn want_reaction(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+        emoji: &ReactionEmoji,
+        want: bool,
+    ) -> Option<Wanted> {
+        let now = self.now_millis();
+        self.write("reaction", |inner, events| {
+            inner
+                .state
+                .want_reaction(channel, row, emoji, want, now, events)
+        })
+    }
+
+    pub(crate) fn confirm_reaction(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+    ) {
+        self.write("reaction", |inner, _| {
+            inner.state.confirm_reaction(channel, message, emoji);
+        });
+    }
+
+    pub(crate) fn settle_reaction(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        restore: Option<(bool, bool)>,
+    ) {
+        self.write("reaction", |inner, events| {
+            inner
+                .state
+                .settle_reaction(channel, message, emoji, restore, events);
+        });
+    }
+
+    // The emoji as the message the row shows has it, which knows a custom emoji's name.
+    pub(crate) fn reaction_emoji(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+        emoji: &ReactionEmoji,
+    ) -> ReactionEmoji {
+        self.reactions(channel, row)
+            .iter()
+            .find(|known| known.emoji.same(emoji))
+            .map_or(emoji, |known| &known.emoji)
+            .clone()
+    }
+
+    // The store's own record of each user it knows unchanged.
+    pub(crate) fn known_users(&self, users: Vec<crate::model::User>) -> Vec<Arc<User>> {
+        self.read(|inner| {
+            users
+                .into_iter()
+                .map(|user| {
+                    let user = User::from_wire(user);
+                    inner
+                        .state
+                        .user(user.id)
+                        .filter(|known| **known == user)
+                        .unwrap_or_else(|| Arc::new(user))
+                })
+                .collect()
         })
     }
 

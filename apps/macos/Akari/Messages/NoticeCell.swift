@@ -16,21 +16,33 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
             threadBox?.animatesEmoji = animatesEmoji
         }
     }
-    /// The list's say: the box's line plays its custom emoji.
+    /// The list's say: the box's line and the reactions play their custom emoji.
     var animatesEmoji = false {
-        didSet { threadBox?.animatesEmoji = animatesEmoji }
+        didSet {
+            threadBox?.animatesEmoji = animatesEmoji
+            reactions?.animatesEmoji = animatesEmoji
+        }
     }
-    /// Where the thread box's avatar comes from.
+    /// Where the thread box's avatar and the reactions' emoji come from.
     var images: ImageCache? {
-        didSet { threadBox?.images = images }
+        didSet {
+            threadBox?.images = images
+            reactions?.images = images
+        }
     }
+    // Built for the first line with reactions: a system line takes them like any message.
+    private(set) var reactions: ReactionRowView?
+    var onReaction: (ReactionPill) -> Void = { _ in }
+    var onAddReaction: (NSView) -> Void = { _ in }
+    var reactionTooltip: (ReactionPill) -> String? = { _ in nil }
+    var reactionsRoll: () -> Bool = { false }
+    // What stands under the text, top to bottom, and the constraints that stack it.
+    private var chain: [NSLayoutConstraint] = []
     var onLink: (URL) -> Void = { _ in }
     var onOpenThread: () -> Void = {}
     /// The message's menu, asked when it opens.
     var menuItems: () -> [NSMenuItem] = { [] }
     private var message: Message?
-    private var textBottom: NSLayoutConstraint?
-    private var textAboveBox: NSLayoutConstraint?
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -40,6 +52,8 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     private static let bottom: CGFloat = 2
     // Discord's box border sits 9.5 below a line's baseline.
     private static let boxGap: CGFloat = 3.5
+    // A line's reactions start 2 under it, as a message's under its text.
+    private static let reactionsGap: CGFloat = 2
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
     // Measures as the cell's own text view lays out; string drawing breaks the line differently.
@@ -60,11 +74,8 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
         addSubview(text)
         let textTop = text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
         self.textTop = textTop
-        let textBottom = text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom)
-        self.textBottom = textBottom
         NSLayoutConstraint.activate([
             textTop,
-            textBottom,
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
             iconWidth,
@@ -72,6 +83,21 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
             icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 36),
             icon.centerYAnchor.constraint(equalTo: text.topAnchor, constant: 11),
         ])
+        stackUnderText()
+    }
+
+    // The text, then the reactions, then the thread's box, whichever show; the last one ends
+    // the row. The old constraints go before the new ones come: both at once can't be satisfied.
+    private func stackUnderText() {
+        NSLayoutConstraint.deactivate(chain)
+        let under = ([reactions, threadBox] as [NSView?]).compactMap { $0 }.filter { !$0.isHidden }
+        var above: NSView = text
+        chain = under.map { view in
+            defer { above = view }
+            return view.topAnchor.constraint(equalTo: above.bottomAnchor)
+        }
+        chain.append(above.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom))
+        NSLayoutConstraint.activate(chain)
     }
 
     required init?(coder: NSCoder) {
@@ -81,19 +107,67 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, hasBox: Bool = false, width: CGFloat
+        followsLine: Bool = false, hasBox: Bool = false, reactions: ReactionRow? = nil,
+        width: CGFloat
     ) -> CGFloat {
         sizing.show(line(notice, time: time))
         sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
+        let pills = reactions.map {
+            ReactionRowView.height($0, width: width - leading - trailing, topInset: reactionsGap)
+        }
         return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.intrinsicContentSize.height
+            + sizing.intrinsicContentSize.height + (pills ?? 0)
             + (hasBox ? ThreadBoxView.height(topInset: boxGap) : 0) + bottom
+    }
+
+    /// The reactions under the line; `animated` for a change in place, whose counts roll.
+    func showReactions(_ row: ReactionRow?, animated: Bool = false) {
+        let was = reactions?.isHidden == false
+        if let row {
+            let view = reactionsView()
+            view.isHidden = false
+            view.configure(row, animated: animated)
+        } else {
+            reactions?.configure(nil)
+            reactions?.isHidden = true
+        }
+        if was != (row != nil) {
+            stackUnderText()
+        }
+    }
+
+    private func reactionsView() -> ReactionRowView {
+        if let reactions {
+            return reactions
+        }
+        let row = ReactionRowView()
+        row.images = images
+        row.animatesEmoji = animatesEmoji
+        row.topInset = Self.reactionsGap
+        row.onPill = { [weak self] pill in self?.onReaction(pill) }
+        row.onAdd = { [weak self] button in self?.onAddReaction(button) }
+        row.tooltip = { [weak self] pill in self?.reactionTooltip(pill) }
+        row.rolls = { [weak self] in self?.reactionsRoll() ?? false }
+        row.isHidden = true
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: text.trailingAnchor),
+        ])
+        reactions = row
+        return row
+    }
+
+    override func layout() {
+        reactions?.preferredWidth = max(0, bounds.width - Self.leading - Self.trailing)
+        super.layout()
     }
 
     func configure(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
         followsLine: Bool = false, fullDate: String, reader: UserId? = nil,
-        threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil
+        threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
+        reactions: ReactionRow? = nil
     ) {
         if let threadBox {
             boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
@@ -101,10 +175,8 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
             self.threadBox?.clear()
         }
         self.threadBox?.isHidden = threadBox == nil
-        // Off before on: both at once can't be satisfied.
-        let (off, on) = threadBox == nil ? (textAboveBox, textBottom) : (textBottom, textAboveBox)
-        off?.isActive = false
-        on?.isActive = true
+        showReactions(reactions)
+        stackUnderText()
         needsDisplay = true
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         let shown = NoticeIcon.of(message, reader: reader)
@@ -201,9 +273,7 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
         box.action = #selector(threadBoxClicked)
         addSubview(box)
         box.topInset = Self.boxGap
-        textAboveBox = box.topAnchor.constraint(equalTo: text.bottomAnchor)
         NSLayoutConstraint.activate([
-            box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
             box.leadingAnchor.constraint(equalTo: text.leadingAnchor),
             box.trailingAnchor.constraint(equalTo: text.trailingAnchor),
         ])

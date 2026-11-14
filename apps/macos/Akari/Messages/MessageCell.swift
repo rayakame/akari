@@ -35,6 +35,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             attachments?.images = newValue
             embeds?.images = newValue
             stickers?.images = newValue
+            reactions?.images = newValue
             threadBox?.images = newValue
         }
     }
@@ -50,6 +51,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             content.animatesEmoji = newValue
             replyLine.animatesEmoji = newValue
             embeds?.animatesEmoji = newValue
+            reactions?.animatesEmoji = newValue
             threadBox?.animatesEmoji = newValue
         }
     }
@@ -102,6 +104,15 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var downloads = AttachmentsView.Downloads.none
     // Built for the first message with stickers; most messages have none.
     private var stickers: StickerRow?
+    // Built for the first message with reactions.
+    private(set) var reactions: ReactionRowView?
+    /// A click on a reaction, and on the add button at the row's end.
+    var onReaction: (ReactionPill) -> Void = { _ in }
+    var onAddReaction: (NSView) -> Void = { _ in }
+    /// A pill's tooltip, asked when its row shows.
+    var reactionTooltip: (ReactionPill) -> String? = { _ in nil }
+    /// Whether a count that changed in place may roll.
+    var reactionsRoll: () -> Bool = { false }
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
@@ -187,13 +198,13 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
         media: MediaState = MediaState(), embeds: [EmbedView.Shown] = [],
         reply: (line: ReplyLine, text: NSAttributedString)? = nil, replyJumps: Bool = true,
-        replyRefused: Bool = false
+        replyRefused: Bool = false, reactions: ReactionRow? = nil
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
             followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate, hasBox: threadBox != nil, media: media, embeds: embeds,
-            hasReply: reply != nil)
+            hasReply: reply != nil, reactions: reactions)
         if let reply {
             replyLine.configure(reply.line, text: reply.text, jumps: replyJumps)
             spine.isEnabled = replyJumps && reply.line.jumps
@@ -226,7 +237,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
         followsLine: Bool, groupTime: String, shortTime: String, fullDate: String,
         hasBox: Bool = false, media: MediaState = MediaState(), embeds shown: [EmbedView.Shown] = [],
-        hasReply: Bool = false
+        hasReply: Bool = false, reactions: ReactionRow? = nil
     ) {
         if hasBox {
             boxView().isHidden = false
@@ -297,6 +308,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             row.isHidden = false
             row.configure(message.stickers)
         }
+        showReactions(reactions)
         let isFailed = message.delivery == .failed
         if isFailed && failed == nil {
             let line = FailedLine()
@@ -308,6 +320,32 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             failed = line
         }
         failed?.isHidden = !isFailed
+    }
+
+    /// The reactions under the message; `animated` for a change in place, whose counts roll.
+    /// The row's height changes with it: the list notes it.
+    func showReactions(_ row: ReactionRow?, animated: Bool = false) {
+        guard let row else {
+            if reactions?.row != nil {
+                reactions?.configure(nil)
+            }
+            reactions?.isHidden = true
+            return
+        }
+        let view = reactionsView()
+        view.isHidden = false
+        view.topInset = reactionsInset
+        if self === Self.sizing {
+            view.measure(row)
+        } else {
+            view.configure(row, animated: animated)
+        }
+    }
+
+    // Discord's accessories are 4 apart and start 2 under the text; the stack's spacing is 2.
+    private var reactionsInset: CGFloat {
+        let accessories = [attachments, embeds, extras, stickers] as [NSView?]
+        return accessories.contains { $0?.isHidden == false } ? Self.accessoryGap - Self.spacing : 0
     }
 
     /// A media item's cover with the session's reveals: a revealed spoiler shows, a sensitive
@@ -346,12 +384,12 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
         followsLine: Bool = false, hasBox: Bool = false, embeds: [EmbedView.Shown] = [],
-        hasReply: Bool = false, width: CGFloat
+        hasReply: Bool = false, reactions: ReactionRow? = nil, width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
             groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox, embeds: embeds,
-            hasReply: hasReply)
+            hasReply: hasReply, reactions: reactions)
         let textWidth = width - textLeading - textTrailing
         let shown = !message.content.isEmpty && !message.hidesContent
         let body = shown ? TextMeasurer.shared.height(body, width: textWidth) : 0
@@ -367,7 +405,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
         let shown = ([replyLine, header, content] + [attachments, embeds].compactMap { $0 } + [extras]
-            + [stickers, threadBox, failed].compactMap { $0 })
+            + [stickers, reactions, threadBox, failed].compactMap { $0 })
             .filter { !$0.isHidden }
         let stacked =
             shown.map { view in
@@ -381,6 +419,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
                             ? embeds?.height(width: textWidth) ?? 0
                         : view === extras
                             ? extrasHeight(width: textWidth)
+                        : view === reactions
+                            ? reactions?.row.map {
+                                ReactionRowView.height($0, width: textWidth, topInset: reactionsInset)
+                            } ?? 0
                             : view === threadBox
                                 ? view.intrinsicContentSize.height
                             : view === failed
@@ -480,6 +522,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     override func layout() {
         attachments?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         embeds?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
+        reactions?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         super.layout()
         placeFlash()
     }
@@ -561,12 +604,32 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)
-        let anchor: NSView = stickers ?? extras
+        let anchor: NSView = reactions ?? stickers ?? extras
         let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
         stack.insertView(box, at: after, in: .top)
         box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         threadBox = box
         return box
+    }
+
+    private func reactionsView() -> ReactionRowView {
+        if let reactions {
+            return reactions
+        }
+        let row = ReactionRowView()
+        row.images = images
+        row.animatesEmoji = content.animatesEmoji
+        row.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
+        row.onPill = { [weak self] pill in self?.onReaction(pill) }
+        row.onAdd = { [weak self] button in self?.onAddReaction(button) }
+        row.tooltip = { [weak self] pill in self?.reactionTooltip(pill) }
+        row.rolls = { [weak self] in self?.reactionsRoll() ?? false }
+        let anchor: NSView = stickers ?? extras
+        let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
+        stack.insertView(row, at: after, in: .top)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        reactions = row
+        return row
     }
 
     private func attachmentsView() -> AttachmentsView {

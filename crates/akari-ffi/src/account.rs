@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, StickerId, StickerPackId, TagId};
+use akari_core::model::{
+    ChannelId, EmojiId, GuildId, MessageId, StickerId, StickerPackId, TagId, UserId,
+};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
-use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
+use crate::errors::{CreateThreadError, GatewayError, ImageError, ReactionError, RequestError};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::{
-    EmojiSource, ForumView, LoadReport, MarkOutcome, SourceGuild, StickerDetails, StickerPack,
+    EmojiSource, ForumView, LoadReport, MarkOutcome, ReactionEmoji, ReactorsPage, SourceGuild,
+    StickerDetails, StickerPack,
 };
 use crate::runtime::run;
 use crate::store::Store;
@@ -143,6 +146,115 @@ impl Account {
         let core = self.core.clone();
         run(self.runtime, async move {
             core.mark_unread(channel_id, message_id).await
+        })
+        .await
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+
+    /// Adds the user's reaction with `emoji` (its `id`, or its `name` for a Unicode one; `key`
+    /// isn't read) to the message the row shows. The store has it at once
+    /// (`MessageReactionsChanged`); an error means it already went back. One request runs per
+    /// message and emoji: a call made meanwhile changes what is asked next and answers the call
+    /// before it without an error. Never a super reaction; nothing is asked when the reaction is
+    /// the user's already. `InvalidRequest`, before asking, where `MessageActions` says no:
+    /// `react` for an emoji the message doesn't have, `toggle_reaction` for one it has.
+    pub async fn react(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: ReactionEmoji,
+        location: ReactionLocation,
+    ) -> Result<(), ReactionError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.react(channel_id, message_id, &emoji.into(), location.into())
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Takes the user's reaction back, as `react` adds it; one that is the user's only as a
+    /// super reaction is removed as one. Needs `MessageActions.toggle_reaction`.
+    pub async fn unreact(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: ReactionEmoji,
+        location: ReactionLocation,
+    ) -> Result<(), ReactionError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.unreact(channel_id, message_id, &emoji.into(), location.into())
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Removes `user_id`'s reaction (the reactions window's ✕); the store changes when the
+    /// gateway says so. The user's own goes as `unreact` does; anyone else's needs
+    /// `MessageActions.remove_reactions`, else `InvalidRequest` before asking.
+    pub async fn remove_reaction(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: ReactionEmoji,
+        kind: ReactionKind,
+        user_id: UserId,
+    ) -> Result<(), ReactionError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.remove_reaction(channel_id, message_id, &emoji.into(), kind.into(), user_id)
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Removes every reaction of the message, or every one with `emoji`; the store changes when
+    /// the gateway says so. `InvalidRequest`, before asking, without
+    /// `MessageActions.remove_reactions`.
+    pub async fn remove_reactions(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: Option<ReactionEmoji>,
+    ) -> Result<(), ReactionError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            let emoji = emoji.map(Into::into);
+            core.remove_reactions(channel_id, message_id, emoji.as_ref())
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// The users who reacted with `emoji`, up to `limit` (1 to 100; the official client asks
+    /// 100 for its list and 3 for a reaction's tooltip), those after the user `after`. Nothing
+    /// is kept: each call asks Discord.
+    pub async fn reactors(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: ReactionEmoji,
+        kind: ReactionKind,
+        after: Option<UserId>,
+        limit: u8,
+    ) -> Result<ReactorsPage, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.reactors(
+                channel_id,
+                message_id,
+                &emoji.into(),
+                kind.into(),
+                after,
+                limit,
+            )
+            .await
         })
         .await
         .map(Into::into)
@@ -545,6 +657,52 @@ impl From<ThreadLocation> for akari_core::ThreadLocation {
             ThreadLocation::ToolbarOverflow => Self::ToolbarOverflow,
             ThreadLocation::ContextMenu => Self::ContextMenu,
             ThreadLocation::ForumToolbar => Self::ForumToolbar,
+        }
+    }
+}
+
+/// Where the user reacted, which Discord's own client tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ReactionLocation {
+    /// The reactions window's ✕, and the official client's default.
+    Message,
+    /// A reaction under a message, or the add button at the row's end.
+    InlineButton,
+    /// A quick reaction in the hover bar.
+    HoverBar,
+    /// A quick reaction in the message's menu.
+    ContextMenu,
+    /// The emoji picker.
+    Picker,
+    /// The bar under a forum post's first message.
+    ForumToolbar,
+}
+
+impl From<ReactionLocation> for akari_core::ReactionLocation {
+    fn from(location: ReactionLocation) -> Self {
+        match location {
+            ReactionLocation::Message => Self::Message,
+            ReactionLocation::InlineButton => Self::InlineButton,
+            ReactionLocation::HoverBar => Self::HoverBar,
+            ReactionLocation::ContextMenu => Self::ContextMenu,
+            ReactionLocation::Picker => Self::Picker,
+            ReactionLocation::ForumToolbar => Self::ForumToolbar,
+        }
+    }
+}
+
+/// Which of an emoji's two counts: plain reactions or super reactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ReactionKind {
+    Normal,
+    Burst,
+}
+
+impl From<ReactionKind> for akari_core::ReactionKind {
+    fn from(kind: ReactionKind) -> Self {
+        match kind {
+            ReactionKind::Normal => Self::Normal,
+            ReactionKind::Burst => Self::Burst,
         }
     }
 }

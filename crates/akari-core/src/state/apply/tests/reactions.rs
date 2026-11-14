@@ -1,5 +1,7 @@
 use super::*;
 use crate::state::StarterMessage;
+use crate::state::apply::Wanted;
+use crate::state::reactions::ReactionEmoji;
 use crate::state::windows::StarterFetch;
 
 const FORUM: u64 = 300_000_000_000_000_050;
@@ -973,4 +975,400 @@ fn a_message_stays_small() {
         size_of::<Option<Arc<[crate::state::Reaction]>>>(),
         size_of::<Arc<[crate::state::Reaction]>>()
     );
+}
+
+const STARTER_ROW: u64 = 400_000_000_000_000_021;
+
+fn emoji(name: &str) -> ReactionEmoji {
+    ReactionEmoji::unicode(name)
+}
+
+// The user's click, with the events it sent.
+fn want(
+    state: &mut State,
+    channel: u64,
+    row: u64,
+    name: &str,
+    wanted: bool,
+) -> (Option<Wanted>, Vec<String>) {
+    let mut events = Vec::new();
+    let now = state.now_millis();
+    let wanted = state.want_reaction(
+        Snowflake::new(channel),
+        Snowflake::new(row),
+        &emoji(name),
+        wanted,
+        now,
+        &mut events,
+    );
+    (wanted, events.iter().map(describe).collect())
+}
+
+fn settle(state: &mut State, wanted: &Wanted, restore: Option<(bool, bool)>) -> Vec<String> {
+    let mut events = Vec::new();
+    state.settle_reaction(
+        wanted.channel,
+        wanted.message,
+        &wanted.emoji,
+        restore,
+        &mut events,
+    );
+    events.iter().map(describe).collect()
+}
+
+#[test]
+fn the_users_click_shows_at_once_and_its_echo_changes_nothing() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, MIRA, UP);
+
+    let (wanted, events) = want(&mut state, GENERAL, 10, UP, true);
+
+    let wanted = wanted.unwrap();
+    assert!(wanted.changed);
+    assert_eq!(
+        (wanted.channel.get(), wanted.message.get(), wanted.burst),
+        (GENERAL, 10, false)
+    );
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), [] as [&str; 0]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 2, true));
+
+    let (again, events) = want(&mut state, GENERAL, 10, UP, true);
+    assert!(!again.unwrap().changed, "already the user's");
+    assert_eq!(events, [] as [&str; 0]);
+
+    let (taken, events) = want(&mut state, GENERAL, 10, UP, false);
+    assert!(taken.unwrap().changed);
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), [] as [&str; 0]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+
+    let (again, events) = want(&mut state, GENERAL, 10, UP, false);
+    assert!(!again.unwrap().changed, "not the user's");
+    assert_eq!(events, [] as [&str; 0]);
+}
+
+// What the user can click on is a row or a card; the copies behind take the click with it.
+#[test]
+fn every_copy_of_a_message_takes_the_users_click() {
+    for mut copy in copies() {
+        let Copy {
+            name, channel, id, ..
+        } = copy;
+        let state = &mut copy.state;
+        let read = copy.read;
+        let (at, row) = if name.contains("starter") {
+            (THREAD, STARTER_ROW)
+        } else {
+            (channel, id)
+        };
+
+        let (wanted, _) = want(state, at, row, UP, true);
+
+        if matches!(name, "held" | "thread box latest") {
+            assert_eq!(wanted, None, "{name}: nothing shows it");
+            continue;
+        }
+        let wanted = wanted.unwrap_or_else(|| panic!("{name}: refused"));
+        assert_eq!(
+            (wanted.channel.get(), wanted.message.get()),
+            (channel, id),
+            "{name}: the message the row shows"
+        );
+        assert_eq!(read(state), one(UP, 1, true), "{name}: reacted");
+
+        settle(state, &wanted, Some((false, false)));
+        assert_eq!(read(state), [], "{name}: refused, taken back");
+    }
+}
+
+#[test]
+fn a_click_on_the_row_reaches_the_starter_the_box_and_the_card() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(ORIGIN, GENERAL));
+    state.view_channel(Snowflake::new(THREAD), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", starter_row(true));
+    apply(&mut state, "MESSAGE_CREATE", message(30, THREAD));
+
+    let (_, events) = want(&mut state, GENERAL, ORIGIN, UP, true);
+    assert_eq!(starter_reactions(&state), one(UP, 1, true));
+    assert_eq!(
+        events,
+        [changed(GENERAL, ORIGIN), changed(THREAD, STARTER_ROW)]
+    );
+
+    let (_, events) = want(&mut state, THREAD, STARTER_ROW, FIRE, true);
+    assert_eq!(
+        reactions(&state, GENERAL, ORIGIN),
+        [one(UP, 1, true), one(FIRE, 1, true)].concat(),
+        "the parent's row"
+    );
+    assert_eq!(
+        events,
+        [changed(GENERAL, ORIGIN), changed(THREAD, STARTER_ROW)]
+    );
+
+    want(&mut state, THREAD, 30, UP, true);
+    let latest = state.latest_message(Snowflake::new(THREAD)).unwrap();
+    assert_eq!(shown(latest.reactions()), one(UP, 1, true), "the box");
+
+    let mut forum = forum_post();
+    apply(&mut forum, "MESSAGE_CREATE", message(POST, POST));
+    forum.view_channel(Snowflake::new(POST), &mut Vec::new());
+    apply(&mut forum, "MESSAGE_CREATE", message(POST + 1, POST));
+    let (_, events) = want(&mut forum, POST, POST, UP, true);
+    assert!(
+        events
+            .iter()
+            .any(|event| event.starts_with("PostPreviewChanged")),
+        "{events:?}"
+    );
+    match forum.post_preview(Snowflake::new(POST)) {
+        Some(crate::state::PostPreview::Loaded(message)) => {
+            assert_eq!(shown(message.reactions()), one(UP, 1, true), "the card");
+        }
+        other => panic!("expected a preview, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_refused_click_goes_back_to_what_discord_had() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    add(&mut state, GENERAL, 10, ME, FIRE);
+
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    let events = settle(&mut state, &added.unwrap(), Some((false, false)));
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(UP, 1, false), one(FIRE, 1, true)].concat()
+    );
+
+    let (taken, _) = want(&mut state, GENERAL, 10, FIRE, false);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+    let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+    assert_eq!(events, [changed(GENERAL, 10)]);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(UP, 1, false), one(FIRE, 1, true)].concat(),
+        "back at the end of the row"
+    );
+}
+
+#[test]
+fn a_settled_click_without_a_refusal_changes_nothing() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    let events = settle(&mut state, &added.unwrap(), None);
+
+    assert_eq!(events, [] as [&str; 0]);
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+}
+
+// What the gateway said while the request ran is newer than what Discord had before it.
+#[test]
+fn a_refusal_never_undoes_what_the_gateway_said_meanwhile() {
+    let target = json!({"channel_id": GENERAL.to_string(), "message_id": "10"});
+    let mut emoji_removal = target.clone();
+    emoji_removal["emoji"] = json!({"id": null, "name": UP});
+    let cases: [(&str, &str, Value); 3] = [
+        ("remove all", "MESSAGE_REACTION_REMOVE_ALL", target),
+        (
+            "remove emoji",
+            "MESSAGE_REACTION_REMOVE_EMOJI",
+            emoji_removal,
+        ),
+        (
+            "removed on another device",
+            "MESSAGE_REACTION_REMOVE",
+            reaction(GENERAL, 10, ME, UP),
+        ),
+    ];
+    for (name, dispatch, data) in cases {
+        let mut state = viewing(GENERAL);
+        apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+        add(&mut state, GENERAL, 10, ME, UP);
+
+        let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+        apply(&mut state, dispatch, data);
+        let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+
+        assert_eq!(events, [] as [&str; 0], "{name}");
+        assert_eq!(reactions(&state, GENERAL, 10), [], "{name}: not put back");
+    }
+
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    add(&mut state, GENERAL, 10, ME, UP);
+    settle(&mut state, &added.unwrap(), Some((false, false)));
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(UP, 1, true),
+        "added on another device: kept"
+    );
+
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, ME, UP);
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    add(&mut state, GENERAL, 10, MIRA, FIRE);
+    remove(&mut state, GENERAL, 10, MIRA, FIRE);
+    add(&mut state, GENERAL, 10, ME, FIRE);
+    remove(&mut state, GENERAL, 10, ME, FIRE);
+    remove(&mut state, GENERAL, 11, ME, UP);
+    settle(&mut state, &taken.unwrap(), Some((true, false)));
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        one(UP, 1, true),
+        "others' reactions, other emoji and other messages say nothing of it"
+    );
+}
+
+#[test]
+fn a_refused_removal_adds_nothing_to_a_super_reaction_made_meanwhile() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, ME, UP);
+
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    settle(&mut state, &taken.unwrap(), Some((true, false)));
+
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 0, 1, false, true)],
+        "the user's on another device, not a second one"
+    );
+}
+
+#[test]
+fn an_answer_from_discord_is_newer_than_what_the_gateway_said_before_it() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    let added = added.unwrap();
+    add(&mut state, GENERAL, 10, ME, UP);
+    state.confirm_reaction(added.channel, added.message, &added.emoji);
+    want(&mut state, GENERAL, 10, UP, false);
+    want(&mut state, GENERAL, 10, UP, true);
+    settle(&mut state, &added, Some((false, false)));
+
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+#[test]
+fn a_refusal_for_a_deleted_message_changes_nothing() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    add(&mut state, GENERAL, 10, ME, UP);
+
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": "10", "channel_id": GENERAL.to_string()}),
+    );
+    let events = settle(&mut state, &taken.unwrap(), Some((true, false)));
+
+    assert_eq!(events, [] as [&str; 0]);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+fn burst_reaction(user: u64) -> Value {
+    let mut data = reaction(GENERAL, 10, user, UP);
+    data["type"] = 1.into();
+    data
+}
+
+#[test]
+fn a_super_reaction_of_the_users_is_taken_back_as_one_and_never_added() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(MIRA));
+
+    let (again, events) = want(&mut state, GENERAL, 10, UP, true);
+    assert!(!again.unwrap().changed, "mine as a super reaction");
+    assert_eq!(events, [] as [&str; 0]);
+
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    let taken = taken.unwrap();
+    assert!(taken.burst && taken.changed);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 0, 1, false, false)]
+    );
+
+    settle(&mut state, &taken, Some((true, true)));
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 0, 2, false, true)],
+        "a refused removal puts the super reaction back"
+    );
+
+    let (taken, _) = want(&mut state, GENERAL, 10, UP, false);
+    settle(&mut state, &taken.unwrap(), None);
+    let (added, _) = want(&mut state, GENERAL, 10, UP, true);
+    assert!(!added.unwrap().burst);
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [(UP.to_owned(), 1, 1, true, false)],
+        "a click adds a plain one"
+    );
+}
+
+#[test]
+fn a_custom_emoji_is_sent_under_the_name_the_message_has() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD",
+        custom(GENERAL, 10, MIRA, 7, json!("wave")),
+    );
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+    let now = state.now_millis();
+
+    let wanted = state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &nameless,
+            true,
+            now,
+            &mut Vec::new(),
+        )
+        .unwrap();
+
+    assert_eq!(wanted.emoji.name.as_deref(), Some("wave"));
+    let empty = ReactionEmoji::unicode("");
+    assert_eq!(
+        state.want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &empty,
+            true,
+            now,
+            &mut Vec::new(),
+        ),
+        None,
+        "no emoji at all"
+    );
+}
+
+#[test]
+fn a_click_on_a_message_the_store_doesnt_have_is_refused() {
+    let mut state = viewing(GENERAL);
+
+    assert_eq!(want(&mut state, GENERAL, 99, UP, true).0, None);
+    assert_eq!(want(&mut state, GENERAL, 99, UP, false).0, None);
 }

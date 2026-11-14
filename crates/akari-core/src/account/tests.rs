@@ -4313,6 +4313,7 @@ mod forum_posts;
 mod forum_unreads;
 mod images;
 mod post_create;
+mod reactions;
 mod reading;
 mod replies;
 mod scans;

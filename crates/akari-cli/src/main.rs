@@ -7,6 +7,7 @@ mod image;
 mod keychain;
 mod login;
 mod messages;
+mod reactions;
 mod read_state;
 mod session;
 
@@ -326,6 +327,69 @@ mod tests {
         assert!(flags_only);
         assert_eq!(channel_id, 1);
         assert!(!help.contains("flags"), "{help}");
+    }
+
+    #[test]
+    fn the_reaction_commands_take_a_channel_a_message_and_an_emoji() {
+        let cli = Cli::try_parse_from(["akari-cli", "react", "1", "2", "👍"]).unwrap();
+        let Command::Session(SessionCommand::React {
+            channel_id,
+            message_id,
+            emoji,
+        }) = cli.command
+        else {
+            panic!("expected react");
+        };
+        assert_eq!((channel_id, message_id, emoji.as_str()), (1, 2, "👍"));
+
+        let cli = Cli::try_parse_from(["akari-cli", "unreact", "1", "2", "wave:7"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Session(SessionCommand::Unreact { emoji, .. }) if emoji == "wave:7"
+        ));
+        assert!(Cli::try_parse_from(["akari-cli", "react", "1", "2"]).is_err());
+    }
+
+    #[test]
+    fn reactors_default_to_a_page_of_100_plain_reactions() {
+        let cli = Cli::try_parse_from(["akari-cli", "reactors", "1", "2", "👍"]).unwrap();
+        let Command::Session(SessionCommand::Reactors {
+            burst,
+            after,
+            limit,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected reactors");
+        };
+        assert_eq!((burst, after, limit), (false, None, 100));
+
+        let cli = Cli::try_parse_from([
+            "akari-cli",
+            "reactors",
+            "1",
+            "2",
+            "👍",
+            "--burst",
+            "--after",
+            "9",
+            "--limit",
+            "3",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Session(SessionCommand::Reactors {
+                burst: true,
+                after: Some(9),
+                limit: 3,
+                ..
+            })
+        ));
+        for limit in ["0", "101"] {
+            let args = ["akari-cli", "reactors", "1", "2", "👍", "--limit", limit];
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]

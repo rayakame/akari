@@ -40,7 +40,8 @@ here: Discord's clients don't sync it, so each app keeps its own.
 
 `display_settings()` is how media shows and animates (`DisplaySettings`: spoilers, inline
 media, GIF autoplay, embeds, emoji and sticker animation, the explicit content filter and
-redactions), with Discord's defaults where the user set nothing;
+redactions, and `render_reactions`: off, a host shows no reactions and no way to react), with
+Discord's defaults where the user set nothing;
 `DisplaySettingsChanged` says to read it again ([user-settings.md](../../docs/protocol/user-settings.md)).
 
 ## Badges and read states
@@ -278,8 +279,9 @@ permissions of the parent channel it is in, whatever the thread's archived or lo
 row itself. `mark_unread` alone is always the thread's: `Account.mark_unread` takes the
 thread's ID and the row's and marks the thread from its start. `reply` is false on the row
 either way: a reply in the thread can't name a message of the parent channel. Requests for the
-shown message (a reaction, a pin, a delete) never take the row's IDs: they go to the
-`channel_id` and `id` of `starter_message`'s message, which a link to it names too. akari-core
+shown message (a pin, a delete) never take the row's IDs: they go to the
+`channel_id` and `id` of `starter_message`'s message, which a link to it names too. The
+reaction calls resolve the row themselves and take either pair of IDs. akari-core
 resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross:
 AkariKit's rows hold their `starter_message`
 ([message-actions.md](../../docs/ui/message-actions.md#a-threads-starter-row)).
@@ -389,6 +391,55 @@ message, so the row has its preview line before Discord answers. `deliver_messag
 stays failed with its text and its reference, and its target reads `Deleted`
 (`ReplyTargetChanged`). Whether the pending reply is cleared when its target is deleted before
 the send is the host's ([messages.md](../../docs/protocol/messages.md#sending-a-reply)).
+
+## Reacting
+
+`react(channel_id, message_id, emoji, location)` adds the user's reaction and `unreact(…)` takes
+it back. `emoji` is a `ReactionEmoji` as `Store.reactions` gives it, or one a host builds: the
+`id` for a custom emoji (with its `name`, which the request's path carries; for an emoji the
+message already has, the message's own name is used), else the `name`, which is the Unicode
+emoji itself, exactly as picked (`❤️` with its variation selector is another reaction than
+`❤`); `key` isn't read. `location` is where the user clicked, which the official client tells
+Discord (`ReactionLocation`: `InlineButton` for a pill or the row's add button, `HoverBar`,
+`ContextMenu`, `Picker`, `ForumToolbar`, `Message`).
+
+Both are optimistic. The store has the change at once, before Discord is asked, on
+every copy of the message, with `MessageReactionsChanged` (and `PostPreviewChanged` for a
+post's first message); Discord's echo changes nothing. A refusal puts back what Discord had
+and is the error, so a host shows its alert and reads nothing again by hand. The calls can
+wait as long as a rate limit's one retry lasts: don't block a click on them.
+
+One request runs per message and emoji. A call made while one runs changes what is asked
+next and answers the call before it with success (its wish was replaced; nothing failed), so
+quick toggles end with what the user chose last in at most the requests that takes. A call
+for what the store already shows (react on a reaction that is the user's, also as a super
+reaction; unreact on one that isn't) asks nothing and succeeds.
+
+Akari never adds a super reaction. A pill is the user's when `me` or `me_burst` is set
+(D158), and `unreact` on one that is theirs only through `me_burst` removes the super
+reaction.
+
+`InvalidRequest` (as `ReactionError.Request`), before anything changes, where
+`message_actions` says no: `react` for an emoji the message doesn't have, `toggle_reaction`
+for one it has, and for a message the store doesn't have. `ReactionError` tells apart what a
+host shows: `TooMany` (the official client's alert "We appreciate the enthusiasm but..."),
+`Blocked` (it shakes its window), `Forbidden`, `UnknownEmoji`, `RateLimited { retry_after }`
+and `Request { error }` for the rest.
+
+`remove_reaction(channel_id, message_id, emoji, kind, user_id)` is the reactions window's ✕:
+`kind` is the tab's (`Normal` or `Burst`). The user's own row goes as `unreact` does, at once;
+anyone else's needs `MessageActions.remove_reactions`, and the store changes when the gateway
+says so, as for `remove_reactions(channel_id, message_id, emoji)`, which removes every reaction
+with one emoji, or all of them with `nil`.
+
+`reactors(channel_id, message_id, emoji, kind, after, limit)` asks Discord for the users who
+reacted: a `ReactorsPage` with `users` (`User` records, with the avatar key) in Discord's order
+and `has_more` when Discord filled the page; the next page is asked with the last user's ID as
+`after`. `limit` is 1 to 100: the official client asks 100 for its window and 3 for a pill's
+tooltip. Nothing is cached in the core and no event keeps a page current: a host that keeps
+the tooltip's three names drops them on `MessageReactionsChanged` for that message. A member's
+nickname isn't in the answer; names are found as for a message's author
+([reactions.md](../../docs/protocol/reactions.md)).
 
 ## Jumps
 

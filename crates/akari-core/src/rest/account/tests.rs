@@ -681,3 +681,5 @@ fn a_deleted_reply_target_is_logged_as_its_own_kind() {
         "reply_target_deleted"
     );
 }
+
+mod reactions;

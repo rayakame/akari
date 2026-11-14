@@ -43,6 +43,7 @@ isn't UTF-8) is an error naming only a byte offset.
 | `inline_embed_media` | 10 | true | |
 | `gif_auto_play` | 11 | true | "Play GIFs when Discord is focused" |
 | `render_embeds` | 12 | true | |
+| `render_reactions` | 13 | true | "Show emoji reactions": off hides messages' reactions and every way to react. The number is from the public proto definitions, not checked against the bundle's descriptors |
 | `animate_emoji` | 14 | true | |
 | `animate_stickers` | 15 | 0 (`UInt32Value`) | 0 always, 1 on interaction, 2 never |
 | `explicit_content_filter` | 19 | 1 (`UInt32Value`) | 0 disabled, 1 non-friends, 2 all |

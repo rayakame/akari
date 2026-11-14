@@ -115,6 +115,8 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     private let empty: Bool

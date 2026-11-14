@@ -183,6 +183,32 @@ alert, unless a later mark has the line by then. The line goes back to where Dis
 newest mark it took (`MarkOutcome.marked`), else the position from before the unanswered marks,
 whatever order the answers come in.
 A thread's starter row acts on the parent's message, but marks the thread unread.
+A row's `reactions` (`ReactionRow`, `nil` without any, with "Show emoji reactions" off, and on a
+forum post's first message) are its pills in Discord's order: each a `ReactionPill` (the emoji,
+plain and super reactions counted together, `mine` when either is the user's), with `adds` (the
+add button: the core's `react`) and `toggles` (a click counts: `toggleReaction`). A list reads a
+page's reactions in one read, and on `MessageReactionsChanged` only the reactions of that row
+(`TimelineChanges.reacted` tells such a row from a reloaded one). `MessageListModel.reactions`
+is the list's `ReactionsModel`: `toggle(_:on:from:)` adds the user's reaction or takes it back
+through the core, which changes the store at once and undoes a refusal itself; a refusal for
+too many reactions is the official alert in `messageActionFailure`, a blocked or forbidden one
+counts in `SessionModel.refusedReactions` (the host's stand-in for the official client's
+shake), the rest stay quiet. `quick(for:)` are the three quick reactions (💯, 😆, 💖 until
+Akari reads the user's own), with whether each is the user's already. `tooltip(of:on:)` is a
+pill's tooltip in the official client's words; `pointerEntered(_:on:)` asks for its three names
+after half a second, once per message and emoji, `tooltipChanged` says when they arrived, and a
+change of the message's reactions or a new session drops them. `MessageActionsModel` offers Add
+Reaction (the host lists `quickReactions(for:shift:)`), View Reactions and, where the core
+allows removing others' reactions, Remove Reactions (`removableReactions(for:)`,
+`removeReactions(of:on:shift:)`) and Remove All Reactions; a removal waits in
+`SessionModel.messageConfirmation` for `answerMessageConfirmation(_:)` unless Shift was held.
+`SessionModel.viewReactions(of:)` opens `reactors` (`ReactorsModel`): the message's emoji by
+count as `tabs`, the chosen one's users a hundred at a time (`loadMore()`, plain reactions then
+super reactions), `remove(_:)` for a row's ✕, the list kept and refreshed when the reactions
+change, closed by the session once the message has none. A forum post's bar carries its first
+message's reactions (`PostBar.reactions`, `defaultReaction`, `reacts`, `toggles`,
+`pillsShown(width:)`), and a forum card its one reaction (`ForumModel.Card.reaction`,
+`ForumModel.react(_:on:)`).
 A row's `reply` (`ReplyLine`, `nil` unless its shown message answers one) is what the line over
 a reply shows: the answered message's state (`ReplyTarget`), `author` for the small avatar,
 `name` with its "@" when the reply mentions them, `content` (the one-line `RichText` with
@@ -285,7 +311,9 @@ The batch also keeps, apart from its messages, the messages whose reactions chan
 (`replyTargetsChanged`, per the target's channel) and the channels whose pins dot changed
 (`pinsUnreadChanged`). A message list reads again only the rows whose reply answers a changed
 message, the composer ends a pending reply whose message was deleted, and the New Thread form
-rereads its source's line; no model reads the other two yet.
+rereads its source's line; a list rereads the reactions of the rows a reaction change names,
+and its `ReactionsModel` and the reactions window follow it too; no model reads the pins dot
+yet.
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.

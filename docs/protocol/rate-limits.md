@@ -56,6 +56,9 @@ their 429s are reported to the caller.
   so it's **unverified** until the manual check sees it. With a slowmode of 10 s or less the
   429 is waited out like any other; longer, the send fails with `RateLimited`.
 - **502 and 504** are retried once after 1 s.
+- **Calls that may be repeated** (the reaction routes, [reactions.md](reactions.md#retries))
+  retry a 429 once instead of 3 times, and once more after a 502, a 504 or a connection that
+  broke before an answer; every other request fails on a broken connection at once.
 - **A 401** marks the token as rejected: every later request fails at once with
   `RequestError::Unauthorized` instead of adding to the invalid-request count, and the
   account closes as for the gateway's 4004 (see [messages.md](messages.md#errors)).

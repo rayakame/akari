@@ -63,6 +63,27 @@ public final class ForumModel {
         /// "3", "25+", or "1+" while Discord hasn't said how many: the messages since the user
         /// last read an opened post, for "(3 New)" after the count; `nil` for any other post.
         public let newCount: String?
+        /// The first message's reaction with the most users, or the forum's default reaction
+        /// while it has none and the user may react; `nil` otherwise.
+        public let reaction: Reaction?
+
+        public struct Reaction: Equatable, Sendable {
+            public let emoji: ReactionEmoji
+            /// 0 for the forum's default reaction, which shows without a number.
+            public let count: UInt32
+            public let mine: Bool
+            /// A click reacts with it, or takes the user's reaction back.
+            public let toggles: Bool
+
+            public init(emoji: ReactionEmoji, count: UInt32, mine: Bool, toggles: Bool) {
+                self.emoji = emoji
+                self.count = count
+                self.mine = mine
+                self.toggles = toggles
+            }
+
+            public var name: String { ReactionPill.name(of: emoji) }
+        }
 
         /// Discord's wording of a post's new messages: "1+" without a number, "25+" from 25.
         public static func newCount(_ count: UInt32?) -> String {
@@ -152,6 +173,8 @@ public final class ForumModel {
 
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let account: Account
+    /// What a click on a card's reaction does.
+    @ObservationIgnored public let reactions: ReactionsModel
     @ObservationIgnored private let remember: (Settings) -> Void
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private var opened = false
@@ -181,6 +204,7 @@ public final class ForumModel {
         self.forumId = forumId
         self.store = store
         self.account = account
+        reactions = ReactionsModel(store: store, account: account)
         self.remember = remember
         let channel = store.channel(id: forumId)
         self.channel = channel
@@ -432,8 +456,17 @@ public final class ForumModel {
 
     // MARK: Changes
 
+    /// A click on a card's reaction: the user's reaction with it on the post's first message is
+    /// added, or taken back.
+    public func react(_ reaction: Card.Reaction, on post: ChannelId) async {
+        await reactions.toggle(
+            reaction.emoji, channelId: post, messageId: MessageId(rawValue: post.rawValue),
+            from: .forumToolbar)
+    }
+
     func apply(_ batch: EventBatch) {
         form.apply(batch)
+        reactions.apply(batch)
         // Covers follow the display settings.
         if batch.everythingChanged || batch.displaySettingsChanged {
             previews = [:]
@@ -551,6 +584,29 @@ public final class ForumModel {
                 ? posted : ThreadBrowserModel.lastActivity(post, info),
             created: info.createdAt ?? posted,
             media: media(of: first), unread: unread,
-            isNew: isNew, newCount: newCount)
+            isNew: isNew, newCount: newCount, reaction: first.flatMap { _ in reaction(of: post.id) })
+    }
+
+    // The official client's pick: the most users, then Discord's order.
+    private func reaction(of post: ChannelId) -> Card.Reaction? {
+        guard reactions.shows else {
+            return nil
+        }
+        let first = MessageId(rawValue: post.rawValue)
+        let top = ReactionPill.byCount(
+            ReactionPill.merged(store.reactions(channelId: post, messageId: first))
+        ).first
+        guard top != nil || channel?.forum?.defaultReaction != nil else {
+            return nil
+        }
+        let actions = store.messageActions(channelId: post, messageId: first)
+        if let top {
+            return Card.Reaction(
+                emoji: top.emoji, count: top.count, mine: top.mine, toggles: actions.toggleReaction)
+        }
+        guard actions.react, let offered = channel?.forum?.defaultReaction else {
+            return nil
+        }
+        return Card.Reaction(emoji: ReactionEmoji(offered), count: 0, mine: false, toggles: true)
     }
 }

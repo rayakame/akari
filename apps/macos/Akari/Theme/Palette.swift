@@ -80,6 +80,12 @@ enum Palette {
         "interactiveBackgroundActive", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.16))
     static let selectedBackground = token(
         "selectedBackground", dark: "#97979f", light: "#97979f", alpha: (0.20, 0.24))
+    // A reaction's pill: the user's own in the brand's colors, and a pressed one's border.
+    static let reactionMine = token(
+        "reactionMine", dark: "#5865f2", light: "#5865f2", alpha: (0.24, 0.24))
+    static let reactionMineText = token("reactionMineText", dark: "#dfe4ff", light: "#273478")
+    static let reactionBorderActive = token(
+        "reactionBorderActive", dark: "#97979f", light: "#97979f", alpha: (0.44, 0.52))
     // Discord's icon-only buttons (a modal's X): hovered and pressed fills, and the border both
     // draw.
     static let iconOnlyHover = token(

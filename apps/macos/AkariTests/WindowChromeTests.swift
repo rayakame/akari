@@ -108,6 +108,8 @@ nonisolated private final class EmptyAccount: Account, @unchecked Sendable {
 
 nonisolated private final class EmptyStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     init() {

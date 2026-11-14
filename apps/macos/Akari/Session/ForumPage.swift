@@ -127,7 +127,8 @@ struct ForumPage: View {
         case .list:
             ForEach(cards) { card in
                 ForumListCard(
-                    card: card, filter: forum.settings.tags, opened: isOpen(card), now: now
+                    card: card, filter: forum.settings.tags, opened: isOpen(card), now: now,
+                    react: { reaction in Task { await forum.react(reaction, on: card.id) } }
                 ) { open(card) }
                     .onAppear { forum.cardShown(card.id) }
                     .onDisappear { forum.cardHidden(card.id) }
@@ -146,7 +147,8 @@ struct ForumPage: View {
                     ForEach(row) { card in
                         ForumGalleryCard(
                             card: card, filter: forum.settings.tags, size: size,
-                            opened: isOpen(card), contained: forum.isMedia, now: now
+                            opened: isOpen(card), contained: forum.isMedia, now: now,
+                            react: { reaction in Task { await forum.react(reaction, on: card.id) } }
                         ) {
                             open(card)
                         }

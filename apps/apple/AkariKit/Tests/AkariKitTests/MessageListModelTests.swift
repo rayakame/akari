@@ -69,7 +69,8 @@ struct MessageListModelTests {
 
         #expect(
             store.reads == [
-                .window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
+                .window(here), .messageReactions(here, [id(3), id(4), id(5)]),
+                .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
             ])
         #expect(
             model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
@@ -88,7 +89,7 @@ struct MessageListModelTests {
             ])
         )
 
-        #expect(store.reads == [.messages(here, [id(2)])])
+        #expect(store.reads == [.messages(here, [id(2)]), .messageReactions(here, [id(2)])])
         #expect(model.rows.map(\.message) == [message(1), message(2, content: "edited")])
     }
 
@@ -145,7 +146,11 @@ struct MessageListModelTests {
 
         #expect(model.rows.map(\.id) == [id(1), id(7)])
         #expect(model.rows.map(\.message.id) == [id(1), id(8)])
-        #expect(store.reads == [.window(here), .messages(here, [id(8)]), .slowmode(here)])
+        #expect(
+            store.reads == [
+                .window(here), .messageReactions(here, [id(8)]), .messages(here, [id(8)]),
+                .slowmode(here),
+            ])
 
         shown(window([1, 8, 9]))
         model.apply(EventBatch([.messageInserted(channelId: here, messageId: id(9))]))
