@@ -586,6 +586,7 @@ impl State {
     ) -> (Entities, Derived) {
         // READY doesn't carry them: they're Akari's, kept with the account.
         next.settings.age_agreements = self.entities.settings.age_agreements.clone();
+        next.settings.reaction_uses = self.entities.settings.reaction_uses.clone();
         self.recounts = match self.journal.take() {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
@@ -662,6 +663,9 @@ impl State {
     ) -> bool {
         if self.ready || self.restored || self.journal.is_some() {
             self.keep_cached_agreements(&cached, events);
+            // A READY that beat the restore knows nothing of them; the flusher would erase them.
+            Arc::make_mut(&mut self.entities.settings.reaction_uses)
+                .merge(&cached.settings.reaction_uses);
             return false;
         }
         self.entities = cached;

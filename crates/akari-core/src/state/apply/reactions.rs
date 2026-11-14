@@ -317,6 +317,9 @@ impl State {
             }
             _ => {}
         }
+        if changed && change == OwnChange::React {
+            self.note_reaction(&emoji, now_millis);
+        }
         if changed {
             let change = match taken {
                 None => ReactionChange::Add {

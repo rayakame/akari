@@ -1,6 +1,8 @@
 use super::*;
+use crate::emoji::EmojiVersion;
 use crate::model::EmojiId;
-use crate::state::picker::{EmojiAccess, EmojiSection};
+use crate::state::picker::{EmojiAccess, EmojiSection, PickerEmoji};
+use crate::state::reactions::ReactionEmoji;
 
 const WAVE: u64 = 700_000_000_000_000_001;
 const DANCE: u64 = 700_000_000_000_000_002;
@@ -225,4 +227,159 @@ fn in_a_dm_sections_follow_the_rail() {
         .collect();
 
     assert_eq!(order, rail);
+}
+
+const NOW: i64 = 1_800_000_000_000;
+const DAY: i64 = 86_400_000;
+
+fn note(state: &mut State, emoji: &ReactionEmoji, times: usize, at: i64) {
+    for _ in 0..times {
+        state.note_reaction(emoji, at);
+    }
+}
+
+fn unicode(emoji: &str) -> ReactionEmoji {
+    ReactionEmoji::unicode(emoji)
+}
+
+fn custom(id: u64) -> ReactionEmoji {
+    ReactionEmoji::custom(EmojiId::new(id), None, false)
+}
+
+fn shown(emojis: Vec<PickerEmoji>) -> Vec<String> {
+    emojis
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect()
+}
+
+fn quick(state: &State, channel: u64, newest: EmojiVersion) -> Vec<String> {
+    shown(state.quick_reactions(ChannelId::new(channel), newest, NOW))
+}
+
+fn recent(state: &State, channel: u64, newest: EmojiVersion) -> Vec<String> {
+    shown(state.recent_reactions(ChannelId::new(channel), newest, NOW))
+}
+
+const ALL: EmojiVersion = EmojiVersion::NEWEST;
+
+// Research §3.8: without frequently used reactions, the official client's three.
+#[test]
+fn quick_reactions_without_uses_are_discords_three() {
+    let state = picker_state(false);
+
+    assert_eq!(
+        quick(&state, GENERAL, ALL),
+        ["100", "laughing", "sparkling_heart"]
+    );
+    assert_eq!(
+        quick(&state, DM, ALL),
+        ["100", "laughing", "sparkling_heart"]
+    );
+}
+
+#[test]
+fn used_emoji_come_first_and_the_three_fill_the_rest_once_each() {
+    let mut state = picker_state(false);
+    note(&mut state, &unicode("👍"), 1, NOW);
+    assert_eq!(quick(&state, GENERAL, ALL), ["thumbsup", "100", "laughing"]);
+
+    let mut state = picker_state(false);
+    note(&mut state, &unicode("😆"), 1, NOW);
+    assert_eq!(
+        quick(&state, GENERAL, ALL),
+        ["laughing", "100", "sparkling_heart"],
+        "no emoji twice"
+    );
+}
+
+#[test]
+fn the_three_most_used_are_the_quick_reactions() {
+    let mut state = picker_state(false);
+    note(&mut state, &unicode("😂"), 1, NOW);
+    note(&mut state, &unicode("👍"), 3, NOW);
+    note(&mut state, &unicode("🔥"), 2, NOW);
+    note(&mut state, &unicode("🎉"), 1, NOW - 10 * DAY);
+
+    assert_eq!(quick(&state, GENERAL, ALL), ["thumbsup", "fire", "joy"]);
+}
+
+// The official client leaves out what its emoji filter refuses here; Akari keeps only what the
+// user may use (a locked one would refuse the click).
+#[test]
+fn quick_reactions_skip_what_cant_be_used_here() {
+    let mut state = picker_state(false);
+    note(&mut state, &custom(POG), 5, NOW);
+    note(&mut state, &custom(DANCE), 4, NOW);
+    note(&mut state, &custom(WAVE), 3, NOW);
+
+    assert_eq!(quick(&state, GENERAL, ALL), ["wave", "100", "laughing"]);
+    assert_eq!(
+        quick(&state, GARDEN, ALL),
+        ["pog", "100", "laughing"],
+        "its own server's"
+    );
+    assert_eq!(
+        quick(&state, DM, ALL),
+        ["100", "laughing", "sparkling_heart"]
+    );
+}
+
+#[test]
+fn quick_reactions_skip_emoji_newer_than_the_host_draws() {
+    let mut state = picker_state(false);
+    note(&mut state, &unicode("🫩"), 3, NOW);
+
+    assert_eq!(
+        quick(&state, GENERAL, EmojiVersion::new(15, 1)),
+        ["100", "laughing", "sparkling_heart"]
+    );
+    assert_eq!(quick(&state, GENERAL, ALL)[0], "face_with_bags_under_eyes");
+}
+
+// The picker's Frequently Used: best first, locked ones too (dimmed), but nothing the picker
+// hides here, no emoji the store doesn't know and none the host can't draw.
+#[test]
+fn recent_reactions_list_what_the_picker_shows_here() {
+    let mut state = picker_state(false);
+    note(&mut state, &unicode("👍"), 6, NOW);
+    note(&mut state, &custom(POG), 5, NOW);
+    note(&mut state, &custom(SUBS), 4, NOW);
+    note(&mut state, &custom(700_000_000_000_000_099), 3, NOW);
+    note(&mut state, &unicode("🫩"), 2, NOW);
+    note(&mut state, &custom(WAVE), 1, NOW);
+
+    let listed = state.recent_reactions(ChannelId::new(GENERAL), EmojiVersion::new(15, 1), NOW);
+
+    assert_eq!(shown(listed.clone()), ["thumbsup", "pog", "wave"]);
+    let access: Vec<EmojiAccess> = listed.iter().map(PickerEmoji::access).collect();
+    assert_eq!(
+        access,
+        [
+            EmojiAccess::Usable,
+            EmojiAccess::NitroLocked,
+            EmojiAccess::Usable
+        ]
+    );
+    assert_eq!(
+        recent(&state, GARDEN, ALL),
+        ["thumbsup", "pog", "face_with_bags_under_eyes"],
+        "G1's are external there"
+    );
+}
+
+// What a pick sends: a Unicode emoji as it is, a custom one by ID with its name.
+#[test]
+fn a_picked_emoji_reacts_with_its_id_and_name() {
+    let mut state = picker_state(true);
+    note(&mut state, &custom(DANCE), 1, NOW);
+    note(&mut state, &unicode("❤"), 1, NOW - DAY);
+
+    let listed = state.recent_reactions(ChannelId::new(GENERAL), ALL, NOW);
+
+    assert_eq!(
+        listed[0].reaction(),
+        ReactionEmoji::custom(EmojiId::new(DANCE), Some("dance"), true)
+    );
+    assert_eq!(listed[1].reaction(), ReactionEmoji::unicode("❤\u{fe0f}"));
 }

@@ -15,7 +15,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
-use super::picker::{EmojiAccess, EmojiSection};
+use super::picker::{EmojiAccess, EmojiSection, PickerEmoji};
 use super::reactions::{Reaction, ReactionEmoji};
 use super::read_states::{Ack, ReadState};
 use super::replies::{ReplyTarget, ReplyTo};
@@ -33,6 +33,7 @@ use super::windows::{
     WindowLimits,
 };
 use crate::backlog::Backlog;
+use crate::emoji::EmojiVersion;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -1332,6 +1333,24 @@ impl Store {
     pub fn emoji_access(&self, channel: ChannelId, emoji: EmojiId) -> Option<EmojiAccess> {
         let now = self.now_millis();
         self.read(|inner| inner.state.emoji_access(channel, emoji, now))
+    }
+
+    /// The user's recently used reactions as the picker's Frequently Used lists them in
+    /// `channel`, best first: Akari's own count of the emoji the user reacted with (at most
+    /// [`RECENT_REACTIONS`](super::RECENT_REACTIONS)), without what the picker leaves out there,
+    /// custom emoji none of the user's servers has, and Unicode emoji newer than `newest` (what
+    /// the host's font draws). No event: read it when the picker opens.
+    pub fn recent_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.recent_reactions(channel, newest, now))
+    }
+
+    /// The hover bar's three quick reactions in `channel`: the recently used ones the user may
+    /// use there, filled from 💯, 😆 and 💖 as Discord's client does. No event: read it when the
+    /// bar shows.
+    pub fn quick_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.quick_reactions(channel, newest, now))
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

@@ -10,6 +10,7 @@ use crate::model::{
     ChannelId, ChannelType, GuildId, MessageId, MessageReferenceType, MessageType, OverwriteType,
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
+use crate::state::ReactionUse;
 use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
@@ -1577,6 +1578,48 @@ mod tests {
             let read: UserRow = serde_json::from_str(&json).unwrap();
 
             assert_eq!(User::from(read).discriminator, discriminator, "{json}");
+        }
+    }
+}
+
+// One emoji the user reacted with: a custom one by `id`, a Unicode one by `name`.
+#[derive(Serialize, Deserialize)]
+pub(super) struct ReactionUseRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    animated: bool,
+    count: u32,
+    // Unix milliseconds.
+    last: i64,
+}
+
+impl From<&ReactionUse> for ReactionUseRow {
+    fn from(used: &ReactionUse) -> Self {
+        Self {
+            id: used.emoji.id.map(Snowflake::get),
+            name: used.emoji.name.clone(),
+            animated: used.emoji.animated,
+            count: used.count,
+            last: used.last_used,
+        }
+    }
+}
+
+impl From<ReactionUseRow> for ReactionUse {
+    fn from(row: ReactionUseRow) -> Self {
+        let emoji = match row.id {
+            Some(id) => {
+                ReactionEmoji::custom(Snowflake::new(id), row.name.as_deref(), row.animated)
+            }
+            None => ReactionEmoji::unicode(row.name.as_deref().unwrap_or_default()),
+        };
+        Self {
+            emoji,
+            count: row.count,
+            last_used: row.last,
         }
     }
 }

@@ -1,8 +1,17 @@
+use std::sync::Arc;
+
 use super::State;
+use crate::emoji::{EmojiVersion, UnicodeEmoji};
 use crate::model::{ChannelId, EmojiId, GuildId, Permissions, PremiumType};
-use crate::state::picker::{CustomEmoji, EmojiAccess, EmojiSection};
+use crate::state::picker::{CustomEmoji, EmojiAccess, EmojiSection, PickerEmoji};
+use crate::state::reactions::ReactionEmoji;
 use crate::state::settings::ServerListItem;
 use crate::state::types::GuildEmoji;
+
+// The official client's quick reactions without frequently used ones: 100, laughing,
+// sparkling_heart (research §3.8).
+const QUICK_DEFAULTS: [&str; 3] = ["💯", "😆", "💖"];
+const QUICK: usize = 3;
 
 // What decides a custom emoji's use in a channel (the REACTION intention of Discord's emoji
 // filter, research §2.1).
@@ -124,5 +133,72 @@ impl State {
                 (!emojis.is_empty()).then_some(EmojiSection { guild_id, emojis })
             })
             .collect()
+    }
+
+    pub(crate) fn note_reaction(&mut self, emoji: &ReactionEmoji, now_millis: i64) {
+        Arc::make_mut(&mut self.entities.settings.reaction_uses).note(emoji, now_millis);
+    }
+
+    // `None`: the picker doesn't list it here, the store doesn't know it, or the host can't draw it.
+    fn picker_emoji(
+        &self,
+        here: Option<&Here>,
+        emoji: &ReactionEmoji,
+        newest: EmojiVersion,
+    ) -> Option<PickerEmoji> {
+        match emoji.id {
+            Some(id) => {
+                let (guild_id, found) = self.guild_emoji(id)?;
+                let access = self.access_of(here?, guild_id, &found);
+                access.listed().then_some(PickerEmoji::Custom(CustomEmoji {
+                    guild_id,
+                    emoji: found,
+                    access,
+                }))
+            }
+            None => UnicodeEmoji::get(emoji.name.as_deref()?)
+                .filter(|found| found.version() <= newest)
+                .map(PickerEmoji::Unicode),
+        }
+    }
+
+    pub(crate) fn recent_reactions(
+        &self,
+        channel: ChannelId,
+        newest: EmojiVersion,
+        now_millis: i64,
+    ) -> Vec<PickerEmoji> {
+        let here = self.emoji_here(channel, now_millis);
+        self.entities
+            .settings
+            .reaction_uses
+            .ranked(now_millis)
+            .into_iter()
+            .filter_map(|used| self.picker_emoji(here.as_ref(), &used.emoji, newest))
+            .collect()
+    }
+
+    pub(crate) fn quick_reactions(
+        &self,
+        channel: ChannelId,
+        newest: EmojiVersion,
+        now_millis: i64,
+    ) -> Vec<PickerEmoji> {
+        let mut quick: Vec<PickerEmoji> = self
+            .recent_reactions(channel, newest, now_millis)
+            .into_iter()
+            .filter(|emoji| emoji.access().usable())
+            .take(QUICK)
+            .collect();
+        for emoji in QUICK_DEFAULTS
+            .iter()
+            .filter_map(|emoji| UnicodeEmoji::get(emoji))
+        {
+            let emoji = PickerEmoji::Unicode(emoji);
+            if quick.len() < QUICK && !quick.contains(&emoji) {
+                quick.push(emoji);
+            }
+        }
+        quick
     }
 }

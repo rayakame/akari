@@ -2301,3 +2301,55 @@ fn message_actions_answers_by_id_and_for_a_held_message() {
         MessageActions::default()
     );
 }
+
+fn note_reaction(store: &Store, emoji: &str) {
+    let now = store.now_millis();
+    store.write("test", |inner, _| {
+        inner
+            .state
+            .note_reaction(&ReactionEmoji::unicode(emoji), now);
+    });
+}
+
+fn quick_names(store: &Store) -> Vec<String> {
+    store
+        .quick_reactions(general(), crate::emoji::EmojiVersion::NEWEST)
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect()
+}
+
+// The emoji the user reacts with are Akari's, not READY's: the pump's READY keeps them, one noted
+// while it was being prepared too.
+#[test]
+fn reaction_uses_outlive_the_pumps_ready() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.replace(store.prepare_ready(ready_where(|_| {})));
+
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    note_reaction(&store, "🔥");
+    store.replace(prepared);
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|_| {}))));
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+}
+
+// A READY that beats the restore: uses noted since add to the cached ones, which the flusher
+// would otherwise erase.
+#[test]
+fn a_ready_before_the_restore_adds_the_cached_reaction_uses() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|_| {}))));
+    note_reaction(&store, "👍");
+    let mut cache = Entities::from_ready(ready_where(|_| {}));
+    let now = store.now_millis();
+    let uses = Arc::make_mut(&mut cache.settings.reaction_uses);
+    for emoji in ["🔥", "🔥", "🔥", "👍", "😂"] {
+        uses.note(&ReactionEmoji::unicode(emoji), now);
+    }
+
+    assert!(!store.restore(cache));
+
+    assert_eq!(quick_names(&store), ["fire", "thumbsup", "joy"]);
+}
