@@ -34,25 +34,69 @@ enum MessageMenu {
         return items
     }
 
-    /// The emoji a click reacts with, each with the official client's hint; one that is the
-    /// user's already has its checkmark and takes the reaction back.
+    /// The emoji a click reacts with by their names, each with the official client's hint; one
+    /// that is the user's already has its checkmark and takes the reaction back.
     static func reactions(
-        _ quick: [QuickReaction], run: @escaping (QuickReaction) -> Void
+        _ quick: [QuickReaction], images: ImageCache? = nil, run: @escaping (QuickReaction) -> Void
     ) -> [NSMenuItem] {
         quick.map { reaction in
             let item = item(reaction.name) { run(reaction) }
             item.state = reaction.mine ? .on : .off
             item.toolTip = reaction.hint
             item.setAccessibilityLabel(reaction.accessibilityLabel)
+            showEmoji(reaction.emoji, on: item, images: images)
             return item
         }
     }
 
     /// "Remove Reactions": one item per emoji of the message.
     static func removals(
-        _ pills: [ReactionPill], run: @escaping (ReactionPill) -> Void
+        _ pills: [ReactionPill], images: ImageCache? = nil, run: @escaping (ReactionPill) -> Void
     ) -> [NSMenuItem] {
-        pills.map { pill in item("\(pill.name)  \(pill.count)") { run(pill) } }
+        pills.map { pill in
+            let item = item("\(pill.name)  \(pill.count)") { run(pill) }
+            showEmoji(pill.emoji, on: item, images: images)
+            return item
+        }
+    }
+
+    static let emojiSide: CGFloat = 16
+
+    /// A Unicode emoji as a menu item's image, drawn as a pill draws it.
+    static func emojiImage(_ glyph: String) -> NSImage? {
+        guard !glyph.isEmpty else {
+            return nil
+        }
+        return NSImage(size: NSSize(width: emojiSide, height: emojiSide), flipped: true) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                return false
+            }
+            EmojiGlyphView.draw(glyph, in: rect, context: context, flipped: true)
+            return true
+        }
+    }
+
+    // A custom emoji's image comes while the menu may already be open: an open menu shows it.
+    private static func showEmoji(_ emoji: ReactionEmoji, on item: NSMenuItem, images: ImageCache?) {
+        guard let key = emoji.key else {
+            item.image = emojiImage(emoji.name ?? "")
+            return
+        }
+        guard let images else {
+            return
+        }
+        let pixels = Int(emojiSide * 2)
+        let spec = ImageSpec(key: key, width: pixels, height: pixels, fit: .contain)
+        if let still = images.cached(spec) {
+            item.image = NSImage(cgImage: still, size: NSSize(width: emojiSide, height: emojiSide))
+            return
+        }
+        Task { [weak item] in
+            guard let still = try? await images.image(spec) else {
+                return
+            }
+            item?.image = NSImage(cgImage: still, size: NSSize(width: emojiSide, height: emojiSide))
+        }
     }
 
     /// "Copy Text" alone, where a message shows outside a list (the New Thread form).

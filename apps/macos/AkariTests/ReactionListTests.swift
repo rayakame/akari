@@ -819,6 +819,60 @@ struct ReactionBarTests {
     }
 
     @Test
+    func aCustomQuickReactionComesFromTheImageTier() throws {
+        let party = customPill(7, "party", animated: true).emoji
+        list.actions.bars[2] = ([.addReaction, .more], [.copyLink, .addReaction, .more])
+        list.actions.quick[2] = [QuickReaction(emoji: party, mine: false), quick[0]]
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        var state = MessageTableState(rows: [
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second"),
+        ])
+        state.reachedOldest = true
+        state.images = ImageCacheRef(cache)
+        list.controller.show(state)
+        list.window.layoutIfNeeded()
+        try list.hover(2)
+
+        let custom = list.bar.quickButtons[0]
+        custom.layoutSubtreeIfNeeded()
+        #expect(custom.picture.content?.key == party.key)
+        #expect(custom.picture.images === cache)
+        #expect(!custom.picture.isHidden)
+        #expect(custom.glyph.isHidden)
+        #expect(custom.picture.frame == NSRect(x: 4, y: 4, width: 20, height: 20))
+        #expect(custom.picture.fallbackText == ":party:")
+        #expect(list.bar.quickButtons[1].picture.isHidden)
+        #expect(!list.bar.quickButtons[1].glyph.isHidden)
+    }
+
+    @Test
+    func anAnimatedQuickReactionPlaysUnderThePointerInTheKeyWindow() throws {
+        let party = customPill(7, "party", animated: true).emoji
+        list.actions.bars[2] = ([.addReaction, .more], [.copyLink, .addReaction, .more])
+        list.actions.quick[2] = [QuickReaction(emoji: party, mine: false)]
+        var state = MessageTableState(rows: [
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second"),
+        ])
+        state.reachedOldest = true
+        state.focused = true
+        state.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: true)
+        list.controller.show(state)
+        list.window.layoutIfNeeded()
+        try list.hover(2)
+        let button = list.bar.quickButtons[0]
+        #expect(!button.picture.animates, "reduced motion: only under the pointer")
+
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: button))
+        #expect(button.picture.animates)
+
+        try list.hover(1)
+        try list.hover(2)
+        #expect(!list.bar.quickButtons[0].picture.animates)
+    }
+
+    @Test
     func aQuickReactionsClickReactsFromTheHoverBar() throws {
         show()
         try list.hover(2)
@@ -890,6 +944,51 @@ struct ReactionBarTests {
     }
 
     // MARK: The menu
+
+    @Test
+    func theMenusEmojiStandBesideTheirShortNames() async throws {
+        let files = TestImages()
+        let cache = ImageCache(
+            source: FakeImageSource.serving(try files.png("party", pixels: 64), pixels: 64))
+        let party = QuickReaction(emoji: customPill(7, "party").emoji, mine: false)
+
+        let items = MessageMenu.reactions(quick + [party], images: cache) { _ in }
+
+        #expect(items.map(\.title) == [":100:", ":laughing:", ":sparkling_heart:", ":party:"])
+        #expect(items.prefix(3).allSatisfy { $0.image?.size == NSSize(width: 16, height: 16) })
+        try await eventually { items[3].image != nil }
+        #expect(items[3].image?.size == NSSize(width: 16, height: 16))
+        let removals = MessageMenu.removals([pill("👍", 2)], images: cache) { _ in }
+        #expect(removals.map(\.title) == [":thumbsup:  2"])
+        #expect(removals[0].image?.size == NSSize(width: 16, height: 16))
+    }
+
+    // A face fills the item's box as it fills a pill's.
+    @Test
+    func aMenuItemsEmojiIsDrawnInItsBox() throws {
+        let image = try #require(MessageMenu.emojiImage("😀"))
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(x: 0, y: 0, width: 32, height: 32))
+        NSGraphicsContext.restoreGraphicsState()
+
+        var inked: [(Int, Int)] = []
+        for y in 0..<32 {
+            for x in 0..<32 where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+                inked.append((x, y))
+            }
+        }
+        let xs = inked.map(\.0)
+        let ys = inked.map(\.1)
+        #expect((xs.max() ?? 0) - (xs.min() ?? 0) >= 26, "the face fills the box's width")
+        #expect((ys.max() ?? 0) - (ys.min() ?? 0) >= 26)
+        #expect((xs.min() ?? 0) >= 0 && (xs.max() ?? 99) <= 31)
+    }
 
     func groups() -> [[MessageActionItem]] {
         let item = MessageTableTests.RecordingActions.item

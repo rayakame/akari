@@ -320,11 +320,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reportLine()
         updateRelativeTimer()
         prefetchMedia()
+        hoverBar.images = state.images.cache
         if previous.focused != state.focused || previous.motion != state.motion
             || previous.images != state.images
         {
             updateAvatarAnimation()
             updateMediaAnimation()
+            updateQuickAnimation()
         }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
@@ -1457,7 +1459,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             case .addReaction:
                 self?.reactionItems(for: row, from: .contextMenu)
             case .removeReactions:
-                MessageMenu.removals(actions.removableReactions(for: row)) { pill in
+                MessageMenu.removals(
+                    actions.removableReactions(for: row), images: self?.state.images.cache
+                ) { pill in
                     guard let self else {
                         return
                     }
@@ -1514,8 +1518,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return []
         }
         let id = MessageTimeline.ItemId.message(row.id)
-        return MessageMenu.reactions(actions.quickReactions(for: row, shift: false)) {
-            [weak self] quick in
+        return MessageMenu.reactions(
+            actions.quickReactions(for: row, shift: false), images: state.images.cache
+        ) { [weak self] quick in
             actions.react(quick, on: self?.row(id) ?? row, from: location)
         }
     }
@@ -2087,6 +2092,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         quick?.isHovered = true
         hoveredQuick = quick
+        updateQuickAnimation()
         let add = target?.view as? ReactionAddButton
         if hoveredAdd !== add {
             hoveredAdd?.isHovered = false
@@ -2306,6 +2312,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             hoverBar.button(.more)?.isSelected = moreSelected
         }
         placeBar()
+    }
+
+    private func updateQuickAnimation() {
+        for button in hoverBar.quickButtons {
+            button.animates = state.motion.plays(
+                .emoji,
+                MotionPolicy.Context(
+                    windowKey: state.focused, appActive: state.focused, hovered: button === hoveredQuick))
+        }
     }
 
     private func hideBar() {

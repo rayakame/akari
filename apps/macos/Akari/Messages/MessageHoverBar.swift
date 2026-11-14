@@ -23,6 +23,14 @@ final class MessageHoverBar: NSView {
     private(set) var quick: [QuickReaction] = []
     private(set) var quickButtons: [QuickReactionButton] = []
     let separator = NSView()
+    /// Custom quick reactions' images.
+    var images: ImageCache? {
+        didSet {
+            if images !== oldValue {
+                quickButtons.forEach { $0.picture.images = images }
+            }
+        }
+    }
     /// A button's click, with the button.
     var onAction: (MessageAction, HoverBarButton) -> Void = { _, _ in }
     var onQuick: (QuickReaction) -> Void = { _ in }
@@ -82,6 +90,7 @@ final class MessageHoverBar: NSView {
         var x = Self.padding
         quickButtons = quick.map { reaction in
             let button = QuickReactionButton(reaction)
+            button.picture.images = images
             button.frame = NSRect(
                 x: x, y: Self.padding, width: HoverBarButton.size, height: HoverBarButton.size)
             button.target = self
@@ -266,13 +275,18 @@ final class HoverBarButton: NSButton {
     }
 }
 
-/// One quick reaction of the hover bar: the emoji in a button's box; the controller says when
-/// the pointer is over it.
+/// One quick reaction of the hover bar: the emoji in a button's box, a custom one from the image
+/// tier; the controller says when the pointer is over it and whether it plays.
 final class QuickReactionButton: NSButton {
     static let emojiSide: CGFloat = 20
 
     let reaction: QuickReaction
-    private let glyph = EmojiGlyphView()
+    let glyph = EmojiGlyphView()
+    let picture = ImageLayerView()
+    var animates: Bool {
+        get { picture.animates }
+        set { picture.animates = newValue }
+    }
 
     var isHovered = false {
         didSet {
@@ -298,8 +312,18 @@ final class QuickReactionButton: NSButton {
         setAccessibilityLabel(reaction.accessibilityLabel)
         wantsLayer = true
         layer?.cornerRadius = 6
-        glyph.emoji = reaction.emoji.name ?? ""
+        picture.fit = .contain
+        picture.placeholder = .none
+        if let key = reaction.emoji.key {
+            glyph.isHidden = true
+            picture.fallbackText = reaction.name
+            picture.show(ImageLayerView.Content(key: key))
+        } else {
+            picture.isHidden = true
+            glyph.emoji = reaction.emoji.name ?? ""
+        }
         addSubview(glyph)
+        addSubview(picture)
     }
 
     required init?(coder: NSCoder) {
@@ -310,9 +334,11 @@ final class QuickReactionButton: NSButton {
 
     override func layout() {
         super.layout()
-        glyph.frame = NSRect(
+        let box = NSRect(
             x: (bounds.width - Self.emojiSide) / 2, y: (bounds.height - Self.emojiSide) / 2,
             width: Self.emojiSide, height: Self.emojiSide)
+        glyph.frame = box
+        picture.frame = box
     }
 
     override func mouseDown(with event: NSEvent) {
