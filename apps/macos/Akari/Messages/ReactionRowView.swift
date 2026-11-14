@@ -561,6 +561,14 @@ final class ReactionAddButton: NSButton {
             }
         }
     }
+    /// Its emoji picker is open: lit as under the pointer.
+    var isSelected = false {
+        didSet {
+            if isSelected != oldValue {
+                updateColors()
+            }
+        }
+    }
 
     init() {
         super.init(frame: .zero)
@@ -594,11 +602,12 @@ final class ReactionAddButton: NSButton {
     }
 
     private func updateColors() {
+        let lit = isHovered || isSelected
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = (isHovered ? Palette.panel : Palette.chat).cgColor
-            layer?.borderColor = isHovered ? Palette.borderNormal.cgColor : .clear
+            layer?.backgroundColor = (lit ? Palette.panel : Palette.chat).cgColor
+            layer?.borderColor = lit ? Palette.borderNormal.cgColor : .clear
         }
-        contentTintColor = isHovered ? Palette.interactiveTextActive : Palette.interactiveText
+        contentTintColor = lit ? Palette.interactiveTextActive : Palette.interactiveText
     }
 }
 

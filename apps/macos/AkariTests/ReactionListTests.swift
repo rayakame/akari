@@ -340,35 +340,15 @@ struct ReactionListTests {
     }
 
     @Test
-    func theAddButtonOpensTheQuickReactionsUnderIt() throws {
-        list.actions.quick[2] = [
-            QuickReaction(emoji: .unicode("💯"), mine: false),
-            QuickReaction(emoji: .unicode("😆"), mine: true),
-        ]
-        list.show(rows(reactions(pill("👍"))))
-        let add = try pills(2).add
-        var menus: [NSMenu] = []
-        list.controller.popUp = { menu, _, _ in menus.append(menu) }
-
-        add.performClick(nil)
-
-        let menu = try #require(menus.first)
-        #expect(menu.items.map(\.title) == [":100:", ":laughing:"])
-        #expect(menu.items.map(\.state) == [.off, .on])
-        #expect(menu.items.map(\.toolTip) == ["Click to react", "Click to remove"])
-        list.actions.calls = []
-        menu.performActionForItem(at: 0)
-        #expect(list.actions.calls == ["react :100: on 2 from inlineButton"])
-    }
-
-    @Test
-    func withoutQuickReactionsTheAddButtonOpensNothing() throws {
+    func whereThePickerIsntOfferedTheAddButtonOpensNothing() throws {
         list.show(rows(reactions(pill("👍"))))
         var menus = 0
         list.controller.popUp = { _, _, _ in menus += 1 }
 
         try pills(2).add.performClick(nil)
 
+        #expect(list.actions.calls.contains("picker for 2 from inlineButton"))
+        #expect(list.controller.emojiPicker.windows.panel == nil)
         #expect(menus == 0)
     }
 
@@ -926,23 +906,6 @@ struct ReactionBarTests {
         #expect(list.bar.quickButtons.map(\.reaction.mine) == [true])
     }
 
-    @Test
-    func addReactionInTheBarOpensTheQuickReactionsUnderItsButton() throws {
-        show()
-        try list.hover(2)
-        var opened: [(menu: NSMenu, view: NSView)] = []
-        list.controller.popUp = { menu, _, view in opened.append((menu, view)) }
-
-        try #require(list.bar.button(.addReaction)).performClick(nil)
-
-        let menu = try #require(opened.first)
-        #expect(menu.view === list.bar.button(.addReaction))
-        #expect(menu.menu.items.map(\.title) == [":100:", ":laughing:", ":sparkling_heart:"])
-        list.actions.calls = []
-        menu.menu.performActionForItem(at: 2)
-        #expect(list.actions.calls == ["react :sparkling_heart: on 2 from picker"])
-    }
-
     // MARK: The menu
 
     @Test
@@ -1051,6 +1014,7 @@ struct ReactionBarTests {
     @Test
     func theMessagesMenuReactsAndRemovesThroughTheList() throws {
         show()
+        list.actions.menuEmoji[2] = quick
         list.actions.removable[2] = [pill("👍", 2)]
         let model = ReactionMenuActions(list.actions, groups: groups())
         list.controller.actions = model
@@ -1087,6 +1051,12 @@ final class ReactionMenuActions: MessageListActions {
     }
     func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] {
         base.quickReactions(for: row, shift: shift)
+    }
+    func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] {
+        base.menuReactions(for: row)
+    }
+    func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel? {
+        base.emojiPicker(for: row, from: location)
     }
     func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {
         base.react(quick, on: row, from: location)

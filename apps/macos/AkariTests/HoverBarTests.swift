@@ -22,7 +22,8 @@ final class BarList {
 
     /// With `timers`, relative times change when the test fires them, at the clock's time.
     init(
-        scale: CGFloat? = nil, height: CGFloat = 400, table: MessageTableView = MessageTableView(),
+        scale: CGFloat? = nil, width: CGFloat = 600, height: CGFloat = 400,
+        table: MessageTableView = MessageTableView(),
         clock: TimeRefreshTests.Clock? = nil, timers: TimeRefreshTests.Timers? = nil
     ) {
         controller = MessageTableController(
@@ -35,8 +36,8 @@ final class BarList {
             onScreen: { timers != nil || MessageTableController.isOnScreen($0) })
         window =
             scale.map { ScaledWindow.make(scale: $0) }
-            ?? TestWindow.make(size: NSSize(width: 600, height: height), style: [.titled, .resizable])
-        window.setContentSize(NSSize(width: 600, height: height))
+            ?? TestWindow.make(size: NSSize(width: width, height: height), style: [.titled, .resizable])
+        window.setContentSize(NSSize(width: width, height: height))
         window.contentView = controller.scrollView
         controller.actions = actions
         controller.modifiers = { [unowned self] in shift ? .shift : [] }

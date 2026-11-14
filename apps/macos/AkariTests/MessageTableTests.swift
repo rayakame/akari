@@ -1327,6 +1327,20 @@ struct MessageTableTests {
             calls.append("react \(quick.name) on \(row.message.id.rawValue) from \(location)")
         }
 
+        /// Add Reaction's submenu's emoji, by message.
+        var menuEmoji: [UInt64: [QuickReaction]] = [:]
+        /// Set: the emoji picker opens on its models.
+        var picking: ReactionsModel?
+
+        func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] {
+            model?.menuReactions(for: row) ?? menuEmoji[row.id.rawValue] ?? []
+        }
+
+        func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel? {
+            calls.append("picker for \(row.message.id.rawValue) from \(location)")
+            return picking?.openPicker(for: row, from: location)
+        }
+
         func toggleReaction(
             _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation
         ) {

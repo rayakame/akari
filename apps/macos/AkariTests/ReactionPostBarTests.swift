@@ -124,21 +124,6 @@ struct ReactionPostBarTests {
     }
 
     @Test
-    func reactToPostOpensTheQuickReactionsFromTheForumsToolbar() throws {
-        list.actions.quick[1] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
-        let cell = try show(bar())
-        var menus: [NSMenu] = []
-        list.controller.popUp = { menu, _, _ in menus.append(menu) }
-
-        cell.react.performClick(nil)
-
-        let menu = try #require(menus.first)
-        list.actions.calls = []
-        menu.performActionForItem(at: 0)
-        #expect(list.actions.calls == ["react :100: on 1 from forumToolbar"])
-    }
-
-    @Test
     func aChangeOfTheReactionsKeepsThePillsViews() throws {
         let cell = try show(bar([pill("👍", 2)]))
         let thumbs = cell.reactions.pills[0]
