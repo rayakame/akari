@@ -41,11 +41,11 @@ by their token in [theme.md](theme.md). Who may react is in
   number is swapped.
 - **The add button** stands at the row's end, always visible, wherever the user may react with
   a new emoji (`react`): 34 × 30, radius 8, the chat's own color with a smiling face in
-  `interactiveText`; under the pointer the panel's color, a white border at 20 % and the face in
+  `interactiveText`; under the pointer the panel's color, a border and the face in
   `interactiveTextActive`. Its tooltip is "Add Reaction".
 - For VoiceOver the row is a group, each pill a button that reads "👍, 3 reactions, press to
   react" or "…, press to remove your reaction" (a custom emoji by its name, underscores as
-  spaces), and the add button "Add Reaction".
+  spaces), and the add button "Add Reaction". A pill that only shows reads "👍, 3 reactions".
 
 *Akari:*
 
@@ -58,6 +58,8 @@ by their token in [theme.md](theme.md). Who may react is in
   stay as they are, and a count that changed keeps its pill. The row's height follows the lines
   of pills without the reader's place moving, and a list at its bottom stays there.*
 - *SF Symbols' smiling face stands for the official client's face with a plus.*
+- *The add button's border under the pointer is `borderNormal` (20 %, 40 % in the light theme),
+  which shows in both themes; the official client's is white at 20 %.*
 - *An emoji the system's font has no single picture for (a newer sequence) is drawn as its
   parts, made smaller until they fit the box. Where Apple's own picture is cut at its canvas
   (🫡's hand), it shows so.*
@@ -111,12 +113,17 @@ by their token in [theme.md](theme.md). Who may react is in
   Unicode emoji by its own short names (`:thumbsup:`), which Akari doesn't have.*
 - *Names are the users' display names; server nicknames come with the member milestone. A pill
   with super reactions fills its three names up from them.*
-- *The names are dropped when the message's reactions change; the official client keeps its
-  list current from the events instead.*
+- *The names are dropped when the row's reactions change (a thread's starter row hears of its
+  message by its own IDs); the official client keeps its list current from the events instead.
+  Names asked before a change are never shown after it. The names of 64 pills are kept, the
+  ones asked longest ago going first.*
+- *A tooltip that is already open keeps its words when the names arrive; it reads them the next
+  time it opens.*
 
 ## Quick reactions
 
-- **In the hover bar,** where `react` allows a new emoji and Shift isn't held: three emoji
+- **In the hover bar,** where `react` allows a new emoji (as in the official client: without
+  it the bar has none, even for emoji the message already has) and Shift isn't held: three emoji
   before the bar's buttons, each in a button of 28 with the emoji at 20, then a line of 1 × 24
   (`borderSubtle`) with 4 on each side, then Add Reaction and the rest
   ([message-actions.md](message-actions.md#the-buttons-in-order)). The bar is 28 wider per
@@ -144,7 +151,7 @@ by their token in [theme.md](theme.md). Who may react is in
 "View Reactions" in the message's menu, where the message has reactions.
 
 - A modal titled "Reactions" over a dimmed window, 600 wide; the X, Escape or a press outside
-  closes it, and it closes itself when the message has no reactions left.
+  closes it, and it closes itself when the message has no reactions left or is deleted.
 - **Left:** the message's emoji in a column 24 from the edge, 98 wide with 16 before a divider
   of 1: one tab per emoji, the most reactions first, 32 high and 8 apart with a radius of 8,
   the emoji at 24 and its count (14 semibold). The chosen tab is filled
@@ -161,9 +168,21 @@ by their token in [theme.md](theme.md). Who may react is in
 
 - *One tab per emoji, plain and super reactions together: the users of the plain reactions,
   then those of the super reactions. The official client has a tab for each kind.*
-- *When the chosen emoji's reactions change, its first hundred are asked again and the list
-  stays as it is until they come; users loaded past them are kept. The official client changes
-  its list by the events' user IDs.*
+- *When the chosen emoji's reactions change, every page that was loaded is asked again and the
+  list stays as it is until they have come; a refresh that fails leaves it. The same when a
+  reaction event leaves every count as it was (one user left, another came): the events name
+  no user. The official client changes its list by the events' user IDs.*
+- *A page asked for while the list is refreshed is loaded after it, and a page that shows no
+  one new (exactly a hundred plain reactions before the super reactions) goes on to the next.*
+- *A removed row stays out until a list asked after Discord's answer has come: one asked
+  before it may still name the user. The ✕ takes the kind of reaction its row stands for; a
+  user who also reacted with the other kind stays in the list with that one. A removal still
+  running hides nothing under another emoji.*
+- *The ✕ also shows while it has the keyboard's focus (Full Keyboard Access), and VoiceOver
+  reaches it on every row that has one.*
+- *The window stays open over a reconnect: while the store has let go of the message (a reload)
+  the emoji and the list stay as they were, and are read again when the message is back. It
+  closes when "Show emoji reactions" is turned off.*
 - *A page that didn't come says "Couldn't load who reacted." with "Retry".*
 - *A removal Discord refuses puts the row back, with the alert sound for a missing permission.*
 - *A click on a user and the user's menu aren't built.*
@@ -205,5 +224,8 @@ and follows its changes; it has no window to change it yet.
 - *The card's reaction is a chip of Akari's own, 20 high (the emoji at 14 and the count, the
   user's own in the brand's colors); the official client's wasn't measured.*
 - *A forum's custom default reaction is known by its ID alone, so a reaction with it is asked
-  without the emoji's name; whether Discord takes that isn't known.*
+  without the emoji's name (whether Discord takes that isn't known) and its pill has no name
+  until Discord's echo brings it.*
+- *The official count takes every pill for 58 wide. Where the counts make the pills wider than
+  that, fewer are shown, so that the button after them never reaches Follow.*
 - *"+N" is a pill of the count's width without an emoji.*
