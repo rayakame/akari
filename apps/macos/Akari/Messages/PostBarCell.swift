@@ -116,7 +116,6 @@ final class PostBarCell: NSTableCellView {
         }
         let samePost = bar.post == self.bar?.post
         self.bar = bar
-        showReactions(animated: samePost)
         react.isHidden = !bar.reacts
         react.show(
             symbol: "face.smiling", title: bar.reactions.isEmpty ? ReactionWords.reactToPost : nil)
@@ -128,6 +127,7 @@ final class PostBarCell: NSTableCellView {
             symbol: bar.following ? "checkmark" : "bell.fill",
             title: bar.following ? PostBar.following : PostBar.follow)
         follow.isEnabled = bar.canFollow
+        showReactions(animated: samePost)
         for view in [inviteSymbol, inviteTitle, inviteText] as [NSView] {
             view.isHidden = under != .invite
         }
@@ -142,12 +142,36 @@ final class PostBarCell: NSTableCellView {
         needsLayout = true
     }
 
-    // As many pills as the official client's bar shows at this width, the rest behind "+N".
+    // The official client's count for this width, less the pills whose counts leave no room
+    // before Follow: its count takes every pill for 58 wide.
+    private var pillsFitting: Int {
+        guard let bar else {
+            return 0
+        }
+        let room =
+            bounds.width - 2 * (Self.side + Self.buttonInset) - copy.fittingWidth
+            - follow.fittingWidth - 2 * Self.gap
+        let react = bar.reacts ? Self.reactGap + PostBarButton.height : 0
+        var shown = min(bar.reactions.count, PostBar.pillsShown(width: Double(bounds.width)))
+        while shown > 0 {
+            var widths = bar.reactions.prefix(shown).map { ReactionPillButton.width(count: $0.count) }
+            if shown < bar.reactions.count {
+                widths.append(ReactionMoreButton.width(bar.reactions.count - shown))
+            }
+            let pills = widths.reduce(0, +) + ReactionRowView.gap * CGFloat(widths.count - 1)
+            if pills + react <= room {
+                break
+            }
+            shown -= 1
+        }
+        return shown
+    }
+
     private func showReactions(animated: Bool) {
         guard let bar else {
             return
         }
-        pillsShown = min(bar.reactions.count, PostBar.pillsShown(width: Double(bounds.width)))
+        pillsShown = pillsFitting
         let shown = Array(bar.reactions.prefix(pillsShown))
         reactions.configure(
             shown.isEmpty ? nil : ReactionRow(pills: shown, adds: false, toggles: bar.toggles),
@@ -189,7 +213,7 @@ final class PostBarCell: NSTableCellView {
             button.frame = NSRect(x: x, y: y, width: width, height: PostBarButton.height)
             x -= Self.gap
         }
-        if let bar, pillsShown != min(bar.reactions.count, PostBar.pillsShown(width: Double(bounds.width))) {
+        if pillsShown != pillsFitting {
             showReactions(animated: false)
         }
         let left = Self.side + Self.buttonInset

@@ -79,6 +79,14 @@ struct ReactorsPanelTests {
         #expect(reactors.reactors.map(\.user.displayName) == ["Mira"])
     }
 
+    // With Full Keyboard Access the ✕ takes the focus without the pointer near it.
+    @Test
+    func theRemovalShowsUnderThePointerAndWithTheKeyboardsFocus() {
+        #expect(!ReactorRow.showsRemove(hovered: false, focused: false))
+        #expect(ReactorRow.showsRemove(hovered: true, focused: false))
+        #expect(ReactorRow.showsRemove(hovered: false, focused: true))
+    }
+
     @Test
     func theWindowClosesWhenTheSessionSaysSo() throws {
         let session = account.window()

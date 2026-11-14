@@ -117,7 +117,11 @@ struct ReactionRowViewTests {
 
         #expect(row.add.isHidden)
         #expect(row.pills.map(\.isEnabled) == [false])
+        #expect(row.pills[0].accessibilityLabel() == "👍, 1 reaction", "no press is promised")
         #expect(row.hitTest(NSPoint(x: 130, y: 10)) == nil)
+
+        row.configure(reactions(pill("👍"), adds: false, toggles: true))
+        #expect(row.pills[0].accessibilityLabel() == "👍, 1 reaction, press to react")
     }
 
     @Test
@@ -243,6 +247,27 @@ struct ReactionRowViewTests {
         let layer = try #require(mine.layer)
         #expect(layer.borderWidth == 1)
         #expect(layer.cornerRadius == 8)
+    }
+
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theAddButtonsBorderUnderThePointerShowsInBothThemes(_ name: NSAppearance.Name) throws {
+        let row = view(reactions(pill("👍")))
+        row.appearance = NSAppearance(named: name)
+        row.add.viewDidChangeEffectiveAppearance()
+        #expect(row.add.layer?.borderColor?.alpha == 0)
+
+        row.add.isHovered = true
+
+        let border = try #require(row.add.layer?.borderColor.flatMap(NSColor.init(cgColor:)))
+        let shown = try #require(border.usingColorSpace(.sRGB))
+        let token = resolved(Palette.borderNormal, name)
+        #expect(abs(shown.alphaComponent - token.alphaComponent) < 0.01)
+        #expect(abs(shown.redComponent - token.redComponent) < 0.01)
+        #expect(shown.alphaComponent >= 0.2)
+        // Against the button's own fill: white on the light theme's fill shows nothing.
+        let fill = try #require(
+            row.add.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))?.usingColorSpace(.sRGB))
+        #expect(abs(shown.brightnessComponent - fill.brightnessComponent) > 0.2)
     }
 
     @Test

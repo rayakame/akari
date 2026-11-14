@@ -168,6 +168,12 @@ struct ReactorRow: View {
     /// Fixed for tests; otherwise the pointer's.
     var hoveredLook: Bool?
     @State private var hovered = false
+    @FocusState private var removeFocused: Bool
+
+    /// The ✕ shows under the pointer and while the keyboard's focus is on it.
+    static func showsRemove(hovered: Bool, focused: Bool) -> Bool {
+        hovered || focused
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -194,7 +200,9 @@ struct ReactorRow: View {
                 }
                 .buttonStyle(.plain)
                 .background(CursorArea(.pointingHand))
-                .opacity(hoveredLook ?? hovered ? 1 : 0)
+                .focused($removeFocused)
+                .opacity(
+                    Self.showsRemove(hovered: hoveredLook ?? hovered, focused: removeFocused) ? 1 : 0)
                 .help(ReactionWords.remove)
                 .accessibilityLabel(ReactionWords.remove)
             }

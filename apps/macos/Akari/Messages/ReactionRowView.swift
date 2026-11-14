@@ -133,7 +133,6 @@ final class ReactionRowView: NSView {
         setAccessibilityChildren(shownButtons)
     }
 
-    // Left to right, as laid out.
     private var shownButtons: [NSView] {
         (offer.isHidden ? [] : [offer]) + pills + (more.isHidden ? [] : [more])
             + (add.isHidden ? [] : [add]) as [NSView]
@@ -167,6 +166,7 @@ final class ReactionRowView: NSView {
             let button = held.removeValue(forKey: pill.id) ?? makePill()
             button.show(pill, animated: animated)
             button.isEnabled = row?.toggles ?? false
+            button.setAccessibilityLabel(pill.accessibilityLabel(toggles: button.isEnabled))
             button.toolTip = tooltip(pill)
             next.append(button)
         }
@@ -327,7 +327,6 @@ final class ReactionPillButton: NSButton {
 
     func show(_ pill: ReactionPill, animated: Bool = false) {
         show(pill, count: String(pill.count), animated: animated)
-        setAccessibilityLabel(pill.accessibilityLabel)
     }
 
     /// A forum's default reaction: the emoji without a number.
@@ -524,7 +523,9 @@ final class ReactionMoreButton: NSButton {
         nil
     }
 
-    var fittingWidth: CGFloat {
+    var fittingWidth: CGFloat { Self.width(count) }
+
+    static func width(_ count: Int) -> CGFloat {
         2 * ReactionPillButton.inset + ReactionPillButton.digitWidth * CGFloat("+\(count)".count)
     }
 
@@ -595,7 +596,7 @@ final class ReactionAddButton: NSButton {
     private func updateColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = (isHovered ? Palette.panel : Palette.chat).cgColor
-            layer?.borderColor = isHovered ? NSColor.white.withAlphaComponent(0.2).cgColor : .clear
+            layer?.borderColor = isHovered ? Palette.borderNormal.cgColor : .clear
         }
         contentTintColor = isHovered ? Palette.interactiveTextActive : Palette.interactiveText
     }

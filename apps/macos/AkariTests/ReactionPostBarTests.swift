@@ -98,6 +98,21 @@ struct ReactionPostBarTests {
         #expect(list.actions.calls == ["view reactions of 1"])
     }
 
+    // The official count takes a pill for 58 wide; a count of five digits makes one 100.
+    @Test
+    func pillsWithLongCountsLeaveFollowItsPlace() throws {
+        let many = (0..<9).map { pill(String(UnicodeScalar(UInt8(65 + $0))), 12345) }
+
+        let cell = try show(bar(many))
+
+        let official = PostBar.pillsShown(width: Double(cell.bounds.width))
+        #expect(cell.reactions.pills.count < official)
+        #expect(!cell.reactions.pills.isEmpty)
+        #expect(cell.reactions.more.count == 9 - cell.reactions.pills.count)
+        #expect(cell.react.frame.maxX <= cell.follow.frame.minX - 4)
+        #expect(cell.reactions.frame.maxX <= cell.react.frame.minX)
+    }
+
     @Test
     func whoMayNotReactHasNoButtonAndPillsThatOnlyShow() throws {
         let cell = try show(bar([pill("👍")], reacts: false, toggles: false))
