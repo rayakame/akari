@@ -117,11 +117,11 @@ struct ReactionRowViewTests {
 
         #expect(row.add.isHidden)
         #expect(row.pills.map(\.isEnabled) == [false])
-        #expect(row.pills[0].accessibilityLabel() == "👍, 1 reaction", "no press is promised")
+        #expect(row.pills[0].accessibilityLabel() == "thumbsup, 1 reaction", "no press is promised")
         #expect(row.hitTest(NSPoint(x: 130, y: 10)) == nil)
 
         row.configure(reactions(pill("👍"), adds: false, toggles: true))
-        #expect(row.pills[0].accessibilityLabel() == "👍, 1 reaction, press to react")
+        #expect(row.pills[0].accessibilityLabel() == "thumbsup, 1 reaction, press to react")
     }
 
     @Test
@@ -159,7 +159,7 @@ struct ReactionRowViewTests {
         row.pills[1].performClick(nil)
         row.add.performClick(nil)
 
-        #expect(clicked == ["🎉 mine"])
+        #expect(clicked == [":tada: mine"])
         #expect(added.first === row.add)
     }
 
@@ -262,7 +262,7 @@ struct ReactionRowViewTests {
 
         #expect(row.accessibilityRole() == .group)
         #expect(row.pills.map { $0.accessibilityLabel() } == [
-            "👍, 2 reactions, press to react", "🎉, 1 reaction, press to remove your reaction",
+            "thumbsup, 2 reactions, press to react", "tada, 1 reaction, press to remove your reaction",
         ])
         #expect(row.add.accessibilityLabel() == "Add Reaction")
         #expect(row.add.toolTip == "Add Reaction")

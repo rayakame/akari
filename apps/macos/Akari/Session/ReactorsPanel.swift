@@ -248,7 +248,7 @@ struct ReactionEmojiView: View {
             if let key = emoji.key {
                 RemoteImage(key: key, place: .emoji, hovered: hovered, fit: .contain)
             } else {
-                UnicodeEmoji(emoji: emoji.name ?? "")
+                EmojiGlyph(emoji: emoji.name ?? "")
             }
         }
         .frame(width: side, height: side)
@@ -256,7 +256,7 @@ struct ReactionEmojiView: View {
     }
 }
 
-private struct UnicodeEmoji: NSViewRepresentable {
+private struct EmojiGlyph: NSViewRepresentable {
     let emoji: String
 
     func makeNSView(context: Context) -> EmojiGlyphView {

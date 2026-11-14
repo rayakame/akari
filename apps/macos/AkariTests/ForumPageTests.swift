@@ -281,10 +281,10 @@ struct ForumCardReactionTests {
 
     @Test
     func voiceOverReadsTheEmojiAndItsCountOrThatAPressReacts() {
-        #expect(ForumCardReaction.label(of: offered) == "🔥, press to react")
+        #expect(ForumCardReaction.label(of: offered) == "fire, press to react")
         #expect(ForumCardReaction.label(of: .init(emoji: .unicode("👍"), count: 1, mine: false, toggles: true))
-            == "👍, 1 reaction")
-        #expect(ForumCardReaction.label(of: plain) == "👍, 2 reactions")
+            == "thumbsup, 1 reaction")
+        #expect(ForumCardReaction.label(of: plain) == "thumbsup, 2 reactions")
     }
 
     // The middle of a row of pixels: its brightest pixel and how blue it is.

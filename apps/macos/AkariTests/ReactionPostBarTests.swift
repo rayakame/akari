@@ -56,12 +56,13 @@ struct ReactionPostBarTests {
         let offer = cell.reactions.offer
         #expect(!offer.isHidden)
         #expect(offer.countText.isEmpty)
+        #expect(offer.accessibilityLabel() == "fire, press to react")
         #expect(offer.frame.width == 34)
         #expect(cell.convert(offer.bounds, from: offer).minX == 24)
         #expect(abs(cell.react.frame.minX - (24 + 34 + 4)) < 0.01)
         list.actions.calls = []
         offer.performClick(nil)
-        #expect(list.actions.calls == ["toggle 🔥 on 1 from forumToolbar"])
+        #expect(list.actions.calls == ["toggle :fire: on 1 from forumToolbar"])
     }
 
     @Test
@@ -78,7 +79,7 @@ struct ReactionPostBarTests {
         #expect(first.midY == cell.follow.frame.midY)
         list.actions.calls = []
         cell.reactions.pills[1].performClick(nil)
-        #expect(list.actions.calls == ["toggle 🎉 on 1 from forumToolbar"])
+        #expect(list.actions.calls == ["toggle :tada: on 1 from forumToolbar"])
     }
 
     @Test
@@ -134,7 +135,7 @@ struct ReactionPostBarTests {
         let menu = try #require(menus.first)
         list.actions.calls = []
         menu.performActionForItem(at: 0)
-        #expect(list.actions.calls == ["react 💯 on 1 from forumToolbar"])
+        #expect(list.actions.calls == ["react :100: on 1 from forumToolbar"])
     }
 
     @Test
@@ -153,15 +154,28 @@ struct ReactionPostBarTests {
     func thePointerLightsABarsPillAndItsTooltipIsItsMessages() throws {
         let cell = try show(bar([pill("👍", 2)]))
         let thumbs = cell.reactions.pills[0]
-        #expect(thumbs.toolTip == "👍 reacted by 2 people")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by 2 people")
 
         list.move(to: list.table.convert(NSPoint(x: thumbs.bounds.midX, y: thumbs.bounds.midY), from: thumbs))
 
         #expect(thumbs.isHovered)
-        #expect(list.actions.rested.last == "👍 of 1")
-        list.actions.names["👍"] = "👍 reacted by Ann and Bo"
+        #expect(list.actions.rested.last == ":thumbsup: of 1")
+        list.actions.names[":thumbsup:"] = ":thumbsup: reacted by Ann and Bo"
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 1))
-        #expect(thumbs.toolTip == "👍 reacted by Ann and Bo")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by Ann and Bo")
+    }
+}
+
+// A forum card's reaction chip as VoiceOver reads it.
+@MainActor
+struct ForumCardReactionTests {
+    @Test
+    func voiceOverReadsTheEmojisShortNameWithoutColons() {
+        let offer = ForumModel.Card.Reaction(emoji: .unicode("🔥"), count: 0, mine: false, toggles: true)
+        let counted = ForumModel.Card.Reaction(emoji: .unicode("👍"), count: 12, mine: false, toggles: true)
+
+        #expect(ForumCardReaction.label(of: offer) == "fire, press to react")
+        #expect(ForumCardReaction.label(of: counted) == "thumbsup, 12 reactions")
     }
 
     @Test

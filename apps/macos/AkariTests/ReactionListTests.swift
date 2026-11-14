@@ -325,7 +325,7 @@ struct ReactionListTests {
 
         try pills(2).pills[1].performClick(nil)
 
-        #expect(list.actions.calls == ["toggle 🎉 on 2 from inlineButton"])
+        #expect(list.actions.calls == ["toggle :tada: on 2 from inlineButton"])
     }
 
     @Test
@@ -353,12 +353,12 @@ struct ReactionListTests {
         add.performClick(nil)
 
         let menu = try #require(menus.first)
-        #expect(menu.items.map(\.title) == ["💯", "😆"])
+        #expect(menu.items.map(\.title) == [":100:", ":laughing:"])
         #expect(menu.items.map(\.state) == [.off, .on])
         #expect(menu.items.map(\.toolTip) == ["Click to react", "Click to remove"])
         list.actions.calls = []
         menu.performActionForItem(at: 0)
-        #expect(list.actions.calls == ["react 💯 on 2 from inlineButton"])
+        #expect(list.actions.calls == ["react :100: on 2 from inlineButton"])
     }
 
     @Test
@@ -409,14 +409,14 @@ struct ReactionListTests {
     func aPillsTooltipCountsPeopleUntilItsNamesArrive() throws {
         list.show(rows(reactions(pill("👍", 3))))
         let thumbs = try pills(2).pills[0]
-        #expect(thumbs.toolTip == "👍 reacted by 3 people")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by 3 people")
 
-        list.actions.names["👍"] = "👍 reacted by Ann, Bo, and Cy"
+        list.actions.names[":thumbsup:"] = ":thumbsup: reacted by Ann, Bo, and Cy"
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 3))
-        #expect(thumbs.toolTip == "👍 reacted by 3 people")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by 3 people")
 
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 2))
-        #expect(thumbs.toolTip == "👍 reacted by Ann, Bo, and Cy")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by Ann, Bo, and Cy")
     }
 
     // The model keeps a row's names under the row's own ID, a thread's starter row's too.
@@ -429,13 +429,13 @@ struct ReactionListTests {
         ).reacting(reactions(pill("👍", 3)))
         list.show([starter])
         let thumbs = try pills(31).pills[0]
-        list.actions.names["👍"] = "👍 reacted by Ann, Bo, and Cy"
+        list.actions.names[":thumbsup:"] = ":thumbsup: reacted by Ann, Bo, and Cy"
 
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 5))
-        #expect(thumbs.toolTip == "👍 reacted by 3 people")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by 3 people")
 
         list.controller.reactionNamesArrived(for: MessageId(rawValue: 31))
-        #expect(thumbs.toolTip == "👍 reacted by Ann, Bo, and Cy")
+        #expect(thumbs.toolTip == ":thumbsup: reacted by Ann, Bo, and Cy")
     }
 
     @Test
@@ -447,7 +447,7 @@ struct ReactionListTests {
         point(at: row.pills[1])
         try list.hover(1)
 
-        #expect(list.actions.rested.suffix(3) == ["👍 of 2", "🎉 of 2", "none"])
+        #expect(list.actions.rested.suffix(3) == [":thumbsup: of 2", ":tada: of 2", "none"])
     }
 
     // MARK: The count's roll
@@ -594,7 +594,7 @@ struct ReactionListTests {
         #expect(cell.convert(shown.pills[0].bounds, from: shown.pills[0]).minX == 72)
         list.actions.calls = []
         shown.pills[0].performClick(nil)
-        #expect(list.actions.calls == ["toggle 👋 on 5 from inlineButton"])
+        #expect(list.actions.calls == ["toggle :wave: on 5 from inlineButton"])
 
         list.show([row(1, by: ray, at: list.noon), join])
         #expect(rowHeight(5) == plain)
@@ -709,7 +709,7 @@ struct ReactionBarTests {
         try list.hover(2)
 
         let bar = list.bar
-        #expect(bar.quickButtons.map(\.reaction.name) == ["💯", "😆", "💖"])
+        #expect(bar.quickButtons.map(\.reaction.name) == [":100:", ":laughing:", ":sparkling_heart:"])
         #expect(bar.quickButtons.map(\.frame.minX) == [3, 31, 59])
         #expect(!bar.separator.isHidden)
         #expect(bar.separator.frame == NSRect(x: 91, y: 5, width: 1, height: 24))
@@ -826,7 +826,7 @@ struct ReactionBarTests {
 
         list.bar.quickButtons[1].performClick(nil)
 
-        #expect(list.actions.calls == ["react 😆 on 2 from hoverBar"])
+        #expect(list.actions.calls == ["react :laughing: on 2 from hoverBar"])
     }
 
     @Test
@@ -835,9 +835,9 @@ struct ReactionBarTests {
         try list.hover(2)
 
         #expect(list.bar.quickButtons.map(\.toolTip) == [
-            "💯\nClick to react", "😆\nClick to remove", "💖\nClick to react",
+            ":100:\nClick to react", ":laughing:\nClick to remove", ":sparkling_heart:\nClick to react",
         ])
-        #expect(list.bar.quickButtons[1].accessibilityLabel() == "Click to remove 😆")
+        #expect(list.bar.quickButtons[1].accessibilityLabel() == "Click to remove laughing")
     }
 
     @Test
@@ -883,10 +883,10 @@ struct ReactionBarTests {
 
         let menu = try #require(opened.first)
         #expect(menu.view === list.bar.button(.addReaction))
-        #expect(menu.menu.items.map(\.title) == ["💯", "😆", "💖"])
+        #expect(menu.menu.items.map(\.title) == [":100:", ":laughing:", ":sparkling_heart:"])
         list.actions.calls = []
         menu.menu.performActionForItem(at: 2)
-        #expect(list.actions.calls == ["react 💖 on 2 from picker"])
+        #expect(list.actions.calls == ["react :sparkling_heart: on 2 from picker"])
     }
 
     // MARK: The menu
@@ -916,16 +916,16 @@ struct ReactionBarTests {
             run: { ran.append("\($0)") })
 
         let add = try #require(items.first { $0.title == "Add Reaction" }?.submenu)
-        #expect(add.items.map(\.title) == ["💯", "😆", "💖"])
+        #expect(add.items.map(\.title) == [":100:", ":laughing:", ":sparkling_heart:"])
         #expect(add.items.map(\.state) == [.off, .on, .off])
         #expect(add.items[1].accessibilityLabel() == "Click to remove 😆")
         let remove = try #require(items.first { $0.title == "Remove Reactions" }?.submenu)
-        #expect(remove.items.map(\.title) == ["👍  2", "🎉  12"])
+        #expect(remove.items.map(\.title) == [":thumbsup:  2", ":tada:  12"])
         #expect(items.first { $0.title == "View Reactions" }?.submenu == nil)
 
         add.performActionForItem(at: 1)
         remove.performActionForItem(at: 0)
-        #expect(ran == ["react 😆", "remove 👍"])
+        #expect(ran == ["react :laughing:", "remove :thumbsup:"])
     }
 
     // The menu's items were made with the row of the moment the cell was made.
@@ -966,7 +966,7 @@ struct ReactionBarTests {
         list.shift = true
         remove.performActionForItem(at: 0)
         #expect(list.actions.calls.suffix(3) == [
-            "react 💯 on 2 from contextMenu", "remove 👍 from 2", "remove 👍 from 2 shift",
+            "react :100: on 2 from contextMenu", "remove :thumbsup: from 2", "remove :thumbsup: from 2 shift",
         ])
     }
 }

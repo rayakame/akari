@@ -332,7 +332,7 @@ final class ReactionPillButton: NSButton {
     /// A forum's default reaction: the emoji without a number.
     func showOffer(_ emoji: ReactionEmoji) {
         show(ReactionPill(emoji: emoji, normal: 0, mine: false), count: "", animated: false)
-        setAccessibilityLabel("\(ReactionPill.name(of: emoji)), press to react")
+        setAccessibilityLabel("\(ReactionPill.spokenName(of: emoji)), press to react")
     }
 
     private func show(_ pill: ReactionPill, count: String, animated: Bool) {

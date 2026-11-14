@@ -30,7 +30,7 @@ struct ReactorsPanelTests {
         let session = account.window()
         let reactors = try #require(session.reactors)
 
-        #expect(reactors.tabs.map(\.name) == ["🎉", "👍"])
+        #expect(reactors.tabs.map(\.name) == [":tada:", ":thumbsup:"])
         await reactors.open()
 
         #expect(reactors.reactors.map(\.user.displayName) == ["Ray", "Mira Belle", "Kim"])
