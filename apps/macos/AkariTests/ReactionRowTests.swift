@@ -344,6 +344,61 @@ struct ReactionRowViewTests {
 
     // MARK: The emoji's picture
 
+    // A 2x bitmap of 28 × 28 points with `emoji` drawn in the 20-point box at (4, 4): where its
+    // picture's pixels are.
+    func ink(_ emoji: String) throws -> (rep: NSBitmapImageRep, columns: ClosedRange<Int>, rows: ClosedRange<Int>) {
+        let side = 56
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try #require(NSGraphicsContext(bitmapImageRep: rep)).cgContext
+        // As a flipped view at 2x draws: the origin at the top left.
+        context.translateBy(x: 0, y: CGFloat(side))
+        context.scaleBy(x: 2, y: -2)
+        EmojiGlyphView.draw(
+            emoji, in: NSRect(x: 4, y: 4, width: 20, height: 20), context: context, flipped: true)
+        var (left, right, top, bottom) = (side, -1, side, -1)
+        for y in 0..<side {
+            for x in 0..<side where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.02 {
+                (left, right, top, bottom) = (min(left, x), max(right, x), min(top, y), max(bottom, y))
+            }
+        }
+        try #require(right >= left && bottom >= top, "nothing drawn")
+        return (rep, left...right, top...bottom)
+    }
+
+    // The box is pixels 8…47 and a face is round: its picture drawn part of a pixel off (and
+    // so resampled) would cover one column or row more on one side.
+    @Test
+    func aFaceStandsOnItsBoxesPixels() throws {
+        let face = try ink("😀")
+
+        #expect(face.columns.lowerBound + face.columns.upperBound == 55, "\(face.columns)")
+        #expect(face.rows.lowerBound + face.rows.upperBound == 55, "\(face.rows)")
+        #expect(face.columns.lowerBound >= 8 && face.columns.count >= 38, "\(face.columns)")
+        #expect(face.rows.lowerBound >= 8 && face.rows.count >= 38, "\(face.rows)")
+    }
+
+    @Test(arguments: ["👍", "🙏", "🎉", "❤️", "🏳️‍🌈", "1️⃣"])
+    func everyEmojiStaysInsideItsBox(_ emoji: String) throws {
+        let drawn = try ink(emoji)
+
+        #expect(drawn.columns.lowerBound >= 8 && drawn.columns.upperBound <= 47, "\(drawn.columns)")
+        #expect(drawn.rows.lowerBound >= 8 && drawn.rows.upperBound <= 47, "\(drawn.rows)")
+    }
+
+    // What the system's font has no single picture for is drawn as several.
+    @Test
+    func severalGlyphsAreMadeSmallerToFitTheBox() throws {
+        let two = try ink("👍🎉")
+
+        #expect(two.columns.lowerBound >= 8 && two.columns.upperBound <= 47, "\(two.columns)")
+        #expect(two.columns.count >= 36, "as wide as the box allows: \(two.columns)")
+        #expect(abs((two.rows.lowerBound + two.rows.upperBound) - 55) <= 2, "in the middle: \(two.rows)")
+    }
+
     @Test
     func aUnicodeEmojiFillsItsBoxAndIsCentered() throws {
         let side = 40

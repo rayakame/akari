@@ -628,33 +628,46 @@ final class EmojiGlyphView: NSView {
         Self.draw(emoji, in: bounds, context: context, flipped: true)
     }
 
-    // A face's picture at 16 points, from its line's origin: the measure for every emoji.
-    private static let face: CGRect = {
-        let space = CGColorSpaceCreateDeviceRGB()
-        guard
-            let context = CGContext(
-                data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else {
-            return CGRect(x: 0, y: -3, width: 20, height: 20)
-        }
-        context.textPosition = .zero
-        let ink = CTLineGetImageBounds(line("\u{1F600}", size: 16), context)
-        return ink.width > 0 ? ink : CGRect(x: 0, y: -3, width: 20, height: 20)
+    private static let measuring: CGContext? = {
+        let context = CGContext(
+            data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.textPosition = .zero
+        return context
     }()
 
+    private static func ink(_ line: CTLine) -> CGRect? {
+        measuring.map { CTLineGetImageBounds(line, $0) }.flatMap { $0.width > 0 ? $0 : nil }
+    }
+
+    // A face's picture at 16 points: the measure for every emoji.
+    private static let face = ink(line("\u{1F600}", size: 16)) ?? CGRect(x: 0, y: -3, width: 20, height: 20)
+
     /// Draws `emoji` in `box`: a face fills it, and other emoji stand where a line of faces
-    /// would have them.
+    /// would have them. What the font draws as several pictures is made smaller to fit.
     static func draw(_ emoji: String, in box: NSRect, context: CGContext, flipped: Bool) {
         let scale = min(box.width, box.height) / max(face.width, face.height)
-        let line = line(emoji, size: 16 * scale)
-        let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
-        // The face's middle above the baseline, at this size.
-        let rise = face.midY * scale
+        var size = 16 * scale
+        var line = line(emoji, size: size)
+        // The face's middle for every emoji, so a face's pixels are the box's.
+        var middle = CGPoint(x: face.midX * scale, y: face.midY * scale)
+        if CTLineGetGlyphCount(line) > 1, var whole = ink(line) {
+            // A picture doesn't shrink exactly with its font's size: measured again after each step.
+            for _ in 0..<2 where whole.width > box.width {
+                size *= box.width / whole.width
+                line = self.line(emoji, size: size)
+                guard let measured = ink(line) else {
+                    break
+                }
+                whole = measured
+            }
+            middle = CGPoint(x: whole.midX, y: whole.midY)
+        }
         context.saveGState()
         context.textMatrix = flipped ? CGAffineTransform(scaleX: 1, y: -1) : .identity
         context.textPosition = CGPoint(
-            x: box.midX - advance / 2, y: flipped ? box.midY + rise : box.midY - rise)
+            x: box.midX - middle.x, y: flipped ? box.midY + middle.y : box.midY - middle.y)
         CTLineDraw(line, context)
         context.restoreGState()
     }

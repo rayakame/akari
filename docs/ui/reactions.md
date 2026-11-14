@@ -33,7 +33,8 @@ by their token in [theme.md](theme.md). Who may react is in
 - **The emoji:** a custom emoji is its picture from Discord's CDN, fitted into the box, with
   `:name:` in its place if it fails; an animated one plays by the same rule as the message's
   other custom emoji ([emoji.md](emoji.md#custom-emoji)). A Unicode emoji is drawn in the
-  system's emoji font so that a face fills the box.
+  system's emoji font so that a face's picture fills the box, pixel on pixel; every other
+  emoji is drawn at the same size and stands where it would beside the face in a line of text.
 - **The count's roll:** when a count changes while the window is key, the old number leaves
   upward and the new one comes from below for a higher count, the other way for a lower one,
   over 0.3 s with a slight overshoot. In a window that isn't key, and with Reduce Motion, the
@@ -57,6 +58,9 @@ by their token in [theme.md](theme.md). Who may react is in
   stay as they are, and a count that changed keeps its pill. The row's height follows the lines
   of pills without the reader's place moving, and a list at its bottom stays there.*
 - *SF Symbols' smiling face stands for the official client's face with a plus.*
+- *An emoji the system's font has no single picture for (a newer sequence) is drawn as its
+  parts, made smaller until they fit the box. Where Apple's own picture is cut at its canvas
+  (🫡's hand), it shows so.*
 - *The first reaction appears without a transition, as in the official client; so does the
   row's last one going.*
 
