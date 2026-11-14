@@ -30,6 +30,8 @@ public final class ReactionsModel {
     public var refused: () -> Void = {}
     /// A pill's names arrived: its tooltip reads differently now.
     public var tooltipChanged: (MessageId, ReactionPill.ID) -> Void = { _, _ in }
+    /// The open emoji picker; one at a time.
+    public private(set) var picker: EmojiPickerModel?
     // With the number of the ask that brought them: the lowest goes first.
     private var names: [NamesKey: (names: [String], ask: Int)] = [:]
     private var asking: [NamesKey: Int] = [:]
@@ -105,6 +107,31 @@ public final class ReactionsModel {
         let emoji = (recent + quick).map { pickerReaction(emoji: $0) }
             .filter { seen.insert(ReactionPill.ID($0)).inserted }
         return quickReactions(Array(emoji.prefix(Self.menuLimit)), on: own)
+    }
+
+    /// The emoji picker for the row's message, in place of one already open; `nil` where Add
+    /// Reaction isn't offered. `location` is the opener's, which a pick reacts from.
+    public func openPicker(
+        for row: MessageListModel.Row, from location: ReactionLocation
+    ) -> EmojiPickerModel? {
+        let own = row.message
+        guard offersReactions(on: own) else {
+            return nil
+        }
+        picker?.close()
+        let (channel, message) = (own.channelId, own.id)
+        let picker = EmojiPickerModel(
+            channelId: channel, messageId: message, location: location, store: store
+        ) { [weak self] emoji, location in
+            await self?.add(emoji, channelId: channel, messageId: message, from: location)
+        }
+        picker.closed = { [weak self, weak picker] in
+            if let self, self.picker === picker {
+                self.picker = nil
+            }
+        }
+        self.picker = picker
+        return picker
     }
 
     /// A pick from the emoji picker: the user's reaction with `emoji`, never taken back when it
@@ -253,6 +280,10 @@ public final class ReactionsModel {
         if batch.everythingChanged || batch.displaySettingsChanged {
             shows = store.displaySettings().renderReactions
         }
+        if !shows {
+            picker?.close()
+        }
+        picker?.apply(batch)
         // A message that arrives whole again may bring other reactions.
         let changed =
             batch.everythingChanged

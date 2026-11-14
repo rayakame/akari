@@ -4,6 +4,15 @@ import Testing
 
 struct EventBatchTests {
     @Test
+    func aServersEmojiChangeIsItsOwn() {
+        let batch = EventBatch([.guildEmojisChanged(guildId: id(1)), .guildEmojisChanged(guildId: id(2))])
+
+        #expect(batch.emojisChanged == [id(1), id(2)])
+        #expect(batch.guildsChanged.isEmpty)
+        #expect(!batch.guildListChanged)
+    }
+
+    @Test
     func touchedIdsAreCollectedPerKind() {
         let batch = EventBatch([
             .ready,

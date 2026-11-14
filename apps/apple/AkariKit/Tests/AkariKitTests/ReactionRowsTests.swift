@@ -29,6 +29,17 @@ struct ReactionRowsTests {
         MessageListModel(channelId: id(channel), userId: id(1), account: account, store: store)
     }
 
+    @Test
+    func aListsEmojiPickerHearsTheListsEvents() throws {
+        let list = list()
+        let picker = try #require(list.reactions.openPicker(for: list.rows[1], from: .picker))
+
+        list.apply(EventBatch([.messageDeleted(channelId: here, messageId: id(2))]))
+
+        #expect(!picker.isOpen)
+        #expect(list.reactions.picker == nil)
+    }
+
     func pills(_ list: MessageListModel) -> [[String]?] {
         list.rows.map { $0.reactions?.pills.map { "\($0.emoji.name ?? "") \($0.count)\($0.mine ? " mine" : "")" } }
     }
