@@ -51,7 +51,8 @@ brotli = { version = "9", default-features = false, features = ["std"] }
 # Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 
-# akari-markdown: graphemes and the Unicode emoji list for jumbo messages and masked-link checks.
+# akari-markdown: graphemes and the Unicode emoji list for jumbo messages and masked-link checks;
+# akari-core: the same list for the emoji picker.
 unicode-segmentation = "1.13"
 emojis = { version = "0.9", default-features = false }
 # WHATWG URL parsing for links; already in the app through reqwest.
