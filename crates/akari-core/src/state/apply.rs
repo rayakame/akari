@@ -2316,6 +2316,7 @@ mod browser;
 mod creating;
 mod forum;
 mod media;
+mod picker;
 mod reactions;
 mod reading;
 

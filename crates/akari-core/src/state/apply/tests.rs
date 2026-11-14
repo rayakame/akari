@@ -1156,6 +1156,7 @@ mod embeds;
 mod expressions;
 mod forum;
 mod media;
+mod picker;
 mod pins;
 mod reactions;
 mod read_states;

@@ -10,6 +10,7 @@ mod expressions;
 mod media;
 mod order;
 mod permissions;
+mod picker;
 mod reactions;
 mod read_states;
 mod replies;
@@ -32,6 +33,7 @@ pub use expressions::{
 pub(crate) use media::AgeAgreements;
 pub use media::{AgeGate, AttachmentDisplay, MediaCover, ShownAttachment};
 pub use order::display_order;
+pub use picker::{CustomEmoji, EmojiAccess, EmojiSection, PickerEmoji, RECENT_REACTIONS};
 pub(crate) use reactions::shared as shared_reactions;
 pub use reactions::{Reaction, ReactionEmoji};
 pub use read_states::ReadState;

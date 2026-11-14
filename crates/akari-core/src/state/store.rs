@@ -15,6 +15,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
+use super::picker::{EmojiAccess, EmojiSection};
 use super::reactions::{Reaction, ReactionEmoji};
 use super::read_states::{Ack, ReadState};
 use super::replies::{ReplyTarget, ReplyTo};
@@ -1314,6 +1315,23 @@ impl Store {
             .filter(|channel| !channel.message_request && !channel.spam)
             .collect();
         order::private_channel_order(listed)
+    }
+
+    /// The user's servers' custom emoji as the picker lists them for reacting in `channel`: the
+    /// channel's own server first, then the rest in the rail's order, each server's emoji by ID.
+    /// Left out, as in Discord's picker: another server's emoji where the channel doesn't allow
+    /// external emoji, emoji for roles the user lacks, and servers left without any. Empty for a
+    /// channel the store doesn't know. Read again on `GuildEmojisChanged`.
+    pub fn custom_emoji_sections(&self, channel: ChannelId) -> Vec<EmojiSection> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.custom_emoji_sections(channel, now))
+    }
+
+    /// Whether the user may react with the custom emoji in `channel`; `None` for an emoji none of
+    /// the user's servers has, or a channel the store doesn't know.
+    pub fn emoji_access(&self, channel: ChannelId, emoji: EmojiId) -> Option<EmojiAccess> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.emoji_access(channel, emoji, now))
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,
