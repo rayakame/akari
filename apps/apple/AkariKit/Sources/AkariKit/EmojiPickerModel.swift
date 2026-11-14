@@ -148,17 +148,26 @@ public final class EmojiPickerModel {
     public var onChange: (Change) -> Void = { _ in }
     /// The picker closed: picked, closed by the host, or its message went.
     public var onClose: () -> Void = {}
-    // The reacting list's hook: it lets go of a closed picker.
+    /// A pick hit a locked emoji.
+    public var onRefused: () -> Void = {}
     var closed: () -> Void = {}
 
     private let store: Store
     private let guildId: GuildId?
+    // A thread's permissions come from its parent's overwrites.
+    private let places: Set<ChannelId>
+    private var permissions: Permissions?
     private let react: (ReactionEmoji, ReactionLocation) async -> Void
     private var browsing: [Section] = []
-    private var searches = 0
+    private(set) var searches = 0
+    private(set) var answersHandled = 0
+    private(set) var reacting: Task<Void, Never>?
     // The search whose answer shows; an older answer never replaces it.
     private var shownSearch = 0
+    private var shownQuery: String?
     private var searching: Task<Void, Never>?
+    // A Return before the answer to what was typed, with its Shift.
+    private var waitingPick: Bool?
 
     init(
         channelId: ChannelId, messageId: MessageId, location: ReactionLocation, store: Store,
@@ -169,7 +178,10 @@ public final class EmojiPickerModel {
         self.location = location
         self.store = store
         self.react = react
-        guildId = store.channel(id: channelId)?.guildId
+        let channel = store.channel(id: channelId)
+        guildId = channel?.guildId
+        places = Set([channelId, channel?.parentId].compactMap { $0 })
+        permissions = guildId == nil ? nil : store.permissions(channelId: channelId)
         browsing = browse()
         sections = browsing
         selection = first(in: sections)
@@ -219,11 +231,12 @@ public final class EmojiPickerModel {
     }
 
     /// The strip's choice: the section's first emoji, its header at the top. A search ends.
-    public func jump(to section: Int) {
+    public func jump(to kind: Section.Kind) {
         if !query.isEmpty {
             endSearch()
         }
-        guard sections.indices.contains(section), !sections[section].items.isEmpty else {
+        guard let section = sections.firstIndex(where: { $0.kind == kind }), !sections[section].items.isEmpty
+        else {
             return
         }
         selection = Position(section: section, item: 0)
@@ -236,6 +249,7 @@ public final class EmojiPickerModel {
             return
         }
         query = text
+        waitingPick = nil
         guard !Self.isBlank(text) else {
             endSearch(clearing: false)
             return
@@ -244,10 +258,19 @@ public final class EmojiPickerModel {
     }
 
     /// Reacts with the emoji at `position`, else the selection, and closes unless `keepOpen`
-    /// (Shift). `false` for a locked emoji or none: nothing happens.
+    /// (Shift). Without a position before the search's answer, the answer's first once it shows.
+    /// `false` for a locked emoji (`onRefused`) or none: nothing happens.
     @discardableResult
     public func pick(_ position: Position? = nil, keepOpen: Bool) -> Bool {
-        guard isOpen, let position = position ?? selection, contains(position) else {
+        guard isOpen else {
+            return false
+        }
+        if position == nil, !Self.isBlank(query), shownQuery != query {
+            waitingPick = keepOpen
+            return true
+        }
+        waitingPick = nil
+        guard let position = position ?? selection, contains(position) else {
             return false
         }
         if selection != position {
@@ -256,6 +279,7 @@ public final class EmojiPickerModel {
         }
         let item = sections[position.section].items[position.item]
         guard !item.isLocked else {
+            onRefused()
             return false
         }
         let emoji = pickerReaction(emoji: item.emoji)
@@ -264,7 +288,7 @@ public final class EmojiPickerModel {
         }
         let react = react
         let location = location
-        Task { await react(emoji, location) }
+        reacting = Task { await react(emoji, location) }
         return true
     }
 
@@ -274,6 +298,7 @@ public final class EmojiPickerModel {
             return
         }
         isOpen = false
+        waitingPick = nil
         searching?.cancel()
         searching = nil
         onClose()
@@ -291,23 +316,45 @@ public final class EmojiPickerModel {
             close()
             return
         }
-        let channelChanged = batch.channelsChanged.values.contains { $0.contains(channelId) }
-        guard
-            batch.everythingChanged || !batch.emojisChanged.isEmpty || !batch.guildsChanged.isEmpty
-                || batch.guildListChanged || !batch.membersChanged.isEmpty || batch.currentUserChanged
-                || channelChanged
-        else {
+        guard mayChangeLists(batch) else {
             return
         }
-        browsing = browse()
+        let fresh = browse()
+        guard fresh != browsing else {
+            return
+        }
+        browsing = fresh
         if Self.isBlank(query) {
-            let kept = selected?.id
-            sections = browsing
-            selection = kept.flatMap(position(of:)) ?? first(in: sections)
+            let kept = selection.flatMap { kept($0, in: fresh) }
+            sections = fresh
+            selection = kept ?? first(in: sections)
             onChange(.sections(fromTop: false))
         } else {
-            ask(query)
+            ask(query, again: true)
         }
+    }
+
+    // A DM's channel changes with every message, a server with any role's edit: only what decides
+    // which emoji the lists hold, and how a listed server shows, reads them again.
+    private func mayChangeLists(_ batch: EventBatch) -> Bool {
+        if batch.everythingChanged || !batch.emojisChanged.isEmpty || batch.guildListChanged
+            || batch.currentUserChanged || !batch.membersChanged.isEmpty
+        {
+            return true
+        }
+        let listed = browsing.compactMap { section -> GuildId? in
+            if case .server(let guild) = section.kind { guild } else { nil }
+        }
+        var changed = !batch.guildsChanged.isDisjoint(with: listed)
+        if let guildId,
+            batch.guildsChanged.contains(guildId)
+                || batch.channelsChanged[guildId].map({ !$0.isDisjoint(with: places) }) == true
+        {
+            let now = store.permissions(channelId: channelId)
+            changed = changed || now != permissions
+            permissions = now
+        }
+        return changed
     }
 
     // MARK: Sections
@@ -373,7 +420,7 @@ public final class EmojiPickerModel {
         text.allSatisfy { $0.isWhitespace || $0 == ":" }
     }
 
-    private func ask(_ text: String) {
+    private func ask(_ text: String, again: Bool = false) {
         searches += 1
         let asked = searches
         let store = store
@@ -381,15 +428,31 @@ public final class EmojiPickerModel {
         searching = Task { [weak self] in
             let found = await store.searchEmoji(
                 channelId: channel, query: text, newest: EmojiCatalog.newest, limit: Self.searchLimit)
-            guard let self, self.isOpen, asked > self.shownSearch, !Self.isBlank(self.query) else {
-                return
-            }
-            self.shownSearch = asked
-            self.sections = [
-                Section(kind: .results, title: "", icon: nil, symbol: nil, items: found.map(Item.init))
-            ]
-            self.selection = self.first(in: self.sections)
-            self.onChange(.sections(fromTop: true))
+            self?.answer(found, to: text, asked: asked, again: again)
+        }
+    }
+
+    private func answer(_ found: [PickerEmoji], to text: String, asked: Int, again: Bool) {
+        answersHandled += 1
+        guard isOpen, asked > shownSearch, !Self.isBlank(query) else {
+            return
+        }
+        shownSearch = asked
+        let results = [Section(kind: .results, title: "", icon: nil, symbol: nil, items: found.map(Item.init))]
+        let refresh = again && shownQuery == text
+        shownQuery = text
+        if !refresh {
+            sections = results
+            selection = first(in: sections)
+            onChange(.sections(fromTop: true))
+        } else if results != sections {
+            let kept = selection.flatMap { kept($0, in: results) }
+            sections = results
+            selection = kept ?? first(in: sections)
+            onChange(.sections(fromTop: false))
+        }
+        if let keepOpen = waitingPick, shownQuery == query {
+            pick(keepOpen: keepOpen)
         }
     }
 
@@ -397,6 +460,8 @@ public final class EmojiPickerModel {
         if clearing {
             query = ""
         }
+        waitingPick = nil
+        shownQuery = nil
         // Answers still coming are older than what shows now.
         shownSearch = searches
         guard sections != browsing else {
@@ -418,7 +483,19 @@ public final class EmojiPickerModel {
         sections.firstIndex { !$0.items.isEmpty }.map { Position(section: $0, item: 0) }
     }
 
-    private func position(of id: Item.ID) -> Position? {
+    // Its own section first: an emoji can also be in Frequently Used, far from where the user is.
+    private func kept(_ position: Position, in new: [Section]) -> Position? {
+        let section = sections[position.section]
+        let id = section.items[position.item].id
+        if let index = new.firstIndex(where: { $0.kind == section.kind }), !new[index].items.isEmpty {
+            let items = new[index].items
+            return Position(
+                section: index, item: items.firstIndex { $0.id == id } ?? min(position.item, items.count - 1))
+        }
+        return self.position(of: id, in: new)
+    }
+
+    private func position(of id: Item.ID, in sections: [Section]) -> Position? {
         for (section, entry) in sections.enumerated() {
             if let item = entry.items.firstIndex(where: { $0.id == id }) {
                 return Position(section: section, item: item)

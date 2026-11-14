@@ -293,7 +293,7 @@ final class EmojiPickerTests {
     func choosingASectionSelectsItsFirstEmojiAndShowsItsTop() throws {
         let picker = try picker()
 
-        picker.jump(to: 2)
+        picker.jump(to: .server(id(2)))
 
         #expect(picker.selection == at(2, 0))
         #expect(changes == [.selection(.section)])
@@ -306,12 +306,29 @@ final class EmojiPickerTests {
         picker.search("wa")
         try await eventually { picker.sections.first?.kind == .results }
 
-        picker.jump(to: 1)
+        picker.jump(to: .server(id(1)))
 
         #expect(picker.query.isEmpty)
         #expect(picker.sections.first?.kind == .recent)
         #expect(picker.selection == at(1, 0))
         #expect(changes.suffix(2) == [.sections(fromTop: true), .selection(.section)])
+    }
+
+    // The strip keeps the browsing sections' buttons as they were when the search began.
+    @Test
+    func aSectionChosenWhileSearchingIsTheOneItsButtonShowed() async throws {
+        store.update { $0.emojiSearch = { _ in [pickerEmoji(7, "wave")] } }
+        let picker = try picker()
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+        store.update { $0.recentReactions[id(11)] = [] }
+        reactions.apply(EventBatch([.currentUserUpdated]))
+
+        picker.jump(to: .server(id(2)))
+
+        let selection = try #require(picker.selection)
+        #expect(picker.sections[selection.section].kind == .server(id(2)))
+        #expect(selection.item == 0)
     }
 
     // MARK: Search
@@ -358,8 +375,7 @@ final class EmojiPickerTests {
         picker.search("wa")
         try await eventually { picker.sections.first?.kind == .results }
         held.fire()
-        try await eventually { self.calls.count == 2 }
-        try await Task.sleep(for: .milliseconds(50))
+        try await eventually { picker.answersHandled == 2 }
 
         #expect(picker.sections.first?.items.map(\.name) == [":wave:"])
         #expect(picker.query == "wa")
@@ -376,7 +392,7 @@ final class EmojiPickerTests {
         try await eventually { picker.sections.first?.kind == .results }
 
         picker.search("wa")
-        try await Task.sleep(for: .milliseconds(20))
+        try await eventually { self.calls.count == 2 }
         #expect(picker.sections.first?.items.map(\.glyph) == ["🌊"])
 
         held.fire()
@@ -395,8 +411,7 @@ final class EmojiPickerTests {
         #expect(picker.selection == at(0, 0))
 
         held.fire()
-        try await eventually { self.calls.count == 1 }
-        try await Task.sleep(for: .milliseconds(50))
+        try await eventually { picker.answersHandled == 1 }
         #expect(picker.sections.first?.kind == .recent)
     }
 
@@ -413,8 +428,7 @@ final class EmojiPickerTests {
         picker.search("")
         picker.search("x")
         wave.fire()
-        try await eventually { self.calls.count == 2 }
-        try await Task.sleep(for: .milliseconds(50))
+        try await eventually { picker.answersHandled == 1 }
         #expect(picker.sections.first?.kind == .recent)
 
         x.fire()
@@ -474,8 +488,63 @@ final class EmojiPickerTests {
 
         #expect(picker.isOpen)
         #expect(picker.selection == at(2, 0))
-        try await Task.sleep(for: .milliseconds(20))
+        #expect(picker.reacting == nil)
         #expect(calls.isEmpty)
+    }
+
+    // What the user typed is what they get: never the list from before the answer.
+    @Test
+    func returnBeforeTheSearchAnswersPicksTheAnswersFirst() async throws {
+        store.update { $0.emojiSearch = { query in query == "fire" ? [pickerEmoji("🔥")] : [] } }
+        let held = store.holdSearch("fire")
+        let picker = try picker()
+        picker.search("fire")
+
+        #expect(picker.pick(keepOpen: false))
+
+        #expect(picker.isOpen)
+        #expect(picker.reacting == nil)
+        held.fire()
+        try await eventually { !picker.isOpen }
+        await picker.reacting?.value
+        #expect(
+            calls == [
+                .searchEmoji(here, "fire", EmojiCatalog.newest, limit: EmojiPickerModel.searchLimit),
+                .react(here, it, "🔥", .picker),
+            ])
+    }
+
+    @Test
+    func aPickWaitingForTheSearchIsDroppedWhenTheTextChanges() async throws {
+        store.update { $0.emojiSearch = { query in [pickerEmoji(query == "fire" ? "🔥" : "🚒")] } }
+        let held = store.holdSearch("fire")
+        let picker = try picker()
+        picker.search("fire")
+        #expect(picker.pick(keepOpen: false))
+
+        picker.search("fir")
+        try await eventually { picker.answersHandled == 1 }
+        held.fire()
+        try await eventually { picker.answersHandled == 2 }
+
+        #expect(picker.isOpen)
+        #expect(picker.selected?.glyph == "🚒")
+        #expect(picker.reacting == nil)
+    }
+
+    @Test
+    func aPickOfALockedEmojiIsRefused() throws {
+        let picker = try picker()
+        var refused = 0
+        picker.onRefused = { refused += 1 }
+
+        #expect(!picker.pick(at(1, 2), keepOpen: false))
+        #expect(refused == 1)
+        picker.select(at(2, 0))
+        #expect(!picker.pick(keepOpen: false))
+        #expect(refused == 2)
+        #expect(picker.pick(at(0, 0), keepOpen: true))
+        #expect(refused == 2)
     }
 
     @Test
@@ -486,7 +555,7 @@ final class EmojiPickerTests {
         #expect(picker.pick(at(0, 0), keepOpen: false))
 
         #expect(!picker.isOpen)
-        try await Task.sleep(for: .milliseconds(20))
+        await picker.reacting?.value
         #expect(calls.isEmpty)
     }
 
@@ -496,7 +565,7 @@ final class EmojiPickerTests {
         picker.close()
 
         #expect(!picker.pick(at(0, 0), keepOpen: false))
-        try await Task.sleep(for: .milliseconds(20))
+        #expect(picker.reacting == nil)
         #expect(calls.isEmpty)
     }
 
@@ -518,8 +587,8 @@ final class EmojiPickerTests {
     }
 
     @Test(arguments: [
-        StoreEvent.guildUpdated(guildId: id(2)), .currentMemberUpdated(guildId: id(1)),
-        .channelUpdated(channelId: id(11), guildId: id(1)), .currentUserUpdated, .serverListChanged,
+        StoreEvent.guildUpdated(guildId: id(2)), .currentMemberUpdated(guildId: id(1)), .currentUserUpdated,
+        .serverListChanged,
     ])
     func whatDecidesWhichEmojiMayBeUsedReadsThemAgain(event: StoreEvent) throws {
         let picker = try picker()
@@ -547,11 +616,165 @@ final class EmojiPickerTests {
         let picker = try picker()
         picker.search("wa")
         try await eventually { picker.sections.first?.kind == .results }
+        store.update { $0.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "new"), at: 0) }
 
         reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
 
         try await eventually { self.calls.count == 2 }
         #expect(picker.sections.first?.kind == .results)
+    }
+
+    // A DM's channel changes with each of its messages; nothing the lists depend on changes.
+    @Test
+    func aMessageInADmLeavesTheSearchAndItsSelectionAlone() async throws {
+        store.update { state in
+            state.talk(dm(12, with: 5), with: user(5))
+            state.allow(reacting(), message: 100, in: 12)
+            state.recentReactions[id(12)] = Self.faces.map(pickerEmoji)
+            state.emojiSearch = { _ in [pickerEmoji(7, "wave"), pickerEmoji("👋")] }
+        }
+        let dmRow = MessageListModel.Row(id: it, message: message(100, in: 12))
+        let picker = try #require(reactions.openPicker(for: dmRow, from: .picker))
+        picker.onChange = { [unowned self] in changes.append($0) }
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+        picker.move(.right)
+        changes = []
+        store.log.forget()
+
+        reactions.apply(EventBatch([.channelUpdated(channelId: id(12), guildId: nil)]))
+
+        #expect(store.reads.isEmpty)
+        #expect(picker.searches == 1)
+        #expect(picker.selected?.glyph == "👋")
+        #expect(changes.isEmpty)
+    }
+
+    @Test
+    func aChannelsChangeReadsTheListsAgainOnlyWhenThePermissionsThereChange() throws {
+        let picker = try picker()
+        store.log.forget()
+
+        reactions.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(!store.reads.contains(.customEmojiSections(here)))
+        #expect(changes.isEmpty)
+
+        store.update { state in
+            state.permissions[id(11)] = [.viewChannel, .useExternalEmojis]
+            state.emojiSections[id(11)]?[1].emojis[0].access = .usable
+        }
+        reactions.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(!picker.sections[2].items[0].isLocked)
+        #expect(changes == [.sections(fromTop: false)])
+    }
+
+    // A thread's permissions are its parent's.
+    @Test
+    func aThreadsParentsChangeIsTheThreadsOwn() throws {
+        store.update { state in
+            state.channels[id(13)] = thread(13, in: 11)
+            state.allow(reacting(), message: 100, in: 13)
+            state.emojiSections[id(13)] = state.emojiSections[id(11)]
+        }
+        let threadRow = MessageListModel.Row(id: it, message: message(100, in: 13))
+        let picker = try #require(reactions.openPicker(for: threadRow, from: .picker))
+        store.update { state in
+            state.permissions[id(13)] = [.viewChannel, .useExternalEmojis]
+            state.emojiSections[id(13)]?[1].emojis[0].access = .usable
+        }
+
+        reactions.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(picker.sections[1].kind == .server(id(2)))
+        #expect(!picker.sections[1].items[0].isLocked)
+    }
+
+    @Test
+    func anUpdateOfAServerThePickerDoesntListReadsNothing() throws {
+        _ = try picker()
+        store.log.forget()
+
+        reactions.apply(EventBatch([.guildUpdated(guildId: id(3))]))
+
+        #expect(store.reads.isEmpty)
+    }
+
+    @Test
+    func aChangeThatLeavesTheListsAsTheyWereSendsNothing() throws {
+        let picker = try picker()
+        picker.select(at(3, 5))
+
+        reactions.apply(EventBatch([.guildUpdated(guildId: id(1)), .currentMemberUpdated(guildId: id(1))]))
+
+        #expect(changes == [.selection(.none)])
+        #expect(picker.selection == at(3, 5))
+    }
+
+    // 😃 is in Frequently Used too; the one in Smileys stays selected, where the user is.
+    @Test
+    func aReReadKeepsTheSelectionInItsSectionNotAtTheFirstCopy() throws {
+        let picker = try picker()
+        let smileys = try #require(picker.sections.firstIndex { $0.kind == .unicode(.smileysAndEmotion) })
+        let smiley = try #require(picker.sections[smileys].items.firstIndex { $0.glyph == "😃" })
+        picker.select(at(smileys, smiley))
+        store.update { $0.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "new"), at: 0) }
+
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+
+        #expect(picker.selection == at(smileys, smiley))
+        #expect(changes.last == .sections(fromTop: false))
+    }
+
+    @Test
+    func anEmojiThatLeftItsSectionLeavesTheSelectionInItsPlace() throws {
+        let picker = try picker()
+        picker.select(at(1, 1))
+        store.update { $0.emojiSections[id(11)]?[0].emojis.remove(at: 1) }
+
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+
+        #expect(picker.selection == at(1, 1))
+        #expect(picker.selected?.name == ":gone:")
+    }
+
+    @Test
+    func aChangeWhileSearchingKeepsTheSelectionAndTheScroll() async throws {
+        store.update { $0.emojiSearch = { _ in [pickerEmoji(7, "wave"), pickerEmoji("👋")] } }
+        let picker = try picker()
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+        picker.move(.right)
+        changes = []
+        store.update { state in
+            state.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "wavy"), at: 0)
+            state.emojiSearch = { _ in [pickerEmoji(6, "wavy"), pickerEmoji(7, "wave"), pickerEmoji("👋")] }
+        }
+
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+        try await eventually { picker.answersHandled == 2 }
+
+        #expect(picker.sections[0].items.count == 3)
+        #expect(picker.selected?.glyph == "👋")
+        #expect(changes == [.sections(fromTop: false)])
+    }
+
+    @Test
+    func aSearchAskedAgainThatFindsTheSameSendsNothing() async throws {
+        store.update { $0.emojiSearch = { _ in [pickerEmoji(7, "wave"), pickerEmoji("👋")] } }
+        let picker = try picker()
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+        picker.move(.right)
+        changes = []
+        store.update { $0.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "new"), at: 0) }
+
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+        try await eventually { picker.answersHandled == 2 }
+
+        #expect(picker.selected?.glyph == "👋")
+        #expect(changes.isEmpty)
     }
 
     @Test

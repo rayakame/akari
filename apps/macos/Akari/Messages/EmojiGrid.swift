@@ -480,8 +480,8 @@ final class EmojiStripView: NSView {
             }
         }
     }
-    /// A button's click: its section's index.
-    var onJump: (Int) -> Void = { _ in }
+    /// A button's click: its section.
+    var onJump: (EmojiPickerModel.Section.Kind) -> Void = { _ in }
     private(set) var lit: Int?
 
     init() {
@@ -560,9 +560,7 @@ final class EmojiStripView: NSView {
     }
 
     @objc private func clicked(_ sender: EmojiStripButton) {
-        if let index = buttons.firstIndex(where: { $0 === sender }) {
-            onJump(index)
-        }
+        onJump(sender.kind)
     }
 
     override func viewDidChangeEffectiveAppearance() {

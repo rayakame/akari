@@ -152,7 +152,7 @@ final class EmojiPickerView: NSView {
         field.placeholder = EmojiPickerModel.placeholder
         field.onChange = { [weak self] text in self?.model.search(text) }
         field.onCommand = { [weak self] command in self?.perform(command) ?? false }
-        strip.onJump = { [weak self] index in self?.model.jump(to: index) }
+        strip.onJump = { [weak self] kind in self?.model.jump(to: kind) }
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
