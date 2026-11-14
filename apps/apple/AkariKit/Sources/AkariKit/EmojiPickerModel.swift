@@ -35,6 +35,9 @@ public final class EmojiPickerModel {
             }
         }
 
+        /// The name as VoiceOver reads it: `wave`, `heart eyes`.
+        public var spokenName: String { ReactionPill.spoken(name) }
+
         /// What the system's emoji font draws; `nil` for a custom emoji.
         public var glyph: String? {
             if case .unicode(let unicode) = emoji { unicode.emoji } else { nil }

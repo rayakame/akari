@@ -49,7 +49,11 @@ public struct ReactionPill: Equatable, Sendable, Identifiable {
 
     /// The name as VoiceOver reads it: without its colons, underscores as spaces.
     public static func spokenName(of emoji: ReactionEmoji) -> String {
-        name(of: emoji).replacingOccurrences(of: ":", with: " ")
+        spoken(name(of: emoji))
+    }
+
+    static func spoken(_ name: String) -> String {
+        name.replacingOccurrences(of: ":", with: " ")
             .replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
     }
 

@@ -116,6 +116,16 @@ final class EmojiPickerTests {
     }
 
     @Test
+    func voiceOverReadsAnItemsNameWithoutColonsAndUnderscores() throws {
+        let picker = try picker()
+        let unicode = EmojiPickerModel.Item(pickerEmoji("😍"))
+
+        #expect(picker.sections[1].items[0].spokenName == "wave")
+        #expect(unicode.name == ":heart_eyes:")
+        #expect(unicode.spokenName == "heart eyes")
+    }
+
+    @Test
     func theDetailUnderTheNameIsTheReasonOrTheServer() throws {
         let picker = try picker()
 
