@@ -704,6 +704,9 @@ impl State {
                     if !before.shows_the_same(after) {
                         events.push(StoreEvent::GuildUpdated(after.clone()));
                     }
+                    if before.emojis != after.emojis {
+                        events.push(StoreEvent::GuildEmojisChanged { guild_id: id });
+                    }
                 }
                 (None, Some(after)) => events.push(StoreEvent::GuildAdded(after.clone())),
                 (Some(_), None) | (None, None) if is_down && !was_down => {
@@ -814,7 +817,7 @@ impl State {
             }
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
-            E::GuildEmojisUpdate(update) => self.put_emojis(*update),
+            E::GuildEmojisUpdate(update) => self.put_emojis(*update, events),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
@@ -1398,6 +1401,9 @@ impl State {
         self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
+                if before.emojis != after.emojis {
+                    events.push(StoreEvent::GuildEmojisChanged { guild_id: id });
+                }
                 if !before.shows_the_same(&after) {
                     events.push(StoreEvent::GuildUpdated(after));
                 }
@@ -1566,14 +1572,20 @@ impl State {
         self.put_guild(next, &known, events);
     }
 
-    // Nothing shows the list, so no event.
-    fn put_emojis(&mut self, update: GuildEmojisUpdate) {
+    fn put_emojis(&mut self, update: GuildEmojisUpdate, events: &mut Vec<StoreEvent>) {
         let Some(known) = self.entities.guilds.get(&update.guild_id) else {
             return;
         };
+        let emojis = super::convert::guild_emojis(update.emojis);
+        if *emojis == *known.emojis {
+            return;
+        }
         let mut next = (**known).clone();
-        next.emojis = super::convert::emoji_ids(&update.emojis);
+        next.emojis = emojis;
         self.entities.guilds.insert(update.guild_id, Arc::new(next));
+        events.push(StoreEvent::GuildEmojisChanged {
+            guild_id: update.guild_id,
+        });
     }
 
     fn delete_role(&mut self, delete: GuildRoleDelete, events: &mut Vec<StoreEvent>) {
@@ -1877,7 +1889,12 @@ impl State {
         self.entities
             .guilds
             .values()
-            .find(|guild| guild.emojis.binary_search(&emoji).is_ok())
+            .find(|guild| {
+                guild
+                    .emojis
+                    .binary_search_by_key(&emoji, |known| known.id)
+                    .is_ok()
+            })
             .map(|guild| guild.id)
     }
 

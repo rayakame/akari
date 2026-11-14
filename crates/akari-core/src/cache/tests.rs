@@ -16,7 +16,7 @@ use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings, ForumSort, ForumTag, Guild,
-    GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
+    GuildEmoji, GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
     PermissionOverwrite, Reaction, ReactionEmoji, Redaction, ReplyPreview, ReplyTarget, Role,
     RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching,
     ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
@@ -119,9 +119,27 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
         community: id == 100,
         emojis: if id == 100 {
-            [Snowflake::new(7001), Snowflake::new(7002)].into()
+            [
+                GuildEmoji {
+                    id: Snowflake::new(7001),
+                    name: "wave".into(),
+                    animated: false,
+                    available: true,
+                    managed: false,
+                    roles: Box::new([]),
+                },
+                GuildEmoji {
+                    id: Snowflake::new(7002),
+                    name: "dance".into(),
+                    animated: true,
+                    available: false,
+                    managed: true,
+                    roles: [Snowflake::new(id + 1)].into(),
+                },
+            ]
+            .into()
         } else {
-            Box::new([])
+            Arc::new([])
         },
         age_restricted: id == 100,
     }

@@ -4,9 +4,9 @@ use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Call, Channel, CurrentUser, Delivery, Discriminator, Embed, EmbedAuthor,
     EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ForumLayout, ForumSettings, ForumSort,
-    ForumTag, Guild, ImageHash, Member, Message, MessageReference, PermissionOverwrite, Role,
-    RoleSubscription, Sticker, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership,
-    User,
+    ForumTag, Guild, GuildEmoji, ImageHash, Member, Message, MessageReference, PermissionOverwrite,
+    Role, RoleSubscription, Sticker, SystemData, TagEmoji, TagMatching, ThreadInfo,
+    ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
@@ -100,7 +100,7 @@ impl Guild {
             large: guild.large,
             default_message_notifications: default_level(properties.default_message_notifications),
             community: community(&properties.features),
-            emojis: emoji_ids(&guild.emojis),
+            emojis: guild_emojis(guild.emojis),
             age_restricted: age_restricted(properties.owner_configured_content_level),
         }
     }
@@ -133,11 +133,24 @@ impl Guild {
     }
 }
 
-pub(crate) fn emoji_ids(emojis: &[model::GuildEmoji]) -> Box<[EmojiId]> {
-    let mut ids: Vec<EmojiId> = emojis.iter().map(|emoji| emoji.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids.into()
+// A deleted emoji has no name, and nothing to show.
+pub(crate) fn guild_emojis(emojis: Vec<model::GuildEmoji>) -> Arc<[GuildEmoji]> {
+    let mut kept: Vec<GuildEmoji> = emojis
+        .into_iter()
+        .filter_map(|emoji| {
+            Some(GuildEmoji {
+                id: emoji.id,
+                name: emoji.name?.into(),
+                animated: emoji.animated,
+                available: emoji.available,
+                managed: emoji.managed,
+                roles: emoji.roles.into(),
+            })
+        })
+        .collect();
+    kept.sort_unstable_by_key(|emoji| emoji.id);
+    kept.dedup_by_key(|emoji| emoji.id);
+    kept.into()
 }
 
 fn age_restricted(level: Option<model::NsfwLevel>) -> bool {

@@ -41,6 +41,11 @@ pub enum StoreEvent {
     /// The display settings changed: read
     /// [`Store::display_settings`](super::Store::display_settings) again.
     DisplaySettingsChanged,
+    /// The guild's custom emoji changed: read its
+    /// [`emojis`](super::Guild::emojis) again, and what the picker lists.
+    GuildEmojisChanged {
+        guild_id: GuildId,
+    },
     /// The user agreed to see the guild's age-restricted channels: read
     /// [`Store::age_gate`](super::Store::age_gate) again.
     AgeGateChanged {
