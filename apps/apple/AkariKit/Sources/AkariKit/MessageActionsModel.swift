@@ -313,8 +313,6 @@ public final class MessageActionsModel {
         }
     }
 
-    // A failed send goes without a question or a request, as with Shift held for any other; the
-    // menu's question has the tip about Shift.
     private func delete(_ row: MessageListModel.Row, shift: Bool, from surface: Surface) {
         guard offer(for: row).has(.delete) else {
             return
