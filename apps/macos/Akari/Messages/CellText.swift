@@ -50,7 +50,6 @@ enum CellText {
         return line
     }
 
-    /// " (edited)" on the text's baseline; `tooltip` is the edit's date.
     static func editedMark(tooltip: String? = nil) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: TypeScale.edited.nsFont, .foregroundColor: Palette.chatTextMuted,

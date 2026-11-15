@@ -1,10 +1,7 @@
 import AkariKit
 import AppKit
 
-/// The editor in an edited message's row, in its text's place (the official client's edit
-/// mode): the composer's box with the text and the counter, a refused save's reason, and
-/// "escape to cancel • enter to save" with its two links. One per list, owned by its controller
-/// and hosted by the edited row's cell; its height comes from `height(width:)`, as the row's.
+// One per list, moved between cells, so its text, selection and undo outlive row reloads.
 final class MessageEditorView: NSView {
     /// 8 below the header with the stack's 2, as the official text area's margin.
     static let top: CGFloat = 6
@@ -80,7 +77,6 @@ final class MessageEditorView: NSView {
         nil
     }
 
-    /// An edit opened: its text, the caret at its end, nothing to undo.
     func load(_ text: String) {
         textView.string = text
         textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
@@ -99,7 +95,6 @@ final class MessageEditorView: NSView {
 
     var problemText: String? { problem.isHidden ? nil : problem.stringValue }
 
-    /// The editor's height in a text column `width` wide, as the row counts it.
     func height(width: CGFloat) -> CGFloat {
         var height = Self.top + boxHeight(width: width)
         if !problem.isHidden {
@@ -131,7 +126,6 @@ final class MessageEditorView: NSView {
     private var refocus = false
     private var focusWhenShown = false
 
-    /// An edit opened: the focus now, or once the row's cell is in the window.
     func takeFocus() {
         refocus = false
         if let window {
@@ -161,7 +155,6 @@ final class MessageEditorView: NSView {
         refocus = false
     }
 
-    /// The edit ended: a later return to the window doesn't take the focus.
     func forgetFocus() {
         refocus = false
         focusWhenShown = false
@@ -214,7 +207,6 @@ final class MessageEditorView: NSView {
         hint.frame = NSRect(x: 0, y: y + Self.lineGap, width: width, height: EditorHint.height)
     }
 
-    /// The caret's line in the editor's coordinates.
     var caretRect: NSRect {
         guard let layout = textView.layoutManager, let container = textView.textContainer else {
             return textView.frame
@@ -248,7 +240,6 @@ final class MessageEditorView: NSView {
         counter.toolTip = Self.counterTip(left)
     }
 
-    /// The official counter's tooltip.
     static func counterTip(_ left: Int) -> String {
         if left < 0 {
             return "Message is too long"
@@ -280,7 +271,6 @@ extension MessageEditorView: NSTextViewDelegate {
     }
 }
 
-/// The composer's box: its color, a 1 border that is stronger while the text has the focus.
 final class EditorBox: NSView {
     var focused = false {
         didSet { needsDisplay = true }
@@ -309,8 +299,7 @@ final class EditorBox: NSView {
     }
 }
 
-/// "escape to cancel • enter to save", drawn as one line; the two words are links, each a
-/// transparent button over its word.
+// One line under transparent buttons: buttons that drew their words padded the line.
 final class EditorHint: NSView {
     static let height: CGFloat = 16
 
@@ -331,7 +320,6 @@ final class EditorHint: NSView {
         nil
     }
 
-    /// The line as it reads.
     var text: String {
         pieces.map(\.text).joined()
     }
@@ -375,8 +363,6 @@ final class EditorHint: NSView {
     }
 }
 
-/// A word of the hint line that acts; the line draws it, underlined while the list says the
-/// pointer is on it.
 final class EditorLink: NSButton {
     let word: String
     var onClick: () -> Void = {}

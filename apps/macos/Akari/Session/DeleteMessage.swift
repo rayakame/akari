@@ -2,8 +2,6 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// The official client's delete question by its words and its message box; the rest is Akari's
-/// modal (the reactions window's surface, ring and radius).
 enum DeleteLayout {
     static let width: CGFloat = 440
     static let margin: CGFloat = 40
@@ -17,7 +15,6 @@ enum DeleteLayout {
     // The least of the message that shows before the box scrolls.
     static let minimumBox: CGFloat = 80
 
-    /// Centered in `area`, as tall as its content and never taller than the area allows.
     static func frame(for question: MessageActionsModel.DeleteQuestion, in area: CGSize) -> CGRect {
         let width = min(Self.width, max(0, area.width - 2 * margin))
         let height = DeleteMessageView.sizing.height(
@@ -28,8 +25,6 @@ enum DeleteLayout {
     }
 }
 
-/// "Delete Message": the question, the message as its row shows it, the Shift tip when it came
-/// from the menu, Cancel and Delete. Return deletes; Escape, Cancel and a press outside don't.
 final class DeleteMessageView: NSView {
     typealias Question = MessageActionsModel.DeleteQuestion
 
@@ -41,7 +36,6 @@ final class DeleteMessageView: NSView {
     let tip = DeleteMessageView.label("", style: TypeScale.detail, color: Palette.textMuted)
     let cancel = PanelButton(Question.cancel, kind: .secondary)
     let delete = PanelButton(Question.confirm, kind: .critical)
-    /// Delete's `true`, Cancel's `false`.
     var answer: (Bool) -> Void = { _ in }
     private var question: Question?
     private var maxHeight: CGFloat = .greatestFiniteMagnitude
@@ -84,7 +78,6 @@ final class DeleteMessageView: NSView {
         needsLayout = true
     }
 
-    /// The panel's height for `question` at `width`, its box scrolling past `maxHeight`.
     func height(for question: Question, width: CGFloat, maxHeight: CGFloat) -> CGFloat {
         tip.isHidden = !question.showsTip
         return frames(width: width, row: question.row, maxHeight: maxHeight).height
@@ -160,7 +153,6 @@ final class DeleteMessageView: NSView {
         answer(true)
     }
 
-    /// The tip, "delete message" in bold as the official client's.
     static var tipText: NSAttributedString {
         let text = NSMutableAttributedString(
             string: Question.tip,
@@ -185,7 +177,6 @@ final class DeleteMessageView: NSView {
     }
 }
 
-/// The question in a SwiftUI panel: the view above, fed the session's images.
 struct DeleteMessagePanel: NSViewRepresentable {
     let question: MessageActionsModel.DeleteQuestion
     let size: CGSize
@@ -207,8 +198,7 @@ struct DeleteMessagePanel: NSViewRepresentable {
     }
 }
 
-/// The official modal's buttons, as `BrandButton` draws them: secondary gray, critical red;
-/// 40 high, at least 100 wide, 16 beside the title, a faint border, darker under the pointer.
+// An NSButton's bezel color shows only while its window is key, so these draw BrandButton's.
 final class PanelButton: NSButton {
     enum Kind {
         case secondary, critical

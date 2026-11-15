@@ -93,7 +93,6 @@ enum MessageText {
         let content: String
         let formatted: FormattedText
         var spoilersShown = false
-        /// When it was edited, for "(edited)" and its tooltip.
         var edited: Date?
         var color = Palette.textDefault
         var base = Base.body

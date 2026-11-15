@@ -24,7 +24,6 @@ struct MessageTableState: Equatable {
     var messageJump: MessageListModel.MessageJump?
     /// The message the pending reply answers: its row is tinted.
     var replyingTo: MessageId?
-    /// The message edited in its row.
     var editing: EditModel.Editing?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
@@ -152,7 +151,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredReply: MessageCell?
     /// The hovered message's buttons: one bar for the list, over the rows.
     let hoverBar = MessageHoverBar()
-    /// The list's editor, in the edited row's text's place.
     let editor = MessageEditorView()
     private weak var hoveredEditorLink: EditorLink?
     private weak var hoveredBarButton: HoverBarButton?

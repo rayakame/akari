@@ -100,7 +100,6 @@ enum Palette {
     static let dangerHover = token("dangerHover", dark: "#da373c", light: "#a12829")
     static let brand = NSColor(hex: "#5865f2")
     static let composer = token("composer", dark: "#222327", light: "#ffffff")
-    /// The official confirmations' message box: its ring and its shadow.
     static let previewRing = token("previewRing", dark: "#1e1f22", light: "#c9cace", alpha: (0.6, 0.3))
     static let previewShadow = token("previewShadow", dark: "#000000", light: "#000000", alpha: (0.2, 0.08))
     static let mentionText = token("mentionText", dark: "#c9cdfb", light: "#4752c4")

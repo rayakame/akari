@@ -2,9 +2,6 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// A message outside a list, as the list draws it at a group's start: the thread form's source
-/// message, whose text can be selected and copied, and in the delete question and later the pins'
-/// modals and popout, where nothing of it takes the pointer.
 struct MessagePreview: NSViewRepresentable {
     let message: Message
     /// The line over it when it answers a message; shown, not clickable.
@@ -84,8 +81,7 @@ struct MessagePreview: NSViewRepresentable {
     }
 }
 
-/// The preview's cell with a pointer of its own, as no list tracks it: the I-beam over its text,
-/// the hand over a link, the arrow elsewhere. Not `interactive`, nothing of it takes the pointer.
+// No list tracks its pointer, so it sets its own cursors.
 final class MessagePreviewView: NSView, CursorAuthority {
     let cell = MessageCell()
     let interactive: Bool
@@ -173,9 +169,6 @@ final class MessagePreviewView: NSView, CursorAuthority {
     }
 }
 
-/// A message in the official confirmations' box (the delete question, later the pins'): the
-/// panel's color, radius 3, a 1 ring and a soft shadow, 10 above and below the row, which keeps
-/// its own insets; nothing in it takes the pointer, and past `maxHeight` it scrolls.
 final class MessagePreviewBox: NSView {
     static let padding: CGFloat = 10
     static let radius: CGFloat = 3
@@ -222,7 +215,6 @@ final class MessagePreviewBox: NSView {
         needsLayout = true
     }
 
-    /// The box's height around `row` at `width`, before any cap.
     static func height(of row: MessageListModel.Row, width: CGFloat) -> CGFloat {
         2 * padding + MessagePreview.height(of: row.shown, reply: row.reply, spaced: false, width: width)
     }

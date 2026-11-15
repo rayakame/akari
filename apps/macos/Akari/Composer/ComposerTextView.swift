@@ -14,7 +14,6 @@ final class ComposerTextView: NSTextView {
     var onShiftPageUp: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
     var onWindow: () -> Void = {}
-    /// Whether it has the keyboard's focus, as it changes.
     var onFocus: (Bool) -> Void = { _ in }
     /// Off in a message's row: the list scrolls its caret into view once the row has its height.
     var scrollsItself = true
@@ -34,7 +33,7 @@ final class ComposerTextView: NSTextView {
         return (scrollView, textView)
     }
 
-    /// A text view on TextKit 1, laid out as the editor's measure lays it out.
+    // TextKit 1, as the editor's own measure lays the text out.
     static func plain() -> ComposerTextView {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
@@ -46,7 +45,6 @@ final class ComposerTextView: NSTextView {
         return textView
     }
 
-    /// What its text is drawn with.
     static var attributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = lineHeight
@@ -114,8 +112,7 @@ final class ComposerTextView: NSTextView {
         scrollsItself ? super.scrollToVisible(rect) : true
     }
 
-    /// Becomes first responder unless the user is selecting message text that's still shown or
-    /// editing a message.
+    // A selection in a shown message or a message's editor keeps the focus.
     func takeFocus() {
         guard let window, isEditable else {
             return

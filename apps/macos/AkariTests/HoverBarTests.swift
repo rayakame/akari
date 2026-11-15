@@ -16,7 +16,6 @@ final class BarList {
     var shift = false
     var popped: [(titles: [String], view: NSView, point: NSPoint, moreSelected: Bool)] = []
     private(set) var rows: [MessageListModel.Row] = []
-    /// The message edited in its row, as the list's state says.
     var editing: EditModel.Editing?
 
     static let plain: [MessageAction] = [.createThread, .more]
