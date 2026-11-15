@@ -139,7 +139,7 @@ struct SessionView<MessageArea: View>: View {
                 set: { if !$0 { session.answerMessageConfirmation(false) } }),
             presenting: session.messageConfirmation
         ) { question in
-            Button(question.confirm, role: .destructive) { session.answerMessageConfirmation(true) }
+            Button(question.confirm, role: question.confirmRole) { session.answerMessageConfirmation(true) }
             Button(question.cancel, role: .cancel) { session.answerMessageConfirmation(false) }
         } message: { question in
             Text(question.message)
@@ -510,5 +510,11 @@ struct SessionView<MessageArea: View>: View {
             case nil: .guildChannel(.guildText)
             }
         return ChannelName(kind: kind, name: openName)
+    }
+}
+
+extension MessageActionsModel.Confirmation {
+    var confirmRole: ButtonRole? {
+        destructive ? .destructive : nil
     }
 }

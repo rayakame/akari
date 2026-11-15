@@ -1,4 +1,4 @@
-import AkariKit
+@testable import AkariKit
 import AppKit
 import SwiftUI
 import Testing
@@ -28,6 +28,16 @@ struct PinQuestionTests {
         let font = text.attribute(.font, at: index, effectiveRange: nil) as? NSFont
         let traits = font?.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
         return traits?[.weight] as? CGFloat ?? 0
+    }
+
+    // The alerts' yes: a removal's is red, "The Pin Is Stuck!"'s Try Again isn't.
+    @Test(arguments: [true, false])
+    func anAlertsYesIsRedOnlyWhereTheQuestionSaysSo(destructive: Bool) {
+        let question = MessageActionsModel.Confirmation(
+            title: "The Pin Is Stuck!", message: "", confirm: "Try Again", cancel: "Cancel",
+            destructive: destructive, run: {})
+
+        #expect(question.confirmRole == (destructive ? ButtonRole.destructive : nil))
     }
 
     @Test
