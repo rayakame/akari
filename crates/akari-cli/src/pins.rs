@@ -35,7 +35,7 @@ fn pin_error(err: &PinError, pin: bool) -> String {
     }
 }
 
-async fn lines(account: &Account, channel: ChannelId) -> Result<Vec<String>, String> {
+pub(crate) async fn lines(account: &Account, channel: ChannelId) -> Result<Vec<String>, String> {
     let failed = |err: RequestError| format!("Couldn't load the pins: {}", report(&err));
     account.load_pins(channel).await.map_err(failed)?;
     let store = account.store();
@@ -74,6 +74,10 @@ pub async fn list(account: &Account, channel: ChannelId) -> ExitCode {
     }
 }
 
+fn changed_line(pin: bool) -> &'static str {
+    if pin { "Pinned." } else { "Unpinned." }
+}
+
 pub async fn change(
     account: &Account,
     channel: ChannelId,
@@ -92,7 +96,7 @@ pub async fn change(
     .await;
     match done {
         Ok(()) => {
-            println!("{}", if pin { "Pinned." } else { "Unpinned." });
+            println!("{}", changed_line(pin));
             ExitCode::SUCCESS
         }
         Err(message) => {
@@ -112,6 +116,12 @@ mod tests {
             pin_line(1_700_000_000_000, "2023-11-01 10:00  Mira: hi"),
             "pinned 2023-11-14 22:13  2023-11-01 10:00  Mira: hi"
         );
+    }
+
+    #[test]
+    fn a_pin_and_an_unpin_say_which_was_done() {
+        assert_eq!(changed_line(true), "Pinned.");
+        assert_eq!(changed_line(false), "Unpinned.");
     }
 
     #[test]

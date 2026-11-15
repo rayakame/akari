@@ -1532,6 +1532,83 @@ mod tests {
         assert!(!succeeded(code));
     }
 
+    async fn pins_answered(
+        server: &MockServer,
+        channel: u64,
+        answer: ResponseTemplate,
+    ) -> Result<Vec<String>, String> {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages/pins")))
+            .respond_with(answer)
+            .mount(server)
+            .await;
+        let client = online(server).await;
+        let Ok(session) = session::open(&client, &Arc::new(OneAccount), false).await else {
+            panic!("no session");
+        };
+        crate::pins::lines(&session.account, Snowflake::new(channel)).await
+    }
+
+    #[tokio::test]
+    async fn each_pin_is_listed_after_its_pin_time() {
+        let server = MockServer::start().await;
+        let answer = ResponseTemplate::new(200).set_body_json(json!({
+            "items": [pinned(8, "2026-10-02T09:30:00+00:00")], "has_more": false,
+        }));
+
+        let lines = pins_answered(&server, GENERAL, answer).await.unwrap();
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("pinned 2026-10-02 09:30  "),
+            "{lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_channel_without_pins_says_so() {
+        let server = MockServer::start().await;
+        let answer =
+            ResponseTemplate::new(200).set_body_json(json!({"items": [], "has_more": false}));
+
+        let lines = pins_answered(&server, GENERAL, answer).await;
+
+        assert_eq!(lines, Ok(vec!["(no pins)".to_owned()]));
+    }
+
+    #[tokio::test]
+    async fn the_pins_of_a_channel_the_account_doesnt_know_arent_listed() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, 999, ResponseTemplate::new(500)).await;
+
+        assert_eq!(
+            lines,
+            Err("Couldn't load the pins: the channel isn't known.".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pins_listing_discord_failed_says_why_and_fails() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, ResponseTemplate::new(500)).await;
+        let client = online(&server).await;
+        let command = SessionCommand::Pins {
+            channel_id: GENERAL,
+        };
+        let code = run(&client, &Arc::new(OneAccount), command).await;
+
+        assert_eq!(
+            lines,
+            Err(format!(
+                "Couldn't load the pins: {}",
+                report(&RequestError::ServerError { status: 500 })
+            ))
+        );
+        assert!(!succeeded(code));
+    }
+
     // #general's message 7 with the user's own reaction with :wave:, and the reactions' routes.
     async fn reacted(server: &MockServer) {
         let mut message = answered(7, 0);
