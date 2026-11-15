@@ -467,10 +467,13 @@ Akari shows the saved text at once and keeps it when Discord refuses.
 - **A refusal** puts Discord's text back on every copy, and `Store::message_edit` is
   `Failed { content, error }` with the text the user saved, until the message is saved again,
   `Account::dismiss_edit` or its deletion. A new session keeps it; past 16 refused edits the
-  oldest goes.
-- **A page** that loads while a request runs brings Discord's text (the reactions' rule: not
-  guarded further); the answer then puts the saved one back.
-- **The disk cache** writes a message with an unconfirmed save with Discord's text.
+  oldest other one goes, and its row is told (`MessageUpdated`). A save after a refusal is
+  asked for unless Discord has that text by what it last said (the gateway may have brought
+  another device's edit since).
+- **A page** that loads while the saved text still shows has it too, in its rows and in the
+  replies' lines it brings: the page may have been read before Discord took the save.
+- **The disk cache** writes a message with an unconfirmed save with Discord's text, in its row
+  and in the reply lines that show it.
 
 | Answer | Official client | `EditError` |
 |---|---|---|

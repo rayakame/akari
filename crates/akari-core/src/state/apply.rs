@@ -1682,10 +1682,15 @@ impl State {
     pub(crate) fn finish_load(
         &mut self,
         ticket: LoadTicket,
-        page: Vec<model::Message>,
+        mut page: Vec<model::Message>,
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
     ) -> PageOutcome {
+        if !self.edits.is_empty() {
+            for message in &mut page {
+                self.show_saved_text(message);
+            }
+        }
         let present =
             ticket.cursor == Cursor::Latest || (ticket.kind == LoadKind::Newer && reached_end);
         let newest = page
@@ -1745,6 +1750,9 @@ impl State {
             for (_, window) in &mut windows {
                 for message in &mut window.messages {
                     *message = self.with_discord_text(message);
+                }
+                for (&(channel, message), target) in &mut window.targets {
+                    self.target_with_discord_text(channel, message, target);
                 }
             }
         }

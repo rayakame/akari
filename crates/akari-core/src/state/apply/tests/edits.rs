@@ -202,6 +202,18 @@ fn copies() -> Vec<Copy> {
         starter_row(Some(mine(ORIGIN, GENERAL))),
     );
 
+    // Held in the parent's stale window; the thread's starter row shows it.
+    let mut held = viewing(THREAD);
+    apply(
+        &mut held,
+        "MESSAGE_CREATE",
+        starter_row(Some(mine(ORIGIN, GENERAL))),
+    );
+    held.view_channel(id(GENERAL), &mut Vec::new());
+    held.windows.mark_stale(&mut Vec::new());
+    apply(&mut held, "MESSAGE_CREATE", mine(ORIGIN, GENERAL));
+    assert_eq!(held.windows.held(id(GENERAL)).len(), 1);
+
     let mut target = general();
     apply(&mut target, "MESSAGE_CREATE", reply_to_ten(11));
     assert!(matches!(
@@ -253,6 +265,13 @@ fn copies() -> Vec<Copy> {
             row: (THREAD, STARTER_ROW),
             message: (GENERAL, ORIGIN),
             read: starter_text,
+        },
+        Copy {
+            name: "held",
+            state: held,
+            row: (THREAD, STARTER_ROW),
+            message: (GENERAL, ORIGIN),
+            read: |state| state.windows.held(id(GENERAL))[0].content.to_string(),
         },
         Copy {
             name: "reply target",
@@ -329,6 +348,7 @@ fn each_copy_tells_what_shows_it_of_a_save() {
             ),
             ("fetched starter", vec![updated(STARTER_ROW)]),
             ("starter sent along", vec![updated(STARTER_ROW)]),
+            ("held", vec![updated(STARTER_ROW)]),
             (
                 "reply target",
                 vec![updated(10), format!("ReplyTargetChanged({GENERAL}, 10)")]
@@ -652,6 +672,27 @@ fn a_late_echo_older_than_an_answer_never_undoes_it() {
 }
 
 #[test]
+fn an_unreadable_answer_after_an_answer_shows_the_latest_save_also_after_an_older_echo() {
+    for echo in [false, true] {
+        let mut state = general();
+        save(&mut state, GENERAL, 10, "first");
+        asked(&mut state, GENERAL, 10);
+        save(&mut state, GENERAL, 10, "second");
+        let first = edited(10, GENERAL, "first", LATER);
+        answer(&mut state, GENERAL, 10, Ok(Some(first)));
+        asked(&mut state, GENERAL, 10);
+
+        if echo {
+            update(&mut state, GENERAL, 10, "older", EARLIER);
+        }
+        let (outcome, _) = answer(&mut state, GENERAL, 10, Ok(None));
+
+        assert!(done(&outcome), "echo {echo}");
+        assert_eq!(text(&state, GENERAL, 10), "second", "echo {echo}");
+    }
+}
+
+#[test]
 fn an_answer_that_isnt_a_message_leaves_the_saved_text() {
     let mut state = general();
     save(&mut state, GENERAL, 10, "saved");
@@ -711,6 +752,30 @@ fn saving_a_refused_edit_again_asks_again() {
     assert_eq!(asked(&mut state, GENERAL, 10), "saved");
 }
 
+// Discord has the other device's text since the refusal, not the text from before the edit.
+#[test]
+fn a_save_back_to_the_old_text_after_a_refusal_and_an_edit_from_elsewhere_is_asked() {
+    for elsewhere_first in [true, false] {
+        let mut state = general();
+        save(&mut state, GENERAL, 10, "saved");
+        asked(&mut state, GENERAL, 10);
+        if elsewhere_first {
+            update(&mut state, GENERAL, 10, "elsewhere", LATER);
+        }
+        answer(&mut state, GENERAL, 10, Err(EditError::Forbidden));
+        if !elsewhere_first {
+            update(&mut state, GENERAL, 10, "elsewhere", LATER);
+        }
+        assert_eq!(text(&state, GENERAL, 10), "elsewhere");
+
+        let (wanted, _) = save(&mut state, GENERAL, 10, "hi");
+
+        assert!(wanted.unwrap().changed, "elsewhere first {elsewhere_first}");
+        assert_eq!(text(&state, GENERAL, 10), "hi");
+        assert_eq!(asked(&mut state, GENERAL, 10), "hi");
+    }
+}
+
 #[test]
 fn a_refused_edit_saved_as_discords_text_is_forgotten_without_a_request() {
     let mut state = general();
@@ -741,6 +806,36 @@ fn refused_edits_are_kept_up_to_a_limit_and_across_a_new_session() {
     assert!(edit_of(&state, GENERAL, 11).starts_with("failed"));
     state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
     assert!(edit_of(&state, GENERAL, 10 + count - 1).starts_with("failed"));
+}
+
+// The refusal that just came is the user's latest word; the oldest other one goes, and its row is
+// told.
+#[test]
+fn a_refusal_past_the_limit_keeps_itself_and_tells_the_row_whose_refusal_goes() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", mine(10, GENERAL));
+    save(&mut state, GENERAL, 10, "saved");
+    asked(&mut state, GENERAL, 10);
+    let last = 10 + u64::try_from(FAILED_KEPT).unwrap();
+    for message in 11..=last {
+        apply(&mut state, "MESSAGE_CREATE", mine(message, GENERAL));
+        save(&mut state, GENERAL, message, "saved");
+        asked(&mut state, GENERAL, message);
+        answer(&mut state, GENERAL, message, Err(EditError::Forbidden));
+    }
+
+    let (outcome, mut events) = answer(&mut state, GENERAL, 10, Err(EditError::Forbidden));
+
+    assert!(matches!(outcome, EditOutcome::Refused(..)));
+    assert!(edit_of(&state, GENERAL, 10).starts_with("failed"));
+    assert_eq!(
+        edit_of(&state, GENERAL, 11),
+        "none",
+        "the oldest other went"
+    );
+    assert!(edit_of(&state, GENERAL, last).starts_with("failed"));
+    events.sort();
+    assert_eq!(events, [updated(10), updated(11)]);
 }
 
 #[test]
@@ -925,6 +1020,7 @@ fn a_confirmed_delete_takes_the_message_from_every_copy_at_once() {
             "fetched starter" | "starter sent along" => {
                 assert_eq!(starter_text(state), "(unavailable)", "{name}");
             }
+            "held" => assert!(state.windows.held(id(GENERAL)).is_empty()),
             "reply target" => assert_eq!(
                 state.reply_target(id(GENERAL), id(10)),
                 ReplyTarget::Deleted
@@ -1130,6 +1226,7 @@ fn a_message_with_a_pending_edit_is_cached_with_discords_text() {
     for message in [10, 11] {
         apply(&mut state, "MESSAGE_CREATE", mine(message, GENERAL));
     }
+    apply(&mut state, "MESSAGE_CREATE", reply_to_ten(12));
     save(&mut state, GENERAL, 10, "unconfirmed");
     save(&mut state, GENERAL, 11, "refused");
     asked(&mut state, GENERAL, 11);
@@ -1143,10 +1240,45 @@ fn a_message_with_a_pending_edit_is_cached_with_discords_text() {
         .iter()
         .map(|message| message.content.to_string())
         .collect();
-    assert_eq!(cached, ["hi", "hi"]);
+    assert_eq!(cached, ["hi", "hi", "hi"]);
+    match windows[0].1.targets.get(&(id(GENERAL), id(10))) {
+        Some(ReplyTarget::Loaded(preview)) => assert_eq!(&*preview.content, "hi", "the reply line"),
+        other => panic!("expected the reply's target, got {other:?}"),
+    }
     assert_eq!(
         text(&state, GENERAL, 10),
         "unconfirmed",
         "the window keeps it"
     );
+}
+
+// D162: every copy shows the saved text until Discord answers, also one a page brings meanwhile.
+#[test]
+fn a_page_loaded_while_a_save_waits_shows_the_saved_text_in_its_rows_and_reply_lines() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "saved");
+    asked(&mut state, GENERAL, 10);
+    let mut reply = reply_to_ten(11);
+    reply["referenced_message"] = mine(10, GENERAL);
+
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(id(GENERAL), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    state.finish_load(
+        ticket,
+        vec![wire(&mine(10, GENERAL)), wire(&reply)],
+        true,
+        &mut events,
+    );
+
+    assert_eq!(text(&state, GENERAL, 10), "saved");
+    assert_eq!(edit_of(&state, GENERAL, 10), "pending");
+    match state.reply_target(id(GENERAL), id(10)) {
+        ReplyTarget::Loaded(preview) => assert_eq!(&*preview.content, "saved"),
+        other => panic!("expected a loaded target, got {other:?}"),
+    }
+    let answered = edited(10, GENERAL, "saved", EARLIER);
+    answer(&mut state, GENERAL, 10, Ok(Some(answered)));
+    assert_eq!(text(&state, GENERAL, 10), "saved");
 }

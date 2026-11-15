@@ -161,7 +161,12 @@ impl State {
         let answered = self.edits.answered(channel, message, outcome);
         match &answered {
             EditOutcome::Done(settled) => self.show_settled(channel, message, settled, events),
-            EditOutcome::Refused(_, text) => self.show_content(channel, message, text, events),
+            EditOutcome::Refused(_, text, gone) => {
+                self.show_content(channel, message, text, events);
+                if let Some((channel, message)) = *gone {
+                    self.announce(channel, message, events);
+                }
+            }
             EditOutcome::Again | EditOutcome::Gone => return answered,
         }
         if shown {
@@ -277,6 +282,30 @@ impl State {
             if !told {
                 events.push(StoreEvent::MessageUpdated(row));
             }
+        }
+    }
+
+    // A page may have been read before Discord took the save, and its copies show the save.
+    pub(super) fn show_saved_text(&self, message: &mut model::Message) {
+        if let Some(text) = self.edits.saved_text(message.channel_id, message.id) {
+            text.clone_into(&mut message.content);
+        }
+        if let Some(Some(referenced)) = &mut message.referenced_message {
+            self.show_saved_text(referenced);
+        }
+    }
+
+    pub(super) fn target_with_discord_text(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        target: &mut ReplyTarget,
+    ) {
+        if let ReplyTarget::Loaded(preview) = target
+            && let Some(text) = self.edits.discord_text(channel, message)
+            && *preview.content != *text
+        {
+            Arc::make_mut(preview).content = text.into();
         }
     }
 

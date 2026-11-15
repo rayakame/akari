@@ -110,12 +110,12 @@ pub(crate) enum EditOutcome {
     // A newer save goes next.
     Again,
     Done(Shown),
-    Refused(EditError, Box<str>),
+    // Discord's text, and the message whose refusal went for the limit.
+    Refused(EditError, Box<str>, Option<(ChannelId, MessageId)>),
     // The message was deleted meanwhile.
     Gone,
 }
 
-// The user's edits and deletes on their way, by the message's own channel and ID.
 #[derive(Debug, Default)]
 pub(crate) struct Edits {
     edits: Vec<OwnEdit>,
@@ -204,7 +204,8 @@ impl Edits {
         if own.failed.is_some() {
             return Ask::Nothing;
         }
-        if own.want == own.sent {
+        // After a refusal `sent` is older than what Discord may have heard since.
+        if own.want == own.sent && own.want == own.discord {
             return Ask::Settled(self.edits.remove(index).settled());
         }
         own.asked = Some(Asked {
@@ -241,7 +242,10 @@ impl Edits {
                         own.answer = Some(Box::new(edit_of(answer)));
                     }
                     Some(_) => {}
-                    None if !asked.heard => own.discord.clone_from(&asked.content),
+                    None if !asked.heard => {
+                        own.discord.clone_from(&asked.content);
+                        own.answer = None;
+                    }
                     None => {}
                 }
                 own.sent = asked.content;
@@ -253,20 +257,28 @@ impl Edits {
             Err(error) if own.want == asked.content => {
                 own.failed = Some(error.clone());
                 let discord = own.discord.clone();
-                self.keep_failed();
-                EditOutcome::Refused(error, discord)
+                let gone = self.keep_failed(channel, message);
+                EditOutcome::Refused(error, discord, gone)
             }
             Err(_) => EditOutcome::Again,
         }
     }
 
-    fn keep_failed(&mut self) {
+    fn keep_failed(
+        &mut self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Option<(ChannelId, MessageId)> {
         let failed = self.edits.iter().filter(|own| own.failed.is_some());
-        if failed.count() > FAILED_KEPT
-            && let Some(oldest) = self.edits.iter().position(|own| own.failed.is_some())
-        {
-            self.edits.remove(oldest);
+        if failed.count() <= FAILED_KEPT {
+            return None;
         }
+        let oldest = self
+            .edits
+            .iter()
+            .position(|own| own.failed.is_some() && !own.is(channel, message))?;
+        let gone = self.edits.remove(oldest);
+        Some((gone.channel, gone.message))
     }
 
     // While the saved text is still to show, the copies keep it over Discord's.
@@ -287,10 +299,11 @@ impl Edits {
             own.discord = content.into();
             own.edited = edited;
             own.answer = None;
-        }
-        if let Some(asked) = &mut own.asked {
-            asked.heard = true;
-            asked.seen |= *asked.content == *content;
+            // An echo older than the last answer was sent before this request was asked.
+            if let Some(asked) = &mut own.asked {
+                asked.heard = true;
+                asked.seen |= *asked.content == *content;
+            }
         }
         own.shown |= *own.want == *content;
         if own.shows_saved() {
@@ -336,10 +349,18 @@ impl Edits {
 
     // What the disk cache writes instead of a save Discord hasn't confirmed.
     pub(crate) fn discord_text(&self, channel: ChannelId, message: MessageId) -> Option<&str> {
+        self.showing_saved(channel, message)
+            .map(|own| &*own.discord)
+    }
+
+    pub(crate) fn saved_text(&self, channel: ChannelId, message: MessageId) -> Option<&str> {
+        self.showing_saved(channel, message).map(|own| &*own.want)
+    }
+
+    fn showing_saved(&self, channel: ChannelId, message: MessageId) -> Option<&OwnEdit> {
         self.edits
             .iter()
             .find(|own| own.is(channel, message) && own.shows_saved())
-            .map(|own| &*own.discord)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
