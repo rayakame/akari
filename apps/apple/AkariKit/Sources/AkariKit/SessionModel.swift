@@ -67,6 +67,8 @@ public final class SessionModel {
             channels?.setOpen(openChannelId)
             if oldValue?.channelId != messages?.channelId {
                 threadBrowser = nil
+                pins = nil
+                rereadPinsDot()
             }
             syncSplit()
             syncForm()
@@ -129,6 +131,11 @@ public final class SessionModel {
             }
         }
     }
+    /// The open pins popout, under the header's pins button. Opening another channel or the
+    /// Threads browser closes it.
+    public private(set) var pins: PinsModel?
+    /// The dot on the header's pins button: the channel has pins the user hasn't seen.
+    public private(set) var pinsUnread = false
     /// The channel list's "More Active Threads" popout's threads, following the store while
     /// `peek(at:)` names a channel; empty otherwise.
     public private(set) var peekedThreads: [ThreadPeek] = []
@@ -893,6 +900,7 @@ public final class SessionModel {
             return
         }
         engage()
+        pins = nil
         threadBrowser = ThreadBrowserModel(
             parentId: parent, presentation: presentation, userId: userId, store: store,
             account: account)
@@ -900,6 +908,73 @@ public final class SessionModel {
 
     public func closeThreadBrowser() {
         threadBrowser = nil
+    }
+
+    /// The channel whose pins the header's pins button shows: the open message list's (a text
+    /// or announcement channel, a thread, a DM or a group DM), not the system DM's; `nil`
+    /// elsewhere, where the button doesn't show.
+    public var pinsChannel: ChannelId? {
+        guard let open = messages?.channelId else {
+            return nil
+        }
+        let conversation = directMessages.conversations.first { $0.id == open }
+        if conversation?.channel.kind == .dm, conversation?.recipients.first?.system == true {
+            return nil
+        }
+        return open
+    }
+
+    /// The pins button can't be used: its channel waits behind the age gate.
+    public var pinsDisabled: Bool {
+        pinsChannel.map { ageGate(of: $0) != .open } ?? false
+    }
+
+    /// The header's pins button and ⌘P: opens the popout of `pinsChannel`, or closes the open
+    /// one, which also closes the Threads browser.
+    public func togglePins() {
+        if pins != nil {
+            closePins()
+            return
+        }
+        guard let channel = pinsChannel, !pinsDisabled else {
+            return
+        }
+        engage()
+        threadBrowser = nil
+        pins = PinsModel(
+            channelId: channel, store: store, account: account,
+            jump: { [weak self] message, shift in
+                if !shift {
+                    self?.closePins()
+                }
+                self?.jump(to: message, in: channel)
+            },
+            ask: { [weak self] in self?.askPin($0) },
+            confirm: { [weak self] in self?.messageConfirmation = $0 },
+            failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    /// "pinned messages" in a pin's line: toggles the popout of the line's channel, which opens
+    /// first where it isn't the open one, as in the official client.
+    public func togglePins(of channel: ChannelId) {
+        if messages?.channelId != channel {
+            go(to: channel)
+        }
+        guard messages?.channelId == channel else {
+            return
+        }
+        togglePins()
+    }
+
+    public func closePins() {
+        pins = nil
+    }
+
+    private func rereadPinsDot() {
+        let unread = pinsChannel.map { store.pinsUnread(channelId: $0) } ?? false
+        if unread != pinsUnread {
+            pinsUnread = unread
+        }
     }
 
     /// A row of the Threads browser or the channel list's "More Active Threads": closes the
@@ -1422,6 +1497,14 @@ public final class SessionModel {
             form.apply(batch)
         }
         threadBrowser?.apply(batch)
+        pins?.apply(batch)
+        if let open = pinsChannel,
+            batch.everythingChanged || batch.pinsUnreadChanged.contains(open)
+                || !batch.guildSettingsChanged.isEmpty
+                || batch.channelsChanged.values.contains(where: { $0.contains(open) })
+        {
+            rereadPinsDot()
+        }
         if let window = reactors {
             window.apply(batch)
             if window.isEmpty {
