@@ -37,6 +37,43 @@ struct ChildWindowsViewTests {
         #expect(window.childWindows?.isEmpty != false)
         window.close()
     }
+
+    @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+    func aPanelLooksAsItsWindow(_ name: NSAppearance.Name) throws {
+        let window = TestWindow.make(size: NSSize(width: 600, height: 400))
+        window.appearance = NSAppearance(named: name)
+        let windows = ChildWindows(keyable: true)
+        windows.focus = WindowFocus(makeKey: { _ in })
+        let frame = NSRect(x: window.frame.minX + 20, y: window.frame.minY + 20, width: 200, height: 100)
+
+        windows.show(NSView(), at: frame, in: window, dimmed: false)
+
+        #expect(windows.panel?.appearance?.name == name)
+        windows.tearDown(refocus: false)
+        window.close()
+    }
+
+    @Test
+    func shownInAnotherWindowThePanelMovesThere() throws {
+        let first = TestWindow.make(size: NSSize(width: 600, height: 400))
+        let second = TestWindow.make(size: NSSize(width: 600, height: 400), at: NSPoint(x: 700, y: 0))
+        let windows = ChildWindows(keyable: true)
+        windows.focus = WindowFocus(makeKey: { _ in })
+        let view = NSView()
+        let frame = NSRect(x: first.frame.minX + 20, y: first.frame.minY + 20, width: 200, height: 100)
+        windows.show(view, at: frame, in: first, dimmed: false)
+        let panel = try #require(windows.panel)
+
+        windows.show(view, at: frame.offsetBy(dx: 700, dy: 0), in: second, dimmed: false)
+
+        #expect(windows.panel !== panel)
+        #expect(first.childWindows?.isEmpty != false)
+        #expect(windows.shield?.frame == second.frame)
+        #expect(second.childWindows?.contains { $0 === windows.shield } == true)
+        windows.tearDown(refocus: false)
+        first.close()
+        second.close()
+    }
 }
 
 // A picker on message 2 in an out-of-sight window: eleven faces used lately, Home's three emoji
@@ -150,6 +187,7 @@ struct EmojiPickerViewTests {
         #expect(view.footerView.frame.maxY == 440)
         #expect(view.footerView.frame.height == 47)
         #expect(view.field.text.placeholderAttributedString?.string == "Find the perfect emoji")
+        #expect(view.field.text.accessibilityLabel() == "Find the perfect emoji")
         #expect(view.accessibilityLabel() == "Reaction Picker")
     }
 
@@ -196,6 +234,21 @@ struct EmojiPickerViewTests {
         #expect(grid.cells.values.allSatisfy { picker.clip.bounds.insetBy(dx: 0, dy: -40).intersects($0.frame) })
     }
 
+    // The wheel, the trackpad and the scroller move the clip, not the grid.
+    @Test
+    func scrollingTheClipShowsItsCellsAndHeader() throws {
+        let grid = picker.grid
+
+        picker.clip.scroll(to: NSPoint(x: 0, y: 2000))
+        picker.view.scrollView.reflectScrolledClipView(picker.clip)
+
+        #expect(grid.cells[picker.at(0, 0)] == nil)
+        #expect(!grid.cells.isEmpty)
+        #expect(grid.cells.values.allSatisfy { picker.clip.bounds.insetBy(dx: 0, dy: -40).intersects($0.frame) })
+        let top = try #require(grid.layout.section(at: 2000))
+        #expect(picker.view.stickyTitle.stringValue == grid.sections[top].title)
+    }
+
     @Test
     func aLockedEmojiIsDimmedWithTheNotAllowedCursor() throws {
         let grid = picker.grid
@@ -220,10 +273,10 @@ struct EmojiPickerViewTests {
     }
 
     @Test
-    func thePointerSelectsWithoutScrollingAndTheFooterSaysTheServer() {
+    func thePointerSelectsWithoutScrollingAndTheFooterSaysTheServer() throws {
         let before = picker.clip.bounds.origin
 
-        picker.grid.pointerMoved(to: picker.middle(of: picker.at(1, 0)))
+        picker.grid.mouseMoved(with: try picker.mouse(.mouseMoved, at: picker.middle(of: picker.at(1, 0))))
 
         #expect(picker.model.selection == picker.at(1, 0))
         #expect(picker.grid.selectionView.frame == picker.grid.layout.rect(of: picker.at(1, 0)))
@@ -232,6 +285,7 @@ struct EmojiPickerViewTests {
         #expect(footer.name.stringValue == ":wave:")
         #expect(footer.detail.stringValue == "Home")
         #expect(!footer.picture.isHidden)
+        #expect(footer.glyph.isHidden, "😀's glyph went")
         #expect(footer.picture.content?.key == .emoji(emojiId: EmojiId(rawValue: 7), animated: false))
 
         picker.grid.pointerMoved(to: picker.middle(of: picker.at(1, 2)))
@@ -267,6 +321,19 @@ struct EmojiPickerViewTests {
         let up = picker.grid.layout.rect(of: picker.model.selection!)
         #expect(up.minY >= picker.clip.bounds.minY + EmojiGridLayout.header - 0.5)
         #expect(up.maxY <= picker.clip.bounds.maxY)
+    }
+
+    // The row above starts out of view: the move brings it out from under the pinned header.
+    @Test
+    func aKeyMoveUpRevealsTheRowBelowThePinnedHeader() {
+        let grid = picker.grid
+        grid.scroll(to: grid.layout.rect(of: picker.at(3, 9)).minY - 5)
+        picker.model.select(picker.at(3, 9))
+
+        picker.command(#selector(NSResponder.moveUp(_:)))
+
+        #expect(picker.model.selection == picker.at(3, 0))
+        #expect(grid.layout.rect(of: picker.at(3, 0)).minY == picker.clip.bounds.minY + EmojiGridLayout.header)
     }
 
     @Test
@@ -358,14 +425,23 @@ struct EmojiPickerViewTests {
         #expect(responder === view.scrollView)
     }
 
+    // A pick without Shift closes at once, before its reaction goes out.
     @Test
-    func aClickOnALockedEmojiDoesNothing() async throws {
+    func aClickOnALockedEmojiOrAHeaderPicksNothing() async throws {
         picker.grid.click(at: picker.middle(of: picker.at(1, 2)), shift: false)
         picker.grid.click(at: NSPoint(x: 70, y: 120), shift: false)
 
         #expect(picker.model.isOpen)
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(picker.made.isEmpty)
+        picker.grid.click(at: picker.middle(of: picker.at(1, 0)), shift: false)
+        try await eventually { !picker.made.isEmpty }
+        #expect(picker.made == [":wave: from picker"])
+    }
+
+    @Test
+    func escapeOrCommandPeriodInTheFieldClosesIt() {
+        #expect(picker.command(#selector(NSResponder.cancelOperation(_:))))
+
+        #expect(!picker.model.isOpen)
     }
 
     @Test
@@ -398,6 +474,28 @@ struct EmojiPickerViewTests {
         #expect(strip.buttons[4].isLit)
         #expect(!strip.buttons[0].isLit)
         #expect(picker.view.stickyTitle.stringValue == "People & Body")
+        #expect(strip.buttons[4].layer?.backgroundColor == strip.buttons[4].resolved(Palette.selectedBackground))
+        #expect(strip.buttons[0].layer?.backgroundColor == nil)
+    }
+
+    @Test
+    func aStripButtonOutOfSightScrollsTheStripToIt() throws {
+        let strip = picker.view.strip
+        let flags = try #require(strip.buttons.last)
+        #expect(!strip.scrollView.documentVisibleRect.contains(flags.frame), "below what the strip shows")
+
+        flags.performClick(nil)
+
+        #expect(picker.model.selection == picker.at(picker.model.sections.count - 1, 0))
+        #expect(strip.lit == strip.buttons.count - 1)
+        #expect(strip.scrollView.documentVisibleRect.contains(flags.frame))
+    }
+
+    @Test
+    func theGridScrollsToItsEndAtMost() {
+        picker.grid.scroll(to: picker.grid.frame.height)
+
+        #expect(picker.clip.bounds.maxY == picker.grid.frame.height)
     }
 
     // A server renamed while the picker is open.
@@ -412,6 +510,36 @@ struct EmojiPickerViewTests {
         #expect(home.toolTip == "Garden")
         #expect(home.accessibilityLabel() == "Garden")
         #expect(home.initials.stringValue == "G")
+    }
+
+    // The grid's top lights its button again once the strip is built anew.
+    @Test
+    func theStripTakesAServersNewIconLit() throws {
+        let strip = picker.view.strip
+        let icon = ImageKey.guildIcon(guildId: GuildId(rawValue: 2), hash: "abc")
+        picker.account.reactionsStore.picker.withLock { $0.icons[GuildId(rawValue: 2)] = icon }
+        #expect(strip.buttons[0].isLit)
+
+        strip.show(try picker.sectionsNow())
+        picker.grid.tile()
+
+        #expect(strip.buttons[2].icon == icon)
+        #expect(strip.buttons[2].picture.content?.key == icon)
+        #expect(strip.buttons[0].isLit)
+    }
+
+    @Test
+    func aServersIconCoversItsInitialsUnlessItFails() async throws {
+        let icon = ImageKey.guildIcon(guildId: GuildId(rawValue: 1), hash: "abc")
+        let picker = try PickerHarness(icons: [GuildId(rawValue: 1): icon])
+        let home = picker.view.strip.buttons[1]
+        #expect(home.tile.isHidden)
+
+        picker.view.images = ImageCache(source: FakeImageSource.failing())
+        try await eventually { home.picture.failed }
+
+        #expect(!home.tile.isHidden)
+        #expect(home.initials.stringValue == "H")
     }
 
     @Test
@@ -430,6 +558,8 @@ struct EmojiPickerViewTests {
         #expect(picker.view.convert(picker.view.stickyTitle.frame, from: picker.view.stickyTitle.superview).minY == 42, "12 into a band 22 above the grid's top")
         // What the header covers takes no pointer.
         #expect(grid.position(at: NSPoint(x: 70, y: grid.visibleRect.minY + 5)) == nil)
+        #expect(picker.view.sticky.subviews.first?.layer?.backgroundColor == picker.view.layer?.backgroundColor)
+        #expect(picker.view.layer?.backgroundColor != nil, "the band hides the emoji under it")
     }
 
     @Test
@@ -448,6 +578,32 @@ struct EmojiPickerViewTests {
         #expect(!found.view.field.clearButton.isHidden)
         #expect(found.view.empty.isHidden)
         #expect(found.view.footerView.name.stringValue == ":ok_hand:")
+        // The cells and headers from before lie hidden for later.
+        #expect(grid.subviews.filter { $0 is PickerEmojiCell && !$0.isHidden }.count == 2)
+        #expect(!grid.subviews.contains { $0 is NSTextField && !$0.isHidden })
+    }
+
+    @Test
+    func aNewSearchShowsItsResultsFromTheTop() async throws {
+        let many = (0..<100).map { PickerEmoji.custom(emoji: pickerCustom(100 + UInt64($0), "a\($0)")) }
+        let found = try PickerHarness(found: ["a": many])
+        found.grid.scroll(to: 2000)
+
+        found.type("a")
+        try await eventually { found.model.sections.first?.kind == .results }
+
+        #expect(found.clip.bounds.minY == 0)
+        #expect(found.grid.cells[found.at(0, 0)] != nil)
+    }
+
+    // A server's emoji or what may be used changed: the lists are read again where the user is.
+    @Test
+    func aReReadKeepsTheScroll() {
+        picker.grid.scroll(to: 1000)
+
+        picker.model.onChange(.sections(fromTop: false))
+
+        #expect(picker.clip.bounds.minY == 1000)
     }
 
     @Test
@@ -479,10 +635,13 @@ struct EmojiPickerViewTests {
         picker.type("zzz")
         try await eventually { picker.model.foundNothing }
 
+        picker.window.makeFirstResponder(nil)
+
         picker.view.field.clearButton.performClick(nil)
 
         #expect(picker.model.query.isEmpty)
         #expect(picker.model.sections.first?.kind == .recent)
+        #expect((picker.window.firstResponder as? NSTextView)?.delegate === picker.view.field.text)
     }
 
     @Test
@@ -499,6 +658,7 @@ struct EmojiPickerViewTests {
         #expect((grid.accessibilityChildren()?.first as? PickerEmojiCell) === face)
 
         #expect(face.accessibilityPerformPress())
+        #expect(!picker.model.isOpen)
         try await eventually { picker.made == [":grinning: from picker"] }
     }
 
@@ -507,21 +667,23 @@ struct EmojiPickerViewTests {
         let view = picker.view
         var key = false
         view.isKey = { key }
-        view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: true)
+        view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: false)
         let cat = try #require(picker.grid.cells[picker.at(1, 1)])
+        #expect(!cat.picture.animates, "not in the key window")
+
+        key = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: picker.window)
+        #expect(cat.picture.animates, "the setting plays every animated one that shows")
+        key = false
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: picker.window)
         #expect(!cat.picture.animates)
 
         key = true
-        view.updateAnimation()
+        view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: true)
         #expect(!cat.picture.animates, "reduced motion: only the selected one")
-
         picker.grid.pointerMoved(to: picker.middle(of: picker.at(1, 1)))
         #expect(cat.picture.animates)
         #expect(view.footerView.picture.animates)
-
-        view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: false)
-        picker.grid.pointerMoved(to: picker.middle(of: picker.at(1, 0)))
-        #expect(cat.picture.animates, "the setting plays every animated one that shows")
     }
 
     // Hidden cells kept for later play nothing.
@@ -551,6 +713,15 @@ struct EmojiPickerViewTests {
 extension EmojiPickerView {
     func stickyBand(offset: CGFloat) -> Bool {
         sticky.subviews.first?.frame.minY == offset
+    }
+}
+
+extension NSView {
+    /// `color` as the view's appearance draws it.
+    func resolved(_ color: NSColor) -> CGColor {
+        var drawn = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { drawn = color.cgColor }
+        return drawn
     }
 }
 
@@ -601,10 +772,12 @@ struct EmojiPickerPresenterTests {
         #expect(squeezed.minX >= 8 && squeezed.maxX <= 592)
     }
 
+    // Closed, it hands the key back to the session's window.
     @Test
     func thePanelIsAKeyDialogWithTheFieldFocusedAndEscapeClosesIt() throws {
         let picker = try PickerHarness()
         let window = TestWindow.make(size: NSSize(width: 1000, height: 700))
+        window.orderFront(nil)
         let presenter = EmojiPickerPresenter()
         var keyed: [NSWindow] = []
         presenter.windows.focus = WindowFocus(makeKey: { keyed.append($0) })
@@ -634,6 +807,7 @@ struct EmojiPickerPresenterTests {
         #expect(presenter.windows.panel == nil)
         #expect(!picker.model.isOpen)
         #expect(closed == 1)
+        #expect(keyed == [panel, window])
         window.close()
     }
 
@@ -714,20 +888,70 @@ struct EmojiPickerListTests {
                     charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)))
     }
 
+    // The list in a split's left pane: room for the picker on both sides of the bar.
     @Test
     func addReactionInTheBarOpensThePickerLeftOfTheBar() throws {
+        let pane = BarList(width: 1600, height: 560)
+        pane.actions.picking = list.actions.picking
+        pane.controller.emojiPicker.windows.focus = WindowFocus(makeKey: { _ in })
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1600, height: 560))
+        pane.window.contentView = content
+        pane.controller.scrollView.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
+        content.addSubview(pane.controller.scrollView)
+        pane.actions.bars[2] = ([.addReaction, .more], [.copyLink, .addReaction, .more])
+        showHigh(pane)
+        try pane.hover(2)
+        let bar = pane.window.convertToScreen(pane.bar.convert(pane.bar.bounds, to: nil))
+        #expect(bar.maxX + 8 + EmojiPickerView.size.width <= pane.window.frame.maxX - 8)
+
+        try #require(pane.bar.button(.addReaction)).performClick(nil)
+
+        #expect(pane.actions.calls.contains("picker for 2 from picker"))
+        let panel = try #require(pane.controller.emojiPicker.windows.panel)
+        #expect(panel.frame.maxX == bar.minX - 8)
+        #expect(panel.frame.maxY == bar.maxY)
+        #expect(pane.controller.emojiPicker.model?.location == .picker)
+        pane.controller.emojiPicker.close()
+    }
+
+    /// Message 2 at the top of what shows: room under it for the picker's top to be its opener's.
+    func showHigh(_ list: BarList, _ second: ReactionRow? = nil) {
+        list.show(
+            [
+                row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+                row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second").reacting(second),
+            ] + (3...20).map { row($0, by: author(3), at: list.noon + Double($0) * 120, content: "later") })
+        list.scroll(to: list.table.rect(ofRow: list.index(of: 2)).minY - 40)
+    }
+
+    @Test
+    func closingWithThePointerStillOnItsRowUnlightsAddReaction() throws {
         show()
         try list.hover(2)
-        let bar = screen(list.bar)
-
         try #require(list.bar.button(.addReaction)).performClick(nil)
 
-        #expect(list.actions.calls.contains("picker for 2 from picker"))
-        let panel = try #require(presenter.windows.panel)
-        #expect(panel.frame.maxX == bar.minX - 8)
-        // Its top at the bar's, unless that would take it below the window.
-        #expect(panel.frame.maxY == bar.maxY || panel.frame.minY == list.window.frame.minY + 8)
-        #expect(presenter.model?.location == .picker)
+        try escape()
+
+        #expect(presenter.windows.panel == nil)
+        #expect(!list.bar.isHidden)
+        #expect(list.hovered == [2])
+        #expect(list.bar.button(.addReaction)?.isSelected == false)
+    }
+
+    // The user's own reaction changes the bar's quick reactions: its buttons are made anew.
+    @Test
+    func aChangeOfItsRowKeepsAddReactionLit() throws {
+        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        show()
+        try list.hover(2)
+        let add = try #require(list.bar.button(.addReaction))
+        add.performClick(nil)
+
+        list.actions.quick[2] = [QuickReaction(emoji: .unicode("💯"), mine: true)]
+        show(reactions(pill("💯", mine: true)))
+
+        #expect(list.bar.button(.addReaction) !== add)
+        #expect(list.bar.button(.addReaction)?.isSelected == true)
     }
 
     @Test
@@ -754,7 +978,8 @@ struct EmojiPickerListTests {
     @Test
     func theRowsAddButtonOpensThePickerRightOfItAndStaysLit() throws {
         // Room on both sides of the button.
-        show(ReactionRow(pills: ["👍", "🎉", "🔥", "👀", "✅", "🚀", "😭"].map { pill($0) }, adds: true, toggles: true))
+        let pills = ["👍", "🎉", "🔥", "👀", "✅", "🚀", "😭"].map { pill($0) }
+        showHigh(list, ReactionRow(pills: pills, adds: true, toggles: true))
         let cell = try #require(try list.cell(of: 2) as? MessageCell)
         let add = try #require(cell.reactions?.add)
         cell.reactions?.layoutSubtreeIfNeeded()
@@ -767,8 +992,7 @@ struct EmojiPickerListTests {
         #expect(list.actions.calls.contains("picker for 2 from inlineButton"))
         let panel = try #require(presenter.windows.panel)
         #expect(panel.frame.minX == button.maxX + 8)
-        // Its top at the button's, unless that would take it below the window.
-        #expect(panel.frame.maxY == button.maxY || panel.frame.minY == list.window.frame.minY + 8)
+        #expect(panel.frame.maxY == button.maxY)
         #expect(add.isSelected)
         #expect(list.hovered == [2])
         #expect(presenter.model?.location == .inlineButton)
@@ -802,6 +1026,29 @@ struct EmojiPickerListTests {
         #expect(presenter.windows.panel != nil)
         #expect(presenter.model?.location == .picker)
         #expect(list.hovered == [2], "the menu's end leaves the picker's row lit")
+    }
+
+    @Test
+    func viewMoreOnARowWithoutABarOpensThePickerWhereItsAddReactionWouldBe() throws {
+        list.actions.menuEmoji[2] = [QuickReaction(emoji: .unicode("💯"), mine: false)]
+        list.show(
+            [
+                row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+                row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second"),
+            ], bars: false)
+        list.controller.actions = ReactionMenuActions(
+            list.actions, groups: [[MessageTableTests.RecordingActions.item(.addReaction, "Add Reaction")]])
+        let cell = try #require(try list.cell(of: 2) as? MessageCell)
+        let add = try #require(cell.menuItems().first { $0.title == "Add Reaction" }?.submenu)
+
+        add.performActionForItem(at: add.items.count - 1)
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: add)
+
+        let panel = try #require(presenter.windows.panel)
+        #expect(list.bar.isHidden)
+        let box = list.window.convertToScreen(cell.convert(cell.box, to: nil))
+        #expect(panel.frame.maxX == box.maxX - MessageHoverBar.trailing - 8)
+        presenter.close()
     }
 
     @Test

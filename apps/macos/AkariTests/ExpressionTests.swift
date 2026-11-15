@@ -294,6 +294,29 @@ final class ExpressionTests {
         NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
     }
 
+    // The bar's Add Reaction while the pointer rests on an emoji of its message.
+    @Test
+    func theEmojiPickerOpeningHidesTheCardAndKeepsItAway() async throws {
+        let account = ReactionsAccount([], people: [:])
+        actions.picking = ReactionsModel(store: account.reactionsStore, account: account)
+        actions.bars[1] = ([.addReaction, .more], [.addReaction, .more])
+        list.controller.emojiPicker.windows.focus = WindowFocus(makeKey: { _ in })
+        show("hi <:wave:5> there")
+        let view = try text()
+        list.pointer.location = try point(at: 3, in: view)
+        list.controller.pointerMoved()
+        try await eventually { self.list.controller.hoverCard.shown != nil }
+
+        try #require(list.controller.hoverBar.button(.addReaction)).performClick(nil)
+
+        #expect(list.controller.emojiPicker.windows.panel != nil)
+        #expect(list.controller.hoverCard.shown == nil)
+        #expect(list.controller.hoverCard.panel?.isVisible != true)
+        list.controller.pointerMoved()
+        #expect(list.controller.hoverCard.pending == nil, "no card waits to show")
+        list.controller.emojiPicker.close()
+    }
+
     // A click opens the popout beside the item and hides the card; the server row of a server
     // the user is in opens it; Escape closes the popout.
     @Test

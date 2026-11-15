@@ -607,7 +607,7 @@ final class EmojiStripButton: NSButton {
     let name: String
     let picture = ImageLayerView()
     let initials = NSTextField(labelWithString: "")
-    private let tile = NSView()
+    let tile = NSView()
 
     var isLit = false {
         didSet {
