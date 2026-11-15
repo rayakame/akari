@@ -180,7 +180,7 @@ pub async fn run<S: Accounts>(
         } => {
             let args = crate::emoji::EmojiArgs {
                 query,
-                newest: newest.unwrap_or(akari_core::emoji::EmojiVersion::NEWEST),
+                newest,
                 limit: usize::from(limit),
             };
             crate::emoji::run(&session, Snowflake::new(channel_id), &args)
@@ -795,6 +795,7 @@ pub(crate) fn utc_minute(unix_millis: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use akari_core::emoji::EmojiVersion;
     use akari_core::model::UserId;
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
     use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
@@ -1426,6 +1427,88 @@ mod tests {
 
         assert_eq!(crate::reactions::reactor_lines(&page), ["(nobody)"]);
         account.close();
+    }
+
+    fn emoji_command(channel_id: u64) -> SessionCommand {
+        SessionCommand::Emoji {
+            channel_id,
+            query: None,
+            newest: None,
+            limit: 50,
+        }
+    }
+
+    #[tokio::test]
+    async fn emoji_refuses_a_channel_the_user_doesnt_have() {
+        let server = MockServer::start().await;
+        for (channel, known) in [(9, false), (GENERAL, true)] {
+            let client = online(&server).await;
+
+            let code = run(&client, &Arc::new(OneAccount), emoji_command(channel)).await;
+
+            assert_eq!(succeeded(code), known, "{channel}");
+        }
+    }
+
+    fn emoji_lines(
+        session: &Session,
+        query: Option<&str>,
+        newest: Option<EmojiVersion>,
+        limit: usize,
+    ) -> Vec<String> {
+        let args = crate::emoji::EmojiArgs {
+            query: query.map(str::to_owned),
+            newest,
+            limit,
+        };
+        crate::emoji::lines(session.account.store(), Snowflake::new(GENERAL), &args)
+    }
+
+    #[tokio::test]
+    async fn emoji_lists_the_quick_reactions_apart_from_the_recent_ones() {
+        let server = MockServer::start().await;
+        let client = online(&server).await;
+        let session = session::open(&client, &Arc::new(OneAccount), false)
+            .await
+            .unwrap();
+
+        let listed = emoji_lines(&session, None, None, 50);
+
+        assert_eq!(
+            listed[..6],
+            [
+                "Quick reactions:",
+                "  💯  :100:",
+                "  😆  :laughing:",
+                "  💖  :sparkling_heart:",
+                "Recently used:",
+                "  (none)",
+            ]
+        );
+        session.close(None).await;
+    }
+
+    #[tokio::test]
+    async fn an_emoji_search_keeps_to_the_limit_and_the_version() {
+        let server = MockServer::start().await;
+        let client = online(&server).await;
+        let session = session::open(&client, &Arc::new(OneAccount), false)
+            .await
+            .unwrap();
+        let bags = "face_with_bags_under_eyes";
+
+        assert_eq!(emoji_lines(&session, Some("a"), None, 3).len(), 3);
+        assert_eq!(
+            emoji_lines(&session, Some(bags), None, 50),
+            [format!("🫩  :{bags}:")],
+            "without --newest, every emoji"
+        );
+        assert_eq!(
+            emoji_lines(&session, Some(bags), Some(EmojiVersion::new(15, 1)), 50),
+            ["(nothing)"]
+        );
+        assert_eq!(emoji_lines(&session, Some("zqxj"), None, 50), ["(nothing)"]);
+        session.close(None).await;
     }
 
     #[test]

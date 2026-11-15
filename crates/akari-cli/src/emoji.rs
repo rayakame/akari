@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use akari_core::emoji::{EmojiVersion, unicode_groups};
 use akari_core::model::ChannelId;
-use akari_core::state::{EmojiAccess, PickerEmoji};
+use akari_core::state::{EmojiAccess, PickerEmoji, Store};
 
 use crate::printable;
 use crate::session::Session;
@@ -50,18 +50,19 @@ pub(crate) fn emoji_line(emoji: &PickerEmoji) -> String {
     }
 }
 
-fn print_all(emojis: &[PickerEmoji]) {
+fn push_all(lines: &mut Vec<String>, emojis: &[PickerEmoji]) {
     if emojis.is_empty() {
-        println!("  (none)");
+        lines.push("  (none)".to_owned());
     }
     for emoji in emojis {
-        println!("  {}", emoji_line(emoji));
+        lines.push(format!("  {}", emoji_line(emoji)));
     }
 }
 
 pub struct EmojiArgs {
     pub query: Option<String>,
-    pub newest: EmojiVersion,
+    /// `None`: every emoji the catalog has.
+    pub newest: Option<EmojiVersion>,
     pub limit: usize,
 }
 
@@ -74,39 +75,47 @@ pub fn run(session: &Session, channel: ChannelId, args: &EmojiArgs) -> ExitCode 
         eprintln!("You have no channel with that ID; `akari-cli channels <guild>` lists them.");
         return ExitCode::FAILURE;
     }
-    if let Some(query) = &args.query {
-        let found = store.search_emoji(channel, query, args.newest, args.limit);
-        if found.is_empty() {
-            println!("(nothing)");
-        }
-        for emoji in &found {
-            println!("{}", emoji_line(emoji));
-        }
-        return ExitCode::SUCCESS;
+    for line in lines(store, channel, args) {
+        println!("{line}");
     }
-    println!("Quick reactions:");
-    print_all(&store.quick_reactions(channel, args.newest));
-    println!("Recently used:");
-    print_all(&store.recent_reactions(channel, args.newest));
+    ExitCode::SUCCESS
+}
+
+pub(crate) fn lines(store: &Store, channel: ChannelId, args: &EmojiArgs) -> Vec<String> {
+    let newest = args.newest.unwrap_or(EmojiVersion::NEWEST);
+    if let Some(query) = &args.query {
+        let found = store.search_emoji(channel, query, newest, args.limit);
+        if found.is_empty() {
+            return vec!["(nothing)".to_owned()];
+        }
+        return found.iter().map(emoji_line).collect();
+    }
+    let mut lines = vec!["Quick reactions:".to_owned()];
+    push_all(&mut lines, &store.quick_reactions(channel, newest));
+    lines.push("Recently used:".to_owned());
+    push_all(&mut lines, &store.recent_reactions(channel, newest));
     for section in store.custom_emoji_sections(channel) {
         let name = store
             .guild(section.guild_id)
             .map(|guild| printable(&guild.name).into_owned())
             .unwrap_or_default();
-        println!("{name}  {}", section.guild_id.get());
+        lines.push(format!("{name}  {}", section.guild_id.get()));
         for custom in &section.emojis {
-            println!("  {}", emoji_line(&PickerEmoji::Custom(custom.clone())));
+            lines.push(format!(
+                "  {}",
+                emoji_line(&PickerEmoji::Custom(custom.clone()))
+            ));
         }
     }
-    let groups = unicode_groups(args.newest);
+    let groups = unicode_groups(newest);
     let count: usize = groups.iter().map(|group| group.emojis.len()).sum();
-    println!(
+    lines.push(format!(
         "Unicode: {count} emoji in {} groups, up to {}.{}",
         groups.len(),
-        args.newest.major,
-        args.newest.minor
-    );
-    ExitCode::SUCCESS
+        newest.major,
+        newest.minor
+    ));
+    lines
 }
 
 #[cfg(test)]
@@ -140,6 +149,14 @@ mod tests {
         assert_eq!(
             custom_line("dance", 8, true, EmojiAccess::NitroLocked),
             ":dance:  8 animated  needs Nitro"
+        );
+        assert_eq!(
+            custom_line("lost", 10, false, EmojiAccess::Unavailable),
+            ":lost:  10  unavailable: the server lost the boosts it needs"
+        );
+        assert_eq!(
+            custom_line("subs", 11, false, EmojiAccess::RoleLocked),
+            ":subs:  11  only for roles you don't have"
         );
         assert_eq!(
             custom_line("x\u{1b}[2J", 9, false, EmojiAccess::External),

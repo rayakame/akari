@@ -390,6 +390,8 @@ mod tests {
         assert_eq!(limit, 5);
         assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--newest", "x"]).is_err());
         assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--limit", "0"]).is_err());
+        assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--limit", "501"]).is_err());
+        assert!(Cli::try_parse_from(["akari-cli", "emoji", "1", "--limit", "500"]).is_ok());
     }
 
     #[test]
