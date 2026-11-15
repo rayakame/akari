@@ -256,12 +256,15 @@ is false while the target isn't loaded: read the replies' messages again with th
 
 `Store.pins_unread(channel_id)` is the dot on the header's pins button; `PinsUnreadChanged {
 channel_id }` says to read it again, and so do a mute (`GuildSettingsChanged`) and a thread's
-join (`ChannelUpdated`) ([read-states.md](../../docs/protocol/read-states.md#pins)).
+join (`ChannelUpdated`) ([read-states.md](../../docs/protocol/read-states.md#pins)). The pins
+list itself is in [Pins](#pins).
 
 `Store.message_actions(channel_id, message_id)` is what the user may do with a message, as
 `MessageActions`: `reply`, `reply_pings`, `mention_toggle`, `edit`, `delete`, `pin`, `unpin`,
 `react`, `toggle_reaction`, `remove_reactions`, `mark_unread`, `copy_link`, `create_thread`
-and `view_thread`, all false for a message the store doesn't have. The rules are akari-core's
+and `view_thread`, all false for a message the store doesn't have. A message only the pins list
+has is asked about with its own IDs, and one the list has is pinned there whatever an older
+copy says. The rules are akari-core's
 ([message-actions.md](../../docs/ui/message-actions.md)); a host asks when its bar or menu
 opens and decides nothing itself. No event reports a change: the answer moves with the
 message, its channel, the user's roles and the end of a timeout.
@@ -477,6 +480,32 @@ or a refusal clears `deleting` and throws a `RequestError`. While it is deleting
 `Store.newest_editable_message(channel_id)` is the message Up arrow in an empty composer edits:
 the newest loaded one that `MessageActions.edit` allows, wherever the list is
 ([messages.md](../../docs/protocol/messages.md#editing-and-deleting)).
+
+## Pins
+
+`Store.pins(channel_id)` is the channel's pins list as loaded: a `PinsPage` with `items` (each a
+`PinnedMessage`: the `message` as a `Message` record, formatted like a list's, and `pinned_at`),
+the newest pin first; `has_more`; and `state`, a `PinsState`: `NotLoaded` (not asked for in this
+connection, items an earlier connection's), `Loading`, `Loaded` or `Failed` (without items the
+first page failed, which isn't an empty list). `PinsChanged { channel_id }` says to read it
+again: a page began, came or failed, a pin came or went, a pinned message changed (its text, its
+reactions), a new session left it `NotLoaded`, or the list was let go (10 lists are kept).
+
+- `Account.load_pins(channel_id)` asks for the first page (25 pins) when the list is `NotLoaded`,
+  its first page failed or Discord named a newer pin than it has; otherwise it returns at once.
+  Call it whenever the list shows and reads `NotLoaded`: on opening and after `PinsChanged`.
+  `load_more_pins(channel_id)` asks for the next page while `has_more`, also after a failed one;
+  a host asks near the list's end. Both throw a `RequestError` and leave the list `Failed`.
+- `pin(channel_id, message_id)` and `unpin(…)` take the row's IDs (a thread's starter row pins
+  the parent's message) or a pinned message's own, by `MessageActions.pin` and `.unpin`; an
+  archived thread is opened first. Nothing changes until the gateway's update (D162): keep the
+  button busy while the call runs. `PinError` tells apart `TooMany { limit }`, `Archived`,
+  `SystemMessage`, `WrongChannel`, `Forbidden`, `Gone` and `Request { error }`; an unpin of a
+  message that is gone succeeds.
+- `ack_pins(channel_id)` while the pins show, again on `PinsUnreadChanged`: the core acks only
+  while the dot shows, and `pins_unread` turns false at once.
+- A pinned message's reactions, actions, edit and delete are read and changed by its IDs, as a
+  list's row's ([messages.md](../../docs/protocol/messages.md#pins)).
 
 ## The emoji picker
 

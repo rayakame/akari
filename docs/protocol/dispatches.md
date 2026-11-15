@@ -72,12 +72,12 @@ Two details:
 | THREAD_MEMBER_UPDATE | `ThreadMemberUpdate` | The user's own thread member: the thread's membership, mute and level are replaced, `ChannelUpdated` ([Threads](#threads)) |
 | THREAD_MEMBERS_UPDATE | `ThreadMembersUpdate` | The user's ID in `added_members` joins the thread, in `removed_member_ids` leaves it: `ChannelUpdated`. Other members and `member_count` are ignored |
 | MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
-| MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated`. Patches a reply's target, loaded or not: `ReplyTargetChanged` ([messages.md](messages.md#replies)). Patches a viewed thread's starter, and tells the starter rows that show the message. Reactions stay. While the user's own edit of the message is on its way, its text is noted as Discord's and the copies keep the saved text ([messages.md](messages.md#an-edit-on-its-way)) |
-| MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message; a reply's target becomes deleted: `ReplyTargetChanged`; a viewed thread's starter becomes unavailable: `MessageUpdated` for its row. The message's edit and delete on their way are forgotten, a bulk delete's too; a pending reply's target reads as deleted in both, also without a window |
+| MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated`. Patches a reply's target, loaded or not: `ReplyTargetChanged` ([messages.md](messages.md#replies)). Patches a viewed thread's starter, and tells the starter rows that show the message. Patches the channel's pins list: `pinned: false` takes the message out, `pinned: true` may put it at the front ([messages.md](messages.md#the-pins-list)), `PinsChanged`. Reactions stay. While the user's own edit of the message is on its way, its text is noted as Discord's and the copies keep the saved text ([messages.md](messages.md#an-edit-on-its-way)) |
+| MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message; a reply's target becomes deleted: `ReplyTargetChanged`; a viewed thread's starter becomes unavailable: `MessageUpdated` for its row; a pin leaves the pins list: `PinsChanged`. The message's edit and delete on their way are forgotten, a bulk delete's too; a pending reply's target reads as deleted in both, also without a window |
 | MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE | `MessageReaction` | One user's reaction counts up or down on every copy of the message: `MessageReactionsChanged` for a loaded one ([Reactions](#reactions)) |
 | MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI | `MessageReactionRemoveAll`, `MessageReactionRemoveEmoji` | The message's reactions, or one emoji's, go: `MessageReactionsChanged` |
 | MESSAGE_REACTION_ADD_MANY | `MessageReactionAddMany` | Each listed user's reaction counts as an ADD; one `MessageReactionsChanged` |
-| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | The channel's newest pin's time, and the pin time the user acknowledged: `PinsUnreadChanged` when the pins dot changed ([read-states.md](read-states.md#pins)) |
+| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | The channel's newest pin's time, and the pin time the user acknowledged: `PinsUnreadChanged` when the pins dot changed ([read-states.md](read-states.md#pins)). A newer pin time names the newest pin the gateway put in the channel's pins list, or makes the next `load_pins` ask again ([messages.md](messages.md#the-pins-list)) |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
@@ -467,11 +467,12 @@ kept. The dispatches change them as the official client's message record does [3
 
 They reach every copy of the message the store holds: the window's row, a live message held
 back until its window is refreshed, a thread box's newest message, a forum post's first
-message (`Store::post_preview`) and the message a viewed thread started from. Events only for
-what shows them: `MessageReactionsChanged { channel_id, message_id }` for the window's row and
-for the starter row of each viewed thread showing the message (the thread's ID and the row's),
-`PostPreviewChanged` for a post's first message; nothing for a thread box, whose preview shows
-no reactions. `Store::reactions(channel, message)` reads them alone, so a click doesn't read the
+message (`Store::post_preview`), the message a viewed thread started from and a pinned message
+of the channel's pins list. Events only for what shows them: `MessageReactionsChanged {
+channel_id, message_id }` for the window's row and for the starter row of each viewed thread
+showing the message (the thread's ID and the row's), `PostPreviewChanged` for a post's first
+message, `PinsChanged` for the pins list; nothing for a thread box, whose preview shows no
+reactions. `Store::reactions(channel, message)` reads them alone, so a click doesn't read the
 message again; a starter row's IDs answer for the message it shows.
 
 A reaction that comes while a page of its channel loads is kept and put over the page, like
@@ -504,6 +505,9 @@ From the code read of canary 671549, not observed:
   `version` (the read states' version). Whether the acking session gets it too isn't known.
 - CHANNEL_UPDATE and THREAD_UPDATE carry `last_pin_timestamp` like the channel object: missing
   is unchanged, `null` none.
+- Neither changes the pins list itself; the official client's pins store doesn't listen to
+  CHANNEL_PINS_UPDATE at all. Akari's list takes its newest pin time for the pin the gateway put
+  at the front ([messages.md](messages.md#the-pins-list)).
 
 ## Large guilds
 
@@ -603,7 +607,7 @@ and applies each event.
   `latest` to false, like Discord's "jump to present"; live messages then wait until newer
   history brings the window back to the present. Every trim emits `MessagesTrimmed`.
 - A new session marks every window stale (`MessagesStale`) instead of clearing it, so a UI
-  keeps its scroll position. Edits and deletes still apply, but new messages are held back
+  keeps its scroll position, and leaves every pins list shown but `NotLoaded` (`PinsChanged`). Edits and deletes still apply, but new messages are held back
   until the window is refreshed and reconciled, because appending them could leave a gap.
   `Account` refreshes stale windows right after READY; a window that is current again sends
   `MessagesRefreshed`, also when the refresh found nothing new. See
