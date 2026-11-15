@@ -159,7 +159,9 @@ messages aren't held back behind it).
 The host names the account (it keys the token store by it), but READY decides. If READY's
 user differs, a host bug, the cache moves to that user's file and leaves the other one as it
 was. Nothing is read from the other file once the session's user is known: neither its
-entities (`cache not used reason=other_user`) nor its windows.
+entities (`cache not used reason=other_user`) nor its windows. Its age agreements and reaction
+uses, Akari's own, never reach READY's account, whether the file was restored before READY, read
+after it or while it was prepared.
 
 ## Deleting
 

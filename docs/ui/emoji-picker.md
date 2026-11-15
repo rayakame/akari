@@ -137,9 +137,10 @@ section lists, which are dimmed and why, and how recently used is counted is the
   Return sounds the system's refusal (the footer says why) and reacts with nothing.
 - The pinned band takes no pointer: the wheel over it scrolls the grid, and a click on it picks
   nothing.
-- A pick adds the user's reaction; an emoji that is the user's reaction already stays theirs
-  (the official client's add does nothing then). The pill shows at once, as for any reaction
-  ([reactions.md](reactions.md#a-click-on-a-pill)), and the emoji counts as used.
+- A pick adds the user's reaction; the pill shows at once, as for any reaction
+  ([reactions.md](reactions.md#a-click-on-a-pill)), and the emoji counts as used. An emoji
+  that is the user's reaction already stays theirs and counts nothing (the official client's
+  add does nothing then).
 - An animated custom emoji plays while the panel has the keyboard, by `animate_emoji`,
   and the selected one always.
 - For VoiceOver each emoji that shows is a button named by its short name without colons

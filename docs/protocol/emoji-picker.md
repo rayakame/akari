@@ -88,9 +88,9 @@ without Unicode emoji newer than `newest`. No event: the picker reads it when it
 
 `Store::quick_reactions(channel, newest)` are the hover bar's three: the recently used reactions
 the user may use there (`Usable`), filled from 💯, 😆 and 💖 (`100`, `laughing`,
-`sparkling_heart`), each emoji once (research §3.8). *Akari:* Discord leaves out what its
-filter rejects; Akari keeps only what a click can add, so a locked emoji never fills a place. No
-event: the bar reads them when it shows.
+`sparkling_heart`), each emoji once (research §3.8), none newer than `newest`. *Akari:* Discord
+leaves out what its filter rejects; Akari keeps only what a click can add, so a locked emoji never
+fills a place. No event: the bar reads them when it shows.
 
 ## Search
 
