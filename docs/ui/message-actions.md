@@ -209,7 +209,7 @@ With **Shift held**, the bar changes at once, the pointer still, and back when S
 | 3 | Configure (a join line, for Manage Server) | | left out |
 | 4 | Mark Unread | `mark_unread` | yes |
 | 5 | Bookmark Message | | left out |
-| 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
+| 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | yes: the pushpin or the slashed pushpin; with Shift let go at the click it asks ([pins.md](pins.md#pinning-and-unpinning)) |
 | 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | yes |
 | 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
 | 9 | Delete | `delete`; no question asked | yes: deletes at once; with Shift let go at the click it asks first ([edit-delete.md](edit-delete.md#deleting)) |
@@ -240,7 +240,7 @@ client's order, with what Akari has in bold:
 |---|---|
 | Reactions | **Add Reaction** (its submenu: up to twelve emoji, then "View More", the picker), **View Reactions** (a message with reactions) |
 | Writing | **Edit Message**, **Reply**, Forward, **Create Thread**, ***View Thread*** |
-| The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
+| The message | **Copy Text** (a message with text), **Pin Message** or **Unpin Message** (not for a failed send: asks first unless Shift is held, [pins.md](pins.md#pinning-and-unpinning)), **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
 | Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red: asks first, with the Shift tip, unless Shift is held; a failed send goes at once; [edit-delete.md](edit-delete.md#deleting)) |
 | Developer | Copy Message ID (developer mode) |
 

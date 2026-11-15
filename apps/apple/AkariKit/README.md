@@ -199,8 +199,13 @@ Copy Message Link (the link is the core's, `Store.messageLink`), Mark Unread, Cr
 View Thread, Edit (the list's `EditModel.start`), Delete (a failed send at once, without a
 request; Shift at the click deletes at once; otherwise `SessionModel.deleteQuestion`, a
 `MessageActionsModel.DeleteQuestion` with the row and, from the menu, the Shift tip, until
-`answerDeleteQuestion(_:)`; a refusal waits in `messageActionFailure`), and Retry for a failed
-send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
+`answerDeleteQuestion(_:)`; a refusal waits in `messageActionFailure`), Pin and Unpin (Shift at
+the click at once; otherwise `SessionModel.pinQuestion`, a `MessageActionsModel.PinQuestion` with
+the row, the official words and, for Unpin, its protip as a `MessageTip`, until
+`answerPinQuestion(_:)`; nothing changes before the gateway says so; a refused pin is the
+official alert for its `PinError` in `messageActionFailure`, a refused unpin the one "The Pin Is
+Stuck!" with Try Again in `messageConfirmation`, whose `destructive` is false), and Retry for a
+failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
 new messages line over the message at once, asks `Account.markUnread`, and on a refusal puts the
 line back and leaves one `messageActionFailure` on the session, in Akari's words, until
 `dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
@@ -298,6 +303,21 @@ search changing nothing; `showsSpinner` and `isEmpty` say what shows instead.
 Shift+click (beside its channel), and `moreActiveThreads(of:)` the channel list's "More Active
 Threads" (`ThreadPeek`): up to three active threads the list doesn't show; while `peek(at:)`
 names the channel it shows for, `peekedThreads` follows the store.
+`pinsChannel` is the channel whose pins the header's pins button shows (the open message
+list's: a text or announcement channel, a thread, a DM or a group DM; not the system DM),
+`pinsUnread` its dot and `pinsDisabled` the age gate in front of it; `togglePins()` (the button,
+⌘P) opens `pins`, its `PinsModel`, or closes it, `togglePins(of:)` (a pin line's "pinned
+messages") opens the line's channel first, and another channel or the Threads browser closes it.
+`PinsModel.open()` acks the channel's pins and leaves the first page to the core
+(`Account.loadPins`, which asks Discord only when the list needs it); `phase` says what shows:
+the spinner, the `rows` (the pinned messages as `MessageListModel.Row`s, the newest pin first, a
+reply with its line), the empty state in the official words for a channel or a conversation
+(`emptyText`, `protip`) or, *Akari*, the failed first page with `retry()`. `reachedEnd()` (the
+list's end came near) loads the next page while Discord has more and the last page came,
+`loadMore()` ("Load more messages", `offersMore`) also after a failed one, `loadingMore` the
+spinner under the rows. `jump(to:shift:)` jumps in the channel's list and closes the popout unless
+Shift is held; `unpin(_:shift:)` is a row's ✕ (`canUnpin(_:)`: the core's `unpin`), the question
+or at once with Shift, `unpinning` the rows whose ✕ is busy until Discord answers.
 `threadForm` is the open channel's "New Thread" form (`ThreadFormModel`), in the split view's
 place: `openThreadForm(in:from:location:)` (a message's menu, the browser's Create and its empty
 state's "Create Thread", nothing where `threadCreation(in:)` or `canStartThread(from:in:)` allows
@@ -359,8 +379,11 @@ The batch also keeps, apart from its messages, the messages whose reactions chan
 (`pinsUnreadChanged`). A message list reads again only the rows whose reply answers a changed
 message, the composer ends a pending reply whose message was deleted, and the New Thread form
 rereads its source's line; a list rereads the reactions of the rows a reaction change names,
-and its `ReactionsModel` and the reactions window follow it too; no model reads the pins dot
-yet.
+and its `ReactionsModel` and the reactions window follow it too. The session rereads the pins
+dot of the header's channel (`pinsUnread`) when the batch names it, a mute or a join, and the
+open popout's `PinsModel` rereads its list on `pinsChanged` (also its pinned replies' lines on
+`replyTargetsChanged`), asks for a list a new session left unloaded, and acks again on
+`pinsUnreadChanged`.
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.
