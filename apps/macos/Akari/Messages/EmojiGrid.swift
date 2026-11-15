@@ -160,6 +160,7 @@ final class EmojiGridView: NSView {
         pressed = nil
         for (_, cell) in cells {
             cell.isHidden = true
+            cell.picture.animates = false
             spareCells.append(cell)
         }
         cells = [:]
@@ -527,7 +528,10 @@ final class EmojiStripView: NSView {
     /// The browsing sections' buttons; a search's results have none.
     func show(_ sections: [EmojiPickerModel.Section]) {
         let shown = sections.filter { $0.kind != .results }
-        guard shown.map(\.id) != buttons.map(\.kind) || shown.map(\.icon) != buttons.map(\.icon) else {
+        guard
+            shown.map(\.id) != buttons.map(\.kind) || shown.map(\.icon) != buttons.map(\.icon)
+                || shown.map(\.title) != buttons.map(\.name)
+        else {
             return
         }
         buttons.forEach { $0.removeFromSuperview() }
@@ -600,6 +604,7 @@ final class EmojiStripButton: NSButton {
 
     let kind: EmojiPickerModel.Section.Kind
     let icon: ImageKey?
+    let name: String
     let picture = ImageLayerView()
     let initials = NSTextField(labelWithString: "")
     private let tile = NSView()
@@ -623,6 +628,7 @@ final class EmojiStripButton: NSButton {
     init(_ section: EmojiPickerModel.Section) {
         kind = section.kind
         icon = section.icon
+        name = section.title
         super.init(frame: .zero)
         isBordered = false
         title = ""

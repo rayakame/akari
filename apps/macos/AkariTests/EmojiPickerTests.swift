@@ -118,6 +118,14 @@ final class PickerHarness {
             Notification(name: NSControl.textDidChangeNotification, object: view.field.text))
     }
 
+    /// The sections a picker opened now reads, after the test changed the store.
+    func sectionsNow() throws -> [EmojiPickerModel.Section] {
+        let reactions = ReactionsModel(store: account.reactionsStore, account: account)
+        return try #require(
+            reactions.openPicker(for: row(2, at: berlinTime(2026, 10, 10, 12, 0)), from: .picker)
+        ).sections
+    }
+
     var made: [String] { account.made.withLock { $0 } }
 }
 
@@ -392,6 +400,20 @@ struct EmojiPickerViewTests {
         #expect(picker.view.stickyTitle.stringValue == "People & Body")
     }
 
+    // A server renamed while the picker is open.
+    @Test
+    func theStripTakesAServersNewName() throws {
+        let strip = picker.view.strip
+        picker.account.reactionsStore.picker.withLock { $0.names[GuildId(rawValue: 1)] = "Garden" }
+
+        strip.show(try picker.sectionsNow())
+
+        let home = strip.buttons[1]
+        #expect(home.toolTip == "Garden")
+        #expect(home.accessibilityLabel() == "Garden")
+        #expect(home.initials.stringValue == "G")
+    }
+
     @Test
     func theStickyHeaderNamesTheSectionAtTheTopAndTheNextPushesItUp() {
         let grid = picker.grid
@@ -500,6 +522,29 @@ struct EmojiPickerViewTests {
         view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: false)
         picker.grid.pointerMoved(to: picker.middle(of: picker.at(1, 0)))
         #expect(cat.picture.animates, "the setting plays every animated one that shows")
+    }
+
+    // Hidden cells kept for later play nothing.
+    @Test
+    func emojiOutOfSightStopPlaying() async throws {
+        let party = (0..<100).map { PickerEmoji.custom(emoji: pickerCustom(100 + UInt64($0), "party", animated: true)) }
+        let found = try PickerHarness(found: ["party": party])
+        found.view.isKey = { true }
+        found.view.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: false)
+        found.type("party")
+        try await eventually { found.model.sections.first?.kind == .results }
+        let grid = found.grid
+        var spares: [PickerEmojiCell] { grid.subviews.compactMap { $0 as? PickerEmojiCell }.filter(\.isHidden) }
+        #expect(grid.cells.values.allSatisfy { $0.picture.animates })
+
+        grid.scroll(to: 2000)
+        #expect(!spares.isEmpty, "the last row has one emoji: fewer cells show at the end")
+        #expect(!spares.contains { $0.picture.animates })
+
+        found.type("partyx")
+        try await eventually { found.model.foundNothing }
+        #expect(grid.cells.isEmpty)
+        #expect(!spares.contains { $0.picture.animates })
     }
 }
 
