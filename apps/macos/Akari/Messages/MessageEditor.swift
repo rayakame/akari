@@ -52,6 +52,7 @@ final class MessageEditorView: NSView {
         measureContainer.lineFragmentPadding = 0
         measureLayout.addTextContainer(measureContainer)
         textView.scrollsItself = false
+        textView.editsAMessage = true
         textView.delegate = self
         textView.onFocus = { [weak self] focused in self?.box.focused = focused }
         textView.onEscape = { [weak self] in self?.onCancel() }

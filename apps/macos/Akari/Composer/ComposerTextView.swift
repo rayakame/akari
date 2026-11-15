@@ -18,6 +18,8 @@ final class ComposerTextView: NSTextView {
     var onFocus: (Bool) -> Void = { _ in }
     /// Off in a message's row: the list scrolls its caret into view once the row has its height.
     var scrollsItself = true
+    /// A message's editor in its row, which the composer leaves the focus to.
+    var editsAMessage = false
     var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     static func scrollable() -> (NSScrollView, ComposerTextView) {
@@ -112,9 +114,15 @@ final class ComposerTextView: NSTextView {
         scrollsItself ? super.scrollToVisible(rect) : true
     }
 
-    /// Becomes first responder unless the user is selecting message text that's still shown.
+    /// Becomes first responder unless the user is selecting message text that's still shown or
+    /// editing a message.
     func takeFocus() {
         guard let window, isEditable else {
+            return
+        }
+        if let editor = window.firstResponder as? ComposerTextView, editor.editsAMessage,
+            editor.window === window
+        {
             return
         }
         if let editor = window.firstResponder as? NSTextView, editor !== self, editor.isFieldEditor,

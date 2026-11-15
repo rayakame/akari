@@ -326,6 +326,23 @@ final class ComposerTextViewTests {
         #expect(window.firstResponder === view)
     }
 
+    // A channel opened again with its edit: the editor has the focus and keeps it.
+    @Test
+    func aMessagesEditorKeepsTheComposerFromTakingFocus() {
+        let (_, view) = field()
+        let editor = MessageEditorView()
+        editor.frame = NSRect(x: 0, y: 100, width: 300, height: 100)
+        window.contentView?.addSubview(editor)
+        window.makeFirstResponder(editor.textView)
+
+        view.takeFocus()
+        #expect(window.firstResponder === editor.textView)
+
+        editor.removeFromSuperview()
+        view.takeFocus()
+        #expect(window.firstResponder === view)
+    }
+
     @Test
     func aSelectionInAMessageKeepsTheComposerFromTakingFocus() {
         let (_, view) = field()
