@@ -146,6 +146,7 @@ struct DeleteMessageTests {
         let window = TestWindow.make(size: NSSize(width: 800, height: 600))
         let windows = ChildWindows(keyable: true)
         windows.focus = WindowFocus(makeKey: { _ in })
+        windows.closesOnDeactivate = false
         var answers: [Bool] = []
         windows.onClose = { answers.append(false) }
         let question = question(row(1, at: noon, content: "goodbye"), tip: true)
@@ -165,6 +166,10 @@ struct DeleteMessageTests {
                     windowNumber: panel.windowNumber, context: nil, characters: characters,
                     charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
         }
+
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        #expect(windows.panel != nil, "it stays while another app is active, as the official modal")
+        #expect(answers.isEmpty)
 
         panel.sendEvent(try key("\r", 36))
         #expect(answers == [true])

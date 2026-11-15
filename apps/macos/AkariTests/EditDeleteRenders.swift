@@ -4,9 +4,7 @@ import Testing
 
 @testable import Akari
 
-// Pictures, not assertions: with TEST_RUNNER_AKARI_RENDERS=1 editing and deleting are drawn at
-// 2x in both themes into the test host's temporary folder (the RENDER lines name the files and
-// the measured boxes, in 2x pixels from the picture's top left).
+// Pictures to look at, not assertions, so they run only when asked (TEST_RUNNER_AKARI_RENDERS=1).
 @MainActor @Suite(.enabled(if: ProcessInfo.processInfo.environment["AKARI_RENDERS"] != nil))
 struct EditDeleteRenders {
     nonisolated final class ActionsStore: Store, @unchecked Sendable {
@@ -140,6 +138,20 @@ struct EditDeleteRenders {
         let save = editor.hint.save
         list.move(to: save.convert(NSPoint(x: save.bounds.midX, y: save.bounds.midY), to: list.table))
         try write(view, "5-editor-save-hovered", theme: theme)
+
+        let room = editor.textView.frame.width - 2 * ComposerTextView.insets.width
+        var line = "Typed right up to the edge"
+        while NSAttributedString(string: line + " x", attributes: ComposerTextView.attributes).size().width < room - 12 {
+            line += " x"
+        }
+        edit(2, line, opening: 6)
+        list.actions.left = 150
+        editor.textView.insertText("!", replacementRange: editor.textView.selectedRange())
+        list.window.layoutIfNeeded()
+        try write(
+            view, "11-editor-counter-wraps-as-typed", theme: theme,
+            notes: try notes() + ["counter \(box(editor.counter, in: view))"])
+        list.actions.left = nil
     }
 
     @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])

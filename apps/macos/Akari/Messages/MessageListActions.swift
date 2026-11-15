@@ -93,6 +93,7 @@ protocol MessageListActions: AnyObject {
     func editRemaining() -> Int?
     func saveEdit()
     func cancelEdit()
+    func editFocused(_ focused: Bool)
 }
 
 extension MessageListActions {
@@ -137,4 +138,5 @@ extension MessageListActions {
     func editRemaining() -> Int? { nil }
     func saveEdit() {}
     func cancelEdit() {}
+    func editFocused(_ focused: Bool) {}
 }

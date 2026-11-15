@@ -83,7 +83,7 @@ struct SessionView<MessageArea: View>: View {
                             )
                             .imageEnvironment(session)),
                         frame: frame, browser: true, dimmed: true,
-                        label: MessageActionsModel.DeleteQuestion.title,
+                        label: MessageActionsModel.DeleteQuestion.title, closesOnDeactivate: false,
                         onClose: { session.answerDeleteQuestion(false) }, refocus: session.refocusChannel
                     )
                     .frame(width: proxy.size.width, height: proxy.size.height)

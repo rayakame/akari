@@ -105,6 +105,22 @@ struct EditedMessageTests {
         #expect(MessageText.Source(failed.message).color == Palette.textDefault)
     }
 
+    // Discord's answer may change nothing but the edit's state.
+    @Test
+    func aSavedEditsDimLiftsWhenOnlyItsEditChanges() throws {
+        let list = MessageListFixture()
+        let saved = changed(row(1, at: list.noon, content: "saved")) { $0.edit = .pending }
+        func color() throws -> NSColor? {
+            try list.text(of: 1).textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        }
+        list.show([saved])
+        #expect(try color() === Palette.textMuted)
+
+        list.show([changed(saved) { $0.edit = nil }])
+
+        #expect(try color() === Palette.textDefault)
+    }
+
     @Test
     func aMessageBeingDeletedIsDimmedAndComesBackOnARefusal() throws {
         let list = MessageListFixture()

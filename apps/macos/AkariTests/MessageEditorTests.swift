@@ -189,6 +189,61 @@ struct MessageEditorTests {
         #expect(editor.textView.frame.width == editor.bounds.width)
     }
 
+    // A line that fits the box until the counter takes its room.
+    func lineNearTheEdge() -> String {
+        let room = editor.textView.frame.width - 2 * ComposerTextView.insets.width
+        var line = ""
+        while NSAttributedString(string: line + "a", attributes: ComposerTextView.attributes).size().width < room - 20 {
+            line += "a"
+        }
+        return line
+    }
+
+    @Test
+    func theRowFollowsTheTextAsTheCounterComesAndGoes() throws {
+        threeMessages()
+        edit(1, text: "first")
+        let one = height(of: 1)
+        let line = lineNearTheEdge()
+        edit(1, text: line, opening: 2)
+        #expect(height(of: 1) == one)
+
+        list.actions.left = 150
+        type("a")
+        #expect(height(of: 1) == one + ComposerTextView.lineHeight, "the counter's room wraps the line")
+        #expect(abs(height(of: 1) - (try fittingHeight(of: 1))) <= 0.5)
+
+        list.actions.left = nil
+        type("a")
+        #expect(height(of: 1) == one)
+        #expect(abs(height(of: 1) - (try fittingHeight(of: 1))) <= 0.5)
+    }
+
+    @Test
+    func aNewLineAtTheEndGrowsTheRowAtOnce() throws {
+        threeMessages()
+        edit(1, text: "first")
+        let one = height(of: 1)
+
+        type("\n")
+
+        #expect(height(of: 1) == one + ComposerTextView.lineHeight)
+        #expect(abs(height(of: 1) - (try fittingHeight(of: 1))) <= 0.5)
+        let caret = editor.caretRect
+        #expect(caret.maxY <= editor.textView.frame.maxY - ComposerTextView.insets.height + 0.5)
+    }
+
+    @Test
+    func theEditorsFocusReachesTheModel() {
+        threeMessages()
+
+        edit(1, text: "first")
+        #expect(list.actions.editorFocus.last == true)
+
+        list.window.makeFirstResponder(list.table)
+        #expect(list.actions.editorFocus.last == false)
+    }
+
     @Test
     func aRefusalsReasonStandsUnderTheBoxAndTheRowMakesRoom() throws {
         threeMessages()

@@ -1382,10 +1382,10 @@ struct MessageTableTests {
             calls.append("view reactions of \(row.message.id.rawValue)")
         }
 
-        /// The inline editor's text as the model holds it, and what is left of the limit.
         var editing = ""
         var left: Int?
         var typed: [String] = []
+        var editorFocus: [Bool] = []
 
         func editText() -> String {
             editing
@@ -1406,6 +1406,10 @@ struct MessageTableTests {
 
         func cancelEdit() {
             calls.append("cancel edit")
+        }
+
+        func editFocused(_ focused: Bool) {
+            editorFocus.append(focused)
         }
 
         var popouts: [ExpressionTarget] = []

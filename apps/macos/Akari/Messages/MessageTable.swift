@@ -464,4 +464,8 @@ final class MessageListBridge: MessageListActions {
     func cancelEdit() {
         messages.editor.cancel()
     }
+
+    func editFocused(_ focused: Bool) {
+        messages.editor.editorFocused = focused
+    }
 }

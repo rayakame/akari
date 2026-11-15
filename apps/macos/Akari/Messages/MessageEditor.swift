@@ -26,17 +26,17 @@ final class MessageEditorView: NSView {
     let problem = CellText.label()
     let hint = EditorHint()
     private let undo = UndoManager()
-    /// The user typed: the model keeps the text, and the row its height.
     var onText: (String) -> Void = { _ in }
+    // After the counter came or went, which changes the text's width.
+    var onResize: () -> Void = {}
+    var onFocus: (Bool) -> Void = { _ in }
     var onSave: () -> Void = {} {
         didSet { hint.save.onClick = onSave }
     }
     var onCancel: () -> Void = {} {
         didSet { hint.cancel.onClick = onCancel }
     }
-    /// The caret moved: the list keeps it in view.
     var onCaret: () -> Void = {}
-    /// Characters left once few remain, as the model counts them.
     var remaining: () -> Int? = { nil }
     // Measures as the text view lays out: TextKit 1, the same attributes and padding.
     private let measureStorage = NSTextStorage()
@@ -54,7 +54,10 @@ final class MessageEditorView: NSView {
         textView.scrollsItself = false
         textView.editsAMessage = true
         textView.delegate = self
-        textView.onFocus = { [weak self] focused in self?.box.focused = focused }
+        textView.onFocus = { [weak self] focused in
+            self?.box.focused = focused
+            self?.onFocus(focused)
+        }
         textView.onEscape = { [weak self] in self?.onCancel() }
         textView.onSubmit = { [weak self] in self?.onSave() }
         textView.setAccessibilityLabel("Edit Message")
@@ -265,6 +268,7 @@ extension MessageEditorView: NSTextViewDelegate {
         refreshCounter()
         invalidateIntrinsicContentSize()
         needsLayout = true
+        onResize()
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {

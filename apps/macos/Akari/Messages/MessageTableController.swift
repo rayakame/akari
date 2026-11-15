@@ -2031,10 +2031,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             perform(action, on: row, from: button)
         }
         emojiPicker.onClose = { [weak self] in self?.pickerClosed() }
-        editor.onText = { [weak self] text in
-            self?.actions?.editChanged(text)
-            self?.editorResized()
-        }
+        editor.onText = { [weak self] text in self?.actions?.editChanged(text) }
+        editor.onResize = { [weak self] in self?.editorResized() }
+        editor.onFocus = { [weak self] focused in self?.actions?.editFocused(focused) }
         editor.onSave = { [weak self] in self?.actions?.saveEdit() }
         editor.onCancel = { [weak self] in self?.actions?.cancelEdit() }
         editor.onCaret = { [weak self] in self?.revealCaret() }
