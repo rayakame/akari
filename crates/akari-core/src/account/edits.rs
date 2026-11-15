@@ -61,15 +61,17 @@ impl Waiter {
 #[derive(Default)]
 pub(super) struct Editing(Mutex<Vec<Waiter>>);
 
-impl Editing {
-    fn finish(&self, channel: ChannelId, message: MessageId, outcome: Result<(), EditError>) {
-        let mut waiters = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(index) = waiters
-            .iter()
-            .position(|waiter| waiter.channel == channel && waiter.message == message)
-        {
-            waiters.swap_remove(index).answer(outcome);
-        }
+fn finish(
+    waiters: &mut Vec<Waiter>,
+    channel: ChannelId,
+    message: MessageId,
+    outcome: Result<(), EditError>,
+) {
+    if let Some(index) = waiters
+        .iter()
+        .position(|waiter| waiter.channel == channel && waiter.message == message)
+    {
+        waiters.swap_remove(index).answer(outcome);
     }
 }
 
@@ -142,9 +144,18 @@ impl Shared {
     // Asks Discord until it has the text the user saved last, or refuses it.
     async fn save(&self, channel: ChannelId, message: MessageId) {
         loop {
-            let Some(ask) = self.store.ask_edit(channel, message) else {
-                self.editing.finish(channel, message, Ok(()));
-                return;
+            let ask = {
+                // So a save can't come between the store's answer and its caller's.
+                let mut waiters = self
+                    .editing
+                    .0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let Some(ask) = self.store.ask_edit(channel, message) else {
+                    finish(&mut waiters, channel, message, Ok(()));
+                    return;
+                };
+                ask
             };
             let body = EditMessage::new(ask.content.into(), ask.quiet_reply);
             let sent = async {
@@ -168,22 +179,20 @@ impl Shared {
                 self.failed(err);
             }
             let asked = outcome.as_ref().map(|_| ()).map_err(Clone::clone);
-            match self.store.edit_answered(channel, message, outcome) {
-                EditOutcome::Again => {}
-                EditOutcome::Done(_) => {
-                    self.editing.finish(channel, message, Ok(()));
-                    return;
-                }
-                EditOutcome::Refused(err, _) => {
-                    self.editing.finish(channel, message, Err(err));
-                    return;
-                }
+            let mut waiters = self
+                .editing
+                .0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let answer = match self.store.edit_answered(channel, message, outcome) {
+                EditOutcome::Again => continue,
+                EditOutcome::Done(_) => Ok(()),
+                EditOutcome::Refused(err, _) => Err(err),
                 // Deleted meanwhile: the caller hears what Discord said.
-                EditOutcome::Gone => {
-                    self.editing.finish(channel, message, asked);
-                    return;
-                }
-            }
+                EditOutcome::Gone => asked,
+            };
+            finish(&mut waiters, channel, message, answer);
+            return;
         }
     }
 

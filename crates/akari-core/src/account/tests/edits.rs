@@ -402,6 +402,34 @@ async fn the_latest_save_wins_and_the_earlier_caller_is_answered_at_once() {
     assert_eq!(online.edit(), "none");
 }
 
+// A save made while the store takes Discord's answer to the one before is asked for too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_save_while_the_answer_is_taken_is_still_asked() {
+    let online = editing().await;
+    let (arrived, release) = online.hold("PATCH", edited("first")).await;
+    online.answer("PATCH", edited("second")).await;
+
+    let (first, second) = tokio::join!(online.edit_to("first"), async {
+        arrival(&arrived).await;
+        online
+            .account
+            .store()
+            .delay_next_write(Duration::from_millis(600));
+        release.send(()).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        online.edit_to("second").await
+    });
+
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(
+        online.bodies().await,
+        [r#"{"content":"first"}"#, r#"{"content":"second"}"#]
+    );
+    assert_eq!(online.edit(), "none");
+    assert_eq!(online.text(), "second");
+}
+
 #[tokio::test]
 async fn a_refused_save_that_a_newer_one_replaced_never_reaches_its_caller() {
     let online = editing().await;
