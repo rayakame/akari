@@ -167,7 +167,12 @@ impl Limits {
             bucket.remaining = limits.remaining;
             bucket.reset_at = limits.reset_after.map(|after| now + after);
         }
-        if let Some(after) = limits.retry_after.filter(|_| limits.limited) {
+        // A published message's edits are limited per message, not per route.
+        let per_message = limits.code == Some(super::PUBLISHED_EDITS);
+        if let Some(after) = limits
+            .retry_after
+            .filter(|_| limits.limited && !per_message)
+        {
             if limits.global {
                 self.global_until = Some(now + after);
             } else {

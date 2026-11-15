@@ -18,6 +18,7 @@ use crate::{DiscordClient, LoadReport, Token};
 
 const CHANNEL: &str = "channels/{}";
 const MESSAGES: &str = "channels/{}/messages";
+const MESSAGE: &str = "channels/{}/messages/{}";
 const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
 const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
@@ -37,6 +38,7 @@ const REACTION_OWN: &str = "channels/{}/messages/{}/reactions/{}/@me";
 const REACTION_TYPED_OWN: &str = "channels/{}/messages/{}/reactions/{}/{}/@me";
 const REACTION_TYPED: &str = "channels/{}/messages/{}/reactions/{}/{}/{}";
 const SLOWMODE: u32 = 20016;
+pub(crate) const PUBLISHED_EDITS: u32 = 20022;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 // The field error Discord's API answers a reply to a message that is gone with; not observed.
@@ -46,7 +48,7 @@ const RATE_LIMIT_RETRIES: u32 = 3;
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(10);
 
 /// A request on behalf of an account that Discord didn't fulfil.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum RequestError {
     /// The token is no longer valid; log in again. Later requests fail at once.
@@ -118,6 +120,8 @@ pub(crate) enum Failure {
     // Only for `Waiting::Create`: Discord's slowmode answer, and its other refusals as sent.
     Slowmode(Option<Duration>),
     Api(ApiError),
+    // A published message edited as often as Discord allows (20022).
+    EditLimit(Option<Duration>),
 }
 
 impl From<RequestError> for Failure {
@@ -139,7 +143,9 @@ impl From<Failure> for RequestError {
                 retry_after: Some(wait),
             },
             Failure::Request(err) => err,
-            Failure::Slowmode(retry_after) => Self::RateLimited { retry_after },
+            Failure::Slowmode(retry_after) | Failure::EditLimit(retry_after) => {
+                Self::RateLimited { retry_after }
+            }
             Failure::Api(api) => RestError::Api(api).into(),
         }
     }
@@ -227,6 +233,30 @@ struct AllowedMentions {
     replied_user: bool,
 }
 
+// Mentions typed in the text still ping; only a reply's own doesn't.
+const QUIET_REPLY: AllowedMentions = AllowedMentions {
+    parse: ["users", "roles", "everyone"],
+    replied_user: false,
+};
+
+// The official client's body for an edit (module 138399): a user's message has no components.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct EditMessage {
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_mentions: Option<AllowedMentions>,
+}
+
+impl EditMessage {
+    // `quiet_reply`: a reply sent without the ping, which an edit mustn't turn on.
+    pub(crate) fn new(content: String, quiet_reply: bool) -> Self {
+        Self {
+            content,
+            allowed_mentions: quiet_reply.then_some(QUIET_REPLY),
+        }
+    }
+}
+
 impl CreateMessage {
     pub(crate) fn new(content: String, nonce: String) -> Self {
         Self {
@@ -239,7 +269,6 @@ impl CreateMessage {
         }
     }
 
-    // Without the ping, mentions typed in the text still ping; only the reply's own doesn't.
     pub(crate) fn answering(
         mut self,
         guild: Option<GuildId>,
@@ -252,10 +281,7 @@ impl CreateMessage {
             channel_id: channel.get().to_string(),
             message_id: message.get().to_string(),
         });
-        self.allowed_mentions = (!mention).then_some(AllowedMentions {
-            parse: ["users", "roles", "everyone"],
-            replied_user: false,
-        });
+        self.allowed_mentions = (!mention).then_some(QUIET_REPLY);
         self
     }
 }
@@ -490,6 +516,38 @@ impl AccountRest {
             .await
             .map_err(RequestError::from)?;
         serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    // `None`: Discord took it in an answer that doesn't read as the message.
+    pub(crate) async fn edit_message(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        body: &EditMessage,
+    ) -> Result<Option<model::Message>, Failure> {
+        let path = format!("channels/{}/messages/{}", channel.get(), message.get());
+        let route = RouteKey::new(Method::Patch, MESSAGE, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Idempotent, || {
+                Ok(self.request(HttpMethod::PATCH, &path)?.json(body))
+            })
+            .await?;
+        Ok(serde_json::from_slice(&body).ok())
+    }
+
+    pub(crate) async fn delete_message(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        let path = format!("channels/{}/messages/{}", channel.get(), message.get());
+        let route = RouteKey::new(Method::Delete, MESSAGE, channel.get());
+        self.send(route, Waiting::Idempotent, || {
+            self.request(HttpMethod::DELETE, &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
     }
 
     // Joins or leaves; `location` is already a query value. Answered with 204.
@@ -984,6 +1042,9 @@ impl AccountRest {
                 }
                 429 if creates && limits.code == Some(SLOWMODE) => {
                     return Err(Failure::Slowmode(limits.retry_after));
+                }
+                429 if limits.code == Some(PUBLISHED_EDITS) => {
+                    return Err(Failure::EditLimit(limits.retry_after));
                 }
                 429 if waits
                     && limits.retry_after.is_some()

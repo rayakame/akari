@@ -1,5 +1,6 @@
 use std::error::Error as StdError;
 use std::fmt;
+use std::sync::Arc;
 
 type BoxError = Box<dyn StdError + Send + Sync>;
 
@@ -7,12 +8,12 @@ type BoxError = Box<dyn StdError + Send + Sync>;
 ///
 /// The underlying error stays available through [`std::error::Error::source`] for logging.
 /// It never contains a request URL.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{kind}")]
 pub struct TransportError {
     kind: TransportErrorKind,
     #[source]
-    source: Option<BoxError>,
+    source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +116,7 @@ impl TransportError {
     pub(crate) fn new(kind: TransportErrorKind, source: impl Into<BoxError>) -> Self {
         Self {
             kind,
-            source: Some(source.into()),
+            source: Some(Arc::from(source.into())),
         }
     }
 
@@ -173,6 +174,19 @@ mod tests {
         assert_eq!(err.kind(), TransportErrorKind::Connect);
         assert!(!format!("{err:?}").contains("secret-value"), "{err:?}");
         assert!(!err.to_string().contains("secret-value"));
+    }
+
+    #[test]
+    fn a_copy_keeps_the_kind_and_the_cause() {
+        let err = TransportError::new(TransportErrorKind::Timeout, "too slow");
+
+        let copy = err.clone();
+
+        assert_eq!(copy.kind(), TransportErrorKind::Timeout);
+        assert_eq!(
+            std::error::Error::source(&copy).map(ToString::to_string),
+            Some("too slow".to_owned())
+        );
     }
 
     #[test]
