@@ -340,6 +340,9 @@ public final class EmojiPickerModel {
         if batch.everythingChanged || !batch.emojisChanged.isEmpty || batch.guildListChanged
             || batch.currentUserChanged || !batch.membersChanged.isEmpty
         {
+            if guildId != nil {
+                permissions = store.permissions(channelId: channelId)
+            }
             return true
         }
         let listed = browsing.compactMap { section -> GuildId? in

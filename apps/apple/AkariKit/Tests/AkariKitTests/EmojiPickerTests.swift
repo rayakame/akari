@@ -714,6 +714,27 @@ final class EmojiPickerTests {
         #expect(changes == [.sections(fromTop: false)])
     }
 
+    // The member's change read the lists with its permissions: a channel's change back to the
+    // ones from before reads them again.
+    @Test
+    func aChannelsChangeAfterAMembersChangeComparesWithTheLastRead() throws {
+        let picker = try picker()
+        store.update { state in
+            state.permissions[id(11)] = [.viewChannel, .useExternalEmojis]
+            state.emojiSections[id(11)]?[1].emojis[0].access = .usable
+        }
+        reactions.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
+        #expect(!picker.sections[2].items[0].isLocked)
+
+        store.update { state in
+            state.permissions[id(11)] = nil
+            state.emojiSections[id(11)]?[1].emojis[0].access = .nitroLocked
+        }
+        reactions.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(picker.sections[2].items[0].isLocked)
+    }
+
     // A thread's permissions are its parent's.
     @Test
     func aThreadsParentsChangeIsTheThreadsOwn() throws {
