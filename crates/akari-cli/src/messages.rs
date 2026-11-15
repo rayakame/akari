@@ -1291,6 +1291,88 @@ mod tests {
         }
     }
 
+    // #general's page around the user's own message 7, and Discord taking its edit and delete.
+    async fn own_seven(server: &MockServer) {
+        let mut seven = answered(7, 0);
+        seven["author"]["id"] = ME.to_string().into();
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([seven.clone()])))
+            .mount(server)
+            .await;
+        let at = format!("/api/v9/channels/{GENERAL}/messages/7");
+        Mock::given(method("PATCH"))
+            .and(path(at.clone()))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let mut edited = seven.clone();
+                edited["content"] = body["content"].clone();
+                ResponseTemplate::new(200).set_body_json(edited)
+            })
+            .mount(server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(at))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(server)
+            .await;
+    }
+
+    async fn methods(server: &MockServer) -> Vec<(String, Value)> {
+        let received = server.received_requests().await.unwrap();
+        received
+            .iter()
+            .filter(|request| request.url.path().contains("/messages"))
+            .map(|request| {
+                (
+                    request.method.to_string(),
+                    serde_json::from_slice(&request.body).unwrap_or(Value::Null),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn edit_loads_the_message_then_saves_the_words_joined() {
+        let server = MockServer::start().await;
+        own_seven(&server).await;
+        let client = online(&server).await;
+        let edit = SessionCommand::Edit {
+            channel_id: GENERAL,
+            message_id: 7,
+            text: vec!["new".to_owned(), "words".to_owned()],
+        };
+
+        let code = run(&client, &Arc::new(OneAccount), edit).await;
+
+        assert!(succeeded(code));
+        let requests = methods(&server).await;
+        let verbs: Vec<&str> = requests.iter().map(|(verb, _)| verb.as_str()).collect();
+        assert_eq!(verbs, ["GET", "PATCH"]);
+        assert_eq!(requests[1].1["content"], "new words");
+    }
+
+    #[tokio::test]
+    async fn delete_loads_the_message_then_deletes_it() {
+        let server = MockServer::start().await;
+        own_seven(&server).await;
+        let client = online(&server).await;
+        let delete = SessionCommand::Delete {
+            channel_id: GENERAL,
+            message_id: 7,
+        };
+
+        let code = run(&client, &Arc::new(OneAccount), delete).await;
+
+        assert!(succeeded(code));
+        let verbs: Vec<String> = methods(&server)
+            .await
+            .into_iter()
+            .map(|(verb, _)| verb)
+            .collect();
+        assert_eq!(verbs, ["GET", "DELETE"]);
+    }
+
     #[tokio::test]
     async fn a_reply_whose_message_cant_be_loaded_sends_nothing() {
         let server = MockServer::start().await;

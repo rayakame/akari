@@ -332,6 +332,17 @@ mod tests {
     }
 
     #[test]
+    fn edits_text_may_start_with_a_hyphen() {
+        let cli = Cli::try_parse_from(["akari-cli", "edit", "1", "2", "-x", "y"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Session(SessionCommand::Edit { channel_id: 1, message_id: 2, text })
+                if text == ["-x", "y"]
+        ));
+    }
+
+    #[test]
     fn the_reaction_commands_take_a_channel_a_message_and_an_emoji() {
         let cli = Cli::try_parse_from(["akari-cli", "react", "1", "2", "👍"]).unwrap();
         let Command::Session(SessionCommand::React {
