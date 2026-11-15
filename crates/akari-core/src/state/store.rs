@@ -1350,8 +1350,8 @@ impl Store {
     }
 
     /// The hover bar's three quick reactions in `channel`: the recently used ones the user may
-    /// use there, filled from 💯, 😆 and 💖 as Discord's client does. No event: read it when the
-    /// bar shows.
+    /// use there, filled from 💯, 😆 and 💖 as Discord's client does, none newer than `newest`.
+    /// No event: read it when the bar shows.
     pub fn quick_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
         let now = self.now_millis();
         self.read(|inner| inner.state.quick_reactions(channel, newest, now))

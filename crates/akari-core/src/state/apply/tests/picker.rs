@@ -489,6 +489,18 @@ fn quick_reactions_skip_emoji_newer_than_the_host_draws() {
     );
 }
 
+// 💯, 😆 and 💖 came with Emoji 0.6.
+#[test]
+fn the_three_defaults_keep_to_the_hosts_version_too() {
+    let state = picker_state(false);
+
+    assert!(quick(&state, GENERAL, EmojiVersion::new(0, 5)).is_empty());
+    assert_eq!(
+        quick(&state, GENERAL, EmojiVersion::new(0, 6)),
+        ["100", "laughing", "sparkling_heart"]
+    );
+}
+
 // The picker's Frequently Used: best first, locked ones too (dimmed), but nothing the picker
 // hides here, no emoji the store doesn't know and none the host can't draw.
 #[test]

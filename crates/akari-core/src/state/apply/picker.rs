@@ -202,6 +202,7 @@ impl State {
         for emoji in QUICK_DEFAULTS
             .iter()
             .filter_map(|emoji| UnicodeEmoji::get(emoji))
+            .filter(|emoji| emoji.version() <= newest)
         {
             let emoji = PickerEmoji::Unicode(emoji);
             if quick.len() < QUICK && !quick.contains(&emoji) {

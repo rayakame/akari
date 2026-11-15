@@ -269,7 +269,8 @@ impl Store {
     }
 
     /// The hover bar's three quick reactions in the channel: the recently used ones the user may
-    /// use there, filled from 💯, 😆 and 💖. No event: read it when the bar shows.
+    /// use there, filled from 💯, 😆 and 💖, none newer than `newest`. No event: read it when the
+    /// bar shows.
     pub fn quick_reactions(&self, channel_id: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
         self.core
             .quick_reactions(channel_id, newest.into())
