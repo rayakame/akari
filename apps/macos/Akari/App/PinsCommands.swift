@@ -19,7 +19,9 @@ struct PinsCommands: Commands {
                 session?.togglePins()
             }
             .keyboardShortcut("p", modifiers: .command)
-            .disabled(session?.pinsChannel == nil || session?.pinsDisabled == true)
+            .disabled(
+                session?.pinsChannel == nil || session?.pinsDisabled == true
+                    || session?.asksAboutMessage == true)
         }
     }
 }
