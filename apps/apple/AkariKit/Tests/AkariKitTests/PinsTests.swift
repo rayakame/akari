@@ -237,6 +237,33 @@ final class PinsModelTests {
             "the button asks, and the end once rows came")
     }
 
+    // A new session's first page may bring the same rows, which page on from there.
+    @Test
+    func aFirstPageLetsTheEndAskAgain() async throws {
+        store.update { $0.pins[id(11)] = self.pins([103], more: true) }
+        let session = session()
+        let pins = try await opened(session)
+        await pins.reachedEnd()
+        await pins.reachedEnd()
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+        account.holdPinLoads.withLock { $0 = true }
+        account.pinsAfterLoad.withLock { $0[id(11)] = self.pins([103], more: true) }
+
+        store.update { $0.pins[id(11)] = self.pins([103], more: true, state: .notLoaded) }
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2 }
+        // The core says so as the page is asked for.
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        #expect(pins.loadingMore)
+        account.holdPinLoads.withLock { $0 = false }
+        account.pinLoadReplies.send(())
+        try await eventually { !pins.loadingMore }
+        await pins.reachedEnd()
+
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 2)
+        session.close()
+    }
+
     @Test
     func theButtonForMoreShowsOnlyWhileNothingLoads() async throws {
         store.update { $0.pins[id(11)] = self.pins([125], more: true) }

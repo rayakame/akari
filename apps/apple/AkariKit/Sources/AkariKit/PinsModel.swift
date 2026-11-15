@@ -186,6 +186,7 @@ public final class PinsModel {
             askAgain = false
             try? await account.loadPins(channelId: channelId)
             reread()
+            endSpent = false
         } while askAgain
     }
 
