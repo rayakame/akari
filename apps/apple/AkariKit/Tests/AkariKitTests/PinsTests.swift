@@ -556,6 +556,7 @@ final class PinsModelTests {
 
         #expect(session.messageConfirmation?.title == "The Pin Is Stuck!")
         #expect(session.messageConfirmation?.confirm == "Try Again")
+        #expect(session.messageConfirmation?.destructive == false, "Try Again isn't red")
         account.pinError.withLock { $0 = nil }
         session.answerMessageConfirmation(true)
         try await eventually { self.store.log.calls.filter { $0 == .unpin(id(11), id(103)) }.count == 2 }
