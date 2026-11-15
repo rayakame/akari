@@ -111,6 +111,7 @@ final class EmojiGridView: NSView {
     private var spareCells: [PickerEmojiCell] = []
     private var spareHeaders: [NSTextField] = []
     private var area: NSTrackingArea?
+    private var pressed: EmojiPickerModel.Position?
     var images: ImageCache? {
         didSet {
             if images !== oldValue {
@@ -153,10 +154,10 @@ final class EmojiGridView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Shows `sections`, `selection` lit.
     func show(_ sections: [EmojiPickerModel.Section], selection: EmojiPickerModel.Position?) {
         self.sections = sections
         layout = EmojiGridLayout(sections)
+        pressed = nil
         for (_, cell) in cells {
             cell.isHidden = true
             spareCells.append(cell)
@@ -248,7 +249,6 @@ final class EmojiGridView: NSView {
         tile()
     }
 
-    /// Lays out the cells and headers that show, one row more above and below.
     func tile() {
         let visible = visibleRect
         let wanted = Set(layout.positions(in: visible.insetBy(dx: 0, dy: -EmojiGridLayout.cell)))
@@ -360,16 +360,28 @@ final class EmojiGridView: NSView {
         return sections[position.section].items[position.item].isLocked ? .operationNotAllowed : .pointingHand
     }
 
-    /// The pointer moved to `point` (the grid's coordinates).
+    /// `point` in the grid's coordinates.
     func pointerMoved(to point: NSPoint) {
         cursor(at: point).set()
         onPoint(position(at: point))
     }
 
-    func click(at point: NSPoint, shift: Bool) {
-        if let position = position(at: point) {
-            onClick(position, shift)
+    func press(at point: NSPoint) {
+        pressed = position(at: point)
+    }
+
+    // As a button's click: dragging off the emoji pressed cancels the pick.
+    func release(at point: NSPoint, shift: Bool) {
+        let pressed = pressed
+        self.pressed = nil
+        if let pressed, position(at: point) == pressed {
+            onClick(pressed, shift)
         }
+    }
+
+    func click(at point: NSPoint, shift: Bool) {
+        press(at: point)
+        release(at: point, shift: shift)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -381,7 +393,11 @@ final class EmojiGridView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        click(at: convert(event.locationInWindow, from: nil), shift: event.modifierFlags.contains(.shift))
+        press(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        release(at: convert(event.locationInWindow, from: nil), shift: event.modifierFlags.contains(.shift))
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -539,7 +555,7 @@ final class EmojiStripView: NSView {
         setAccessibilityChildren(buttons)
     }
 
-    /// Lights the button of section `index` of the browsing sections and brings it into view.
+    /// `index` among the browsing sections.
     func light(_ index: Int?) {
         guard index != lit else {
             return

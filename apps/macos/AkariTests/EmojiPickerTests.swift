@@ -79,6 +79,7 @@ final class PickerHarness {
             reactions.openPicker(
                 for: row(2, at: berlinTime(2026, 10, 10, 12, 0)), from: .picker))
         view = EmojiPickerView(model: model)
+        view.refuse = {}
         window = TestWindow.make(size: EmojiPickerView.size)
         window.contentView = view
         window.layoutIfNeeded()
@@ -101,6 +102,14 @@ final class PickerHarness {
     @discardableResult
     func command(_ selector: Selector) -> Bool {
         view.field.control(view.field.text, textView: NSTextView(), doCommandBy: selector)
+    }
+
+    func mouse(_ type: NSEvent.EventType, at point: NSPoint, shift: Bool = false) throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: type, location: grid.convert(point, to: nil), modifierFlags: shift ? .shift : [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
     }
 
     func type(_ text: String) {
@@ -281,6 +290,64 @@ struct EmojiPickerViewTests {
         picker.grid.click(at: picker.middle(of: picker.at(0, 2)), shift: false)
         #expect(!picker.model.isOpen)
         try await eventually { picker.made == [":wave: from picker", ":smile: from picker"] }
+    }
+
+    // As a button: the release over the emoji pressed picks it, with Shift as it is then.
+    @Test
+    func aPickHappensOnTheReleaseOverTheEmojiPressed() async throws {
+        let wave = picker.middle(of: picker.at(1, 0))
+
+        picker.grid.mouseDown(with: try picker.mouse(.leftMouseDown, at: wave))
+        #expect(picker.model.isOpen)
+        picker.grid.mouseUp(with: try picker.mouse(.leftMouseUp, at: wave, shift: true))
+        #expect(picker.model.isOpen)
+        try await eventually { picker.made == [":wave: from picker"] }
+
+        picker.grid.mouseDown(with: try picker.mouse(.leftMouseDown, at: wave))
+        picker.grid.mouseUp(with: try picker.mouse(.leftMouseUp, at: wave))
+        #expect(!picker.model.isOpen)
+    }
+
+    @Test
+    func aPressDraggedOffItsEmojiPicksNothing() throws {
+        picker.grid.mouseDown(with: try picker.mouse(.leftMouseDown, at: picker.middle(of: picker.at(1, 0))))
+        picker.grid.mouseUp(with: try picker.mouse(.leftMouseUp, at: picker.middle(of: picker.at(1, 1))))
+        picker.grid.mouseDown(with: try picker.mouse(.leftMouseDown, at: picker.middle(of: picker.at(0, 0))))
+        picker.grid.mouseUp(with: try picker.mouse(.leftMouseUp, at: NSPoint(x: 70, y: 120)))
+        picker.grid.mouseUp(with: try picker.mouse(.leftMouseUp, at: picker.middle(of: picker.at(0, 0))))
+
+        #expect(picker.model.isOpen, "a header, then a release without its press")
+    }
+
+    @Test
+    func returnOrAClickOnALockedEmojiSoundsTheRefusal() throws {
+        var refused = 0
+        picker.view.refuse = { refused += 1 }
+
+        picker.grid.click(at: picker.middle(of: picker.at(1, 2)), shift: false)
+        #expect(refused == 1)
+        picker.command(#selector(NSResponder.insertNewline(_:)))
+        #expect(refused == 2, "the locked one stays selected")
+        picker.grid.click(at: picker.middle(of: picker.at(1, 0)), shift: true)
+
+        #expect(refused == 2)
+        #expect(picker.model.isOpen)
+    }
+
+    // A window hands a wheel event to the view its frame view finds under the pointer, which
+    // passes it up its responders.
+    @Test
+    func theWheelOverThePinnedHeaderReachesTheGridsScrollView() throws {
+        let view = picker.view
+        #expect(!view.sticky.isHidden)
+        let band = view.convert(NSPoint(x: view.sticky.frame.midX, y: view.sticky.frame.midY), to: nil)
+
+        var responder: NSResponder? = try #require(picker.window.contentView?.superview?.hitTest(band))
+        while let next = responder, next !== view.scrollView {
+            responder = next.nextResponder
+        }
+
+        #expect(responder === view.scrollView)
     }
 
     @Test
@@ -715,6 +782,65 @@ struct EmojiPickerListTests {
         let panel = try #require(presenter.windows.panel)
         #expect(panel.frame.minX == button.maxX + 8)
         #expect(list.hovered.isEmpty)
+    }
+
+    @Test
+    func onlyTheButtonThatOpenedThePickerIsLit() throws {
+        show(reactions(pill("👍")))
+        try list.hover(2)
+        let add = try #require((try list.cell(of: 2) as? MessageCell)?.reactions?.add)
+
+        add.performClick(nil)
+
+        #expect(add.isSelected)
+        #expect(!list.bar.isHidden)
+        #expect(list.bar.button(.addReaction)?.isSelected != true)
+        presenter.close()
+        try list.hover(2)
+
+        try #require(list.bar.button(.addReaction)).performClick(nil)
+
+        #expect(list.bar.button(.addReaction)?.isSelected == true)
+        #expect(!add.isSelected)
+    }
+
+    // A table makes a row's view from those it kept for later; this one hands out the test's.
+    final class HandingTable: MessageTableView {
+        var handing: NSView?
+
+        override func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier, owner: Any?) -> NSView? {
+            if let view = handing, view.identifier == identifier {
+                handing = nil
+                return view
+            }
+            return super.makeView(withIdentifier: identifier, owner: owner)
+        }
+    }
+
+    @Test
+    func theLitAddButtonGoesWithItsMessageNotItsCell() throws {
+        let table = HandingTable()
+        let own = BarList(width: 1000, height: 560, table: table)
+        own.actions.picking = ReactionsModel(store: account.reactionsStore, account: account)
+        own.controller.emojiPicker.windows.focus = WindowFocus(makeKey: { _ in })
+        let one = reactions(pill("👍"))
+        own.show((1...3).map { row($0, by: author(2, "Ray"), at: own.noon + Double($0) * 10).reacting(one) })
+        let cell = try #require(try own.cell(of: 2) as? MessageCell)
+        try #require(cell.reactions?.add).performClick(nil)
+        #expect(cell.reactions?.add.isSelected == true)
+
+        table.handing = cell
+        table.reloadData(forRowIndexes: [own.index(of: 3)], columnIndexes: [0])
+
+        #expect(try own.cell(of: 3) === cell, "message 3 has its cell now")
+        #expect(cell.reactions?.add.isSelected == false)
+
+        table.reloadData(forRowIndexes: [own.index(of: 2)], columnIndexes: [0])
+
+        let now = try #require(try own.cell(of: 2) as? MessageCell)
+        #expect(now !== cell)
+        #expect(now.reactions?.add.isSelected == true)
+        own.controller.emojiPicker.close()
     }
 
     @Test

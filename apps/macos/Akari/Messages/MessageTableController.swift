@@ -164,7 +164,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // The open picker's message row, and the one it keeps selected (a post's bar keeps none).
     private var pickerItem: MessageTimeline.ItemId?
     private var pickerRow: MessageTimeline.ItemId?
-    private weak var pickerButton: ReactionAddButton?
+    // Only what opened the picker is lit: the bar's Add Reaction, or a row's add button, whose
+    // cell may show another message by the time it closes.
+    private var pickerBar: MessageTimeline.ItemId?
+    private var pickerAdd: MessageTimeline.ItemId?
     private var moreSelected = false
     // The press of an Option-click was taken: its drag and release are too.
     private var optionClickTaken = false
@@ -1236,6 +1239,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                     followsLine: followsLine, fullDate: fullDate,
                     reader: row.noticeContext.currentUserId, threadBox: boxParts(row),
                     reactions: row.reactions)
+                cell.reactions?.add.isSelected = item.id == pickerAdd
                 return cell
             }
             let cell =
@@ -1289,6 +1293,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
                 embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused,
                 reactions: row.reactions)
+            cell.reactions?.add.isSelected = item.id == pickerAdd
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
@@ -1517,7 +1522,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         actions?.toggleReaction(pill.emoji, of: self.row(id) ?? row, from: .inlineButton)
     }
 
-    // Add Reaction's submenu: its emoji, then "View More", the picker.
     private func reactionItems(for row: MessageListModel.Row) -> [NSMenuItem] {
         guard let actions else {
             return []
@@ -1556,13 +1560,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let (anchor, side) = pickerAnchor(for: id, beside: opener)
         emojiPicker.show(
             model, beside: anchor, on: side, in: window, images: state.images.cache, motion: state.motion)
-        hoverBar.button(.addReaction)?.isSelected = pickerRow != nil && barShown?.row == pickerRow
-        pickerButton = opener as? ReactionAddButton
-        pickerButton?.isSelected = true
+        pickerBar = location == .picker ? id : nil
+        pickerAdd = location == .inlineButton ? id : nil
+        hoverBar.button(.addReaction)?.isSelected = pickerBar != nil && barShown?.row == pickerBar
+        addButton(of: pickerAdd)?.isSelected = true
     }
 
-    // Left of the bar when it shows for the row, else right of the button that opened it; from a
-    // menu without a bar, where the bar's right edge would be.
+    private func addButton(of id: MessageTimeline.ItemId?) -> ReactionAddButton? {
+        guard let id, let index = timeline.items.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+        return ((cell as? MessageCell)?.reactions ?? (cell as? NoticeCell)?.reactions)?.add
+    }
+
     private func pickerAnchor(
         for id: MessageTimeline.ItemId, beside opener: NSView?
     ) -> (NSRect, EmojiPickerPresenter.Side) {
@@ -1572,6 +1583,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !hoverBar.isHidden, barShown?.row == id {
             return (hoverBar.convert(hoverBar.bounds, to: nil), .left)
         }
+        // From a menu without a bar: where the bar's Add Reaction would be.
         if let index = timeline.items.firstIndex(where: { $0.id == id }),
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? MessageMenuRow
         {
@@ -1584,8 +1596,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func pickerClosed() {
         hoverBar.button(.addReaction)?.isSelected = false
-        pickerButton?.isSelected = false
-        pickerButton = nil
+        addButton(of: pickerAdd)?.isSelected = false
+        pickerBar = nil
+        pickerAdd = nil
         pickerItem = nil
         guard let row = pickerRow else {
             return
@@ -2372,7 +2385,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             hoveredQuick?.isHovered = false
             hoveredQuick = nil
             hoverBar.button(.more)?.isSelected = moreSelected
-            hoverBar.button(.addReaction)?.isSelected = pickerRow != nil && hovered == pickerRow
+            hoverBar.button(.addReaction)?.isSelected = pickerBar != nil && hovered == pickerBar
         }
         placeBar()
     }

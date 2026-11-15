@@ -122,6 +122,16 @@ struct EmojiPickerRenders {
         try list.hover(2)
         try #require(list.bar.button(.addReaction)).performClick(nil)
         try list.hover(3)
+        try save(list, "7-row-while-open", theme: theme, note: "row 2 lit with its bar, Add Reaction selected, pointer over row 3")
+        list.controller.emojiPicker.close()
+
+        try #require((try list.cell(of: 2) as? MessageCell)?.reactions?.add).performClick(nil)
+        try list.hover(3)
+        try save(list, "8-add-button-open", theme: theme, note: "row 2's add button lit, its bar's Add Reaction not")
+        list.controller.emojiPicker.close()
+    }
+
+    func save(_ list: BarList, _ name: String, theme: String, note: String) throws {
         list.window.layoutIfNeeded()
         list.window.displayIfNeeded()
         let view = try #require(list.window.contentView)
@@ -133,9 +143,8 @@ struct EmojiPickerRenders {
         let rep = try AttachmentDrawingTests.layerImage(of: view, scale: 2, over: backdrop)
         let data = try #require(rep.representation(using: .png, properties: [:]))
         try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
-        let file = Self.folder.appendingPathComponent("7-row-while-open-\(theme).png")
+        let file = Self.folder.appendingPathComponent("\(name)-\(theme).png")
         try data.write(to: file)
-        print("RENDER \(file.path) row 2 lit with its bar, Add Reaction selected, pointer over row 3")
-        list.controller.emojiPicker.close()
+        print("RENDER \(file.path) \(note)")
     }
 }

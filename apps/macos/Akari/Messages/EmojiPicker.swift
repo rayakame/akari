@@ -107,7 +107,7 @@ final class EmojiPickerView: NSView {
     let strip = EmojiStripView()
     let scrollView = NSScrollView()
     let grid = EmojiGridView()
-    let sticky = FlippedView()
+    let sticky = PinnedHeaderView()
     let stickyTitle = EmojiGridView.makeTitle()
     let footerView = EmojiFooterView()
     let empty = NSTextField(labelWithString: EmojiPickerView.nothingFound)
@@ -137,6 +137,7 @@ final class EmojiPickerView: NSView {
     }
     /// Shift at a key press, for Enter.
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
+    var refuse: () -> Void = { NSSound.beep() }
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
 
     init(model: EmojiPickerModel) {
@@ -152,6 +153,7 @@ final class EmojiPickerView: NSView {
         field.placeholder = EmojiPickerModel.placeholder
         field.onChange = { [weak self] text in self?.model.search(text) }
         field.onCommand = { [weak self] command in self?.perform(command) ?? false }
+        model.onRefused = { [weak self] in self?.refuse() }
         strip.onJump = { [weak self] kind in self?.model.jump(to: kind) }
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -378,7 +380,7 @@ final class PickerSearchField: NSView, NSTextFieldDelegate {
         clearButton.frame = NSRect(x: bounds.width - 26, y: (bounds.height - 18) / 2, width: 18, height: 18)
     }
 
-    /// Empties the field without a search.
+    /// Without `onChange`.
     func clear() {
         text.stringValue = ""
         clearButton.isHidden = true
@@ -495,4 +497,13 @@ final class EmojiFooterView: NSView {
 
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+// It lies over the grid, whose wheel and pointer it must not take.
+final class PinnedHeaderView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
 }
