@@ -30,6 +30,20 @@ public struct MessageActionItem: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Words under a question's message: `bold` is drawn bold, `label` ("Protip:") stands before
+/// them in the official client's green.
+public struct MessageTip: Equatable, Sendable {
+    public let label: String?
+    public let text: String
+    public let bold: String
+
+    public init(label: String?, text: String, bold: String) {
+        self.label = label
+        self.text = text
+        self.bold = bold
+    }
+}
+
 /// What a message's hover bar and menu list, in the official client's order, and what each does.
 /// Akari's core decides what is allowed (`Store.messageActions`, asked with the row's own IDs
 /// every time: nothing announces a change) and builds a message's link (`Store.messageLink`); an
@@ -73,6 +87,53 @@ public final class MessageActionsModel {
         }
     }
 
+    /// Pin's and Unpin's question, with the message as its row shows it (the official client's
+    /// modals); `run` pins or unpins it.
+    public struct PinQuestion: Identifiable {
+        public let id = UUID()
+        public let row: MessageListModel.Row
+        /// Pins the message; unpins it otherwise.
+        public let pins: Bool
+        public let title: String
+        public let message: String
+        /// Unpin's: Shift skips the question.
+        public let tip: MessageTip?
+        public let confirm: String
+        public let cancel: String
+        public let run: @MainActor () -> Void
+
+        /// Unpin's confirm is red.
+        public var destructive: Bool { !pins }
+
+        public init(
+            row: MessageListModel.Row, pins: Bool, channelName: String?,
+            run: @escaping @MainActor () -> Void
+        ) {
+            self.row = row
+            self.pins = pins
+            self.run = run
+            cancel = "Cancel"
+            if pins {
+                title = "Pin It. Pin It Good."
+                let place = channelName.map { "#\($0)" } ?? "the current channel"
+                message =
+                    "Hey, just double checking that you want to pin this message to \(place) for "
+                    + "posterity and greatness?"
+                tip = nil
+                confirm = "Oh yeah. Pin it"
+            } else {
+                title = "Unpin Message"
+                message = "You sure you want to remove this pinned message?"
+                tip = MessageTip(
+                    label: "Protip:",
+                    text: "You can hold down shift when clicking unpin message to bypass this "
+                        + "confirmation entirely.",
+                    bold: "unpin message")
+                confirm = "Remove it please!"
+            }
+        }
+    }
+
     /// A question before something that can't be undone; `run` does it.
     public struct Confirmation: Identifiable {
         public let id = UUID()
@@ -80,6 +141,8 @@ public final class MessageActionsModel {
         public let message: String
         public let confirm: String
         public let cancel: String
+        /// The confirm button is red.
+        public var destructive = true
         public let run: @MainActor () -> Void
     }
 
@@ -146,6 +209,7 @@ public final class MessageActionsModel {
     private let confirm: (Confirmation) -> Void
     private let edit: (MessageListModel.Row) -> Void
     private let askDelete: (DeleteQuestion) -> Void
+    private let askPin: (PinQuestion) -> Void
     private let failed: (Failure) -> Void
 
     /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
@@ -153,8 +217,8 @@ public final class MessageActionsModel {
     /// once and returns what takes Discord's answer: whether it took the mark; `reply` starts a
     /// reply to the row's message, with Shift as it was at the click; `reactions` is the list's
     /// (without it nothing about reactions is offered), `viewReactions` opens the reactions
-    /// window and `confirm` asks before reactions are removed; `edit` opens the row's editor and
-    /// `askDelete` asks before a message is deleted.
+    /// window and `confirm` asks before reactions are removed; `edit` opens the row's editor,
+    /// `askDelete` asks before a message is deleted and `askPin` before one is pinned or unpinned.
     public init(
         store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
@@ -167,10 +231,12 @@ public final class MessageActionsModel {
         confirm: @escaping (Confirmation) -> Void = { _ in },
         edit: @escaping (MessageListModel.Row) -> Void = { _ in },
         askDelete: @escaping (DeleteQuestion) -> Void = { _ in },
+        askPin: @escaping (PinQuestion) -> Void = { _ in },
         failed: @escaping (Failure) -> Void
     ) {
         self.edit = edit
         self.askDelete = askDelete
+        self.askPin = askPin
         self.reactions = reactions
         self.viewReactions = viewReactions
         self.confirm = confirm
@@ -308,8 +374,107 @@ public final class MessageActionsModel {
             viewReactions(row)
         case .removeAllReactions:
             removeReactions(of: nil, on: row, shift: shift)
-        case .addReaction, .pin, .unpin, .removeReactions, .copyId, .more:
+        case .pin, .unpin:
+            guard offer(for: row).has(action) else {
+                return
+            }
+            Self.pin(
+                row, pins: action == .pin, shift: shift, store: store, account: account,
+                ask: askPin, confirm: confirm, failed: failed)
+        case .addReaction, .removeReactions, .copyId, .more:
             break
+        }
+    }
+
+    static func pin(
+        _ row: MessageListModel.Row, pins: Bool, shift: Bool, store: Store, account: Account,
+        ask: (PinQuestion) -> Void, confirm: @escaping (Confirmation) -> Void,
+        failed: @escaping (Failure) -> Void, busy: @escaping @MainActor (Bool) -> Void = { _ in }
+    ) {
+        let channel = store.channel(id: row.shown.channelId)
+        let isPrivate = channel?.kind == .dm || channel?.kind == .groupDm
+        let name = isPrivate ? nil : channel?.name ?? ""
+        let question = PinQuestion(row: row, pins: pins, channelName: name) { @MainActor in
+            _ = Task {
+                await request(
+                    row, pins: pins, channelName: name, account: account, confirm: confirm,
+                    failed: failed, busy: busy)
+            }
+        }
+        if shift {
+            question.run()
+        } else {
+            ask(question)
+        }
+    }
+
+    // Nothing changes before the gateway says so, as in the official client.
+    private static func request(
+        _ row: MessageListModel.Row, pins: Bool, channelName: String?, account: Account,
+        confirm: @escaping (Confirmation) -> Void, failed: @escaping (Failure) -> Void,
+        busy: @escaping @MainActor (Bool) -> Void
+    ) async {
+        let own = row.message
+        busy(true)
+        defer { busy(false) }
+        do {
+            if pins {
+                try await account.pin(channelId: own.channelId, messageId: own.id)
+            } else {
+                try await account.unpin(channelId: own.channelId, messageId: own.id)
+            }
+        } catch {
+            guard pins else {
+                confirm(
+                    Confirmation(
+                        title: "The Pin Is Stuck!",
+                        message: "Discord failed to unpin that message for some reason. Sorry about that.",
+                        confirm: "Try Again", cancel: "Cancel", destructive: false
+                    ) { @MainActor in
+                        _ = Task {
+                            await request(
+                                row, pins: false, channelName: channelName, account: account,
+                                confirm: confirm, failed: failed, busy: busy)
+                        }
+                    })
+                return
+            }
+            failed(
+                pinFailure(error as? PinError ?? .Request(error: .UnexpectedResponse), channelName: channelName))
+        }
+    }
+
+    // `channelName` is `nil` in a DM or a group DM.
+    static func pinFailure(_ error: PinError, channelName: String?) -> Failure {
+        let retry = "An error occurred, please try again."
+        switch error {
+        case .TooMany(let limit):
+            let place = channelName.map { "channel #\($0)" } ?? "this channel"
+            return Failure(
+                title: "The Pin Broke",
+                message: "Discord is unable to pin that message. You may have hit the limit of "
+                    + "\(limit) pins in \(place).")
+        case .Forbidden:
+            return Failure(
+                title: "No Access", message: "You do not have permission to pin messages in this channel.")
+        case .WrongChannel:
+            return Failure(
+                title: "Invalid Channel Type", message: "This message cannot be pinned in this channel.")
+        case .Archived:
+            return Failure(
+                title: "Invalid Thread Archive State",
+                message: "This message cannot be pinned in an archived thread.")
+        case .SystemMessage:
+            return Failure(
+                title: "Invalid Message Type",
+                message: "This message is a system message and cannot be pinned.")
+        case .Gone:
+            return Failure(
+                title: "Unknown Message", message: "The message you are trying to pin does not exist.")
+        case .Request(.Discord(_, _, let message)):
+            return Failure(title: "The Pin Broke", message: message.isEmpty ? retry : message)
+        case .Request:
+            return Failure(title: "Error", message: retry)
         }
     }
 
@@ -400,8 +565,11 @@ public final class MessageActionsModel {
             case .viewReactions: reactions && hasReactions
             case .removeReactions, .removeAllReactions:
                 reactions && hasReactions && actions.removeReactions
-            // Their features aren't built yet.
-            case .pin, .unpin, .copyId:
+            // The official menu leaves them out for a failed send.
+            case .pin: !failed && actions.pin
+            case .unpin: !failed && actions.unpin
+            // Developer mode isn't built yet.
+            case .copyId:
                 false
             }
         }

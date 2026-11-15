@@ -144,6 +144,9 @@ public final class SessionModel {
     /// What Delete asks, with the message, until `answerDeleteQuestion(_:)` or the message's
     /// deletion.
     public private(set) var deleteQuestion: MessageActionsModel.DeleteQuestion?
+    /// What Pin and Unpin ask, with the message, until `answerPinQuestion(_:)` or the
+    /// message's deletion.
+    public private(set) var pinQuestion: MessageActionsModel.PinQuestion?
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
     public private(set) var reactors: ReactorsModel?
@@ -1003,7 +1006,22 @@ public final class SessionModel {
             confirm: { [weak self] in self?.messageConfirmation = $0 },
             edit: { [weak list] row in list?.editor.start(row) },
             askDelete: { [weak self] in self?.askDelete($0) },
+            askPin: { [weak self] in self?.askPin($0) },
             failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    /// The answer to `pinQuestion`: its yes pins or unpins the message.
+    public func answerPinQuestion(_ confirmed: Bool) {
+        let asked = pinQuestion
+        pinQuestion = nil
+        if confirmed {
+            asked?.run()
+        }
+    }
+
+    private func askPin(_ question: MessageActionsModel.PinQuestion) {
+        engage()
+        pinQuestion = question
     }
 
     /// The answer to `deleteQuestion`: "Delete" deletes the message.
@@ -1413,6 +1431,9 @@ public final class SessionModel {
         drafts.forget(batch.deletedMessages)
         if let asked = deleteQuestion?.row, deleted(asked, in: batch) {
             deleteQuestion = nil
+        }
+        if let asked = pinQuestion?.row, deleted(asked, in: batch) {
+            pinQuestion = nil
         }
         if let peeked {
             let threads = moreActiveThreads(of: peeked)

@@ -43,6 +43,11 @@ final class CallLog: Sendable {
         case searchPosts(ChannelId, String, ForumView)
         case requestPostPreviews(ChannelId, [ChannelId])
         case searchEmoji(ChannelId, String, EmojiVersion, limit: UInt32)
+        case loadPins(ChannelId)
+        case loadMorePins(ChannelId)
+        case pin(ChannelId, MessageId)
+        case unpin(ChannelId, MessageId)
+        case ackPins(ChannelId)
         case flushCache
     }
 
@@ -69,6 +74,7 @@ final class CallLog: Sendable {
         case replyTarget(ChannelId, MessageId)
         case replyTargets(ChannelId, [MessageId])
         case pinsUnread(ChannelId)
+        case pins(ChannelId)
         case messageActions(ChannelId, MessageId)
         case messageLink(ChannelId, MessageId)
         case starterMessage(ChannelId)

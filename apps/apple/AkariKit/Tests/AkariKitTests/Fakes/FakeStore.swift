@@ -24,6 +24,8 @@ final class FakeStore: Store, @unchecked Sendable {
         // By the channel and message asked with; none: not loaded.
         var replyTargets: [MessageKey: ReplyTarget] = [:]
         var unreadPins: Set<ChannelId> = []
+        // None: not asked for in this connection.
+        var pins: [ChannelId: PinsPage] = [:]
         // By the channel and message asked with. None: nothing is allowed.
         var messageActions: [MessageKey: MessageActions] = [:]
         var lengthLimit: UInt32 = 2000
@@ -225,6 +227,10 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func pinsUnread(channelId: ChannelId) -> Bool {
         read(.pinsUnread(channelId)) { $0.unreadPins.contains(channelId) }
+    }
+
+    override func pins(channelId: ChannelId) -> PinsPage {
+        read(.pins(channelId)) { $0.pins[channelId] ?? PinsPage(items: [], hasMore: false, state: .notLoaded) }
     }
 
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
