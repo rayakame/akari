@@ -181,6 +181,52 @@ async fn pinning_and_unpinning_cross_with_their_errors() {
     pinning.account.close();
 }
 
+#[test]
+fn every_pin_error_crosses_with_what_the_ui_says() {
+    use akari_core::PinError as Core;
+
+    let cases = [
+        (
+            Core::TooMany { limit: 250 },
+            PinError::TooMany { limit: 250 },
+        ),
+        (Core::Archived, PinError::Archived),
+        (Core::SystemMessage, PinError::SystemMessage),
+        (Core::WrongChannel, PinError::WrongChannel),
+        (Core::Forbidden, PinError::Forbidden),
+        (Core::Gone, PinError::Gone),
+        (
+            Core::Request(akari_core::RequestError::ServerError { status: 502 }),
+            PinError::Request {
+                error: RequestError::ServerError { status: 502 },
+            },
+        ),
+    ];
+    for (core, expected) in cases {
+        assert_eq!(PinError::from(core), expected);
+    }
+}
+
+#[tokio::test]
+async fn a_page_on_its_way_reads_loading() {
+    let pinning = pinning().await;
+    pinning
+        .answer(
+            "GET",
+            "/pins$",
+            listed(false).set_delay(Duration::from_secs(10)),
+        )
+        .await;
+    let account = Arc::clone(&pinning.account);
+
+    let loading = tokio::spawn(async move { account.load_pins(GENERAL).await });
+    pinning.pins_changed().await;
+
+    assert_eq!(pinning.pins().state, PinsState::Loading);
+    loading.abort();
+    pinning.account.close();
+}
+
 #[tokio::test]
 async fn acking_pins_takes_the_dot_and_says_so() {
     let mut pinning = pinning().await;
