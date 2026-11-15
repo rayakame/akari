@@ -40,6 +40,33 @@ struct PinsLayoutTests {
         #expect(PinsLayout.cardHeight(message) == 1 + 14 + preview + 16 + 1)
     }
 
+    func pins(_ count: Int, more: Bool = false, state: PinsState = .loaded) throws -> PinsModel {
+        let fake = FakeBrowserStore()
+        fake.pins = count
+        fake.pinsMore = more
+        fake.pinsState = state
+        let session = fake.session()
+        session.open(channel: FakeBrowserStore.parent)
+        session.togglePins()
+        return try #require(session.pins)
+    }
+
+    // The last card's 8 is the room above Load more or the spinner: Load more 8 below the card
+    // and 16 above the bottom, the spinner 32 from both.
+    @Test
+    func loadMoreAndTheNextPagesSpinnerTakeTheirRoomUnderTheCards() throws {
+        let more = try pins(2, more: true)
+        let cards = PinsLayout.listTop + more.rows.map { PinsLayout.cardHeight($0) + PinsLayout.cardGap }.reduce(0, +)
+        #expect(more.offersMore)
+        #expect(PinsLayout.contentHeight(more, upTo: 2000) == cards + 32 + 16)
+
+        let loading = try pins(2, more: true, state: .loading)
+        #expect(loading.loadingMore)
+        #expect(PinsLayout.contentHeight(loading, upTo: 2000) == cards + 32 + 32 + 24)
+
+        #expect(PinsLayout.contentHeight(try pins(2), upTo: 2000) == cards)
+    }
+
     @Test
     func aLongListIsMeasuredOnlyAsFarAsItCanShow() throws {
         let fake = FakeBrowserStore()

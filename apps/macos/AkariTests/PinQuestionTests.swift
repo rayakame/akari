@@ -74,6 +74,22 @@ struct PinQuestionTests {
         #expect(view.tip.frame.minY == view.box.frame.maxY + 20)
     }
 
+    func fill(of button: PanelButton) -> NSColor? {
+        button.updateLayer()
+        return button.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) }?.usingColorSpace(.sRGB)
+    }
+
+    @Test
+    func pinsYesIsTheBrandsAndUnpinsRed() {
+        let (pin, _) = shown(pins: true)
+        let (unpin, _) = shown(pins: false)
+
+        #expect(same(fill(of: pin.confirm), Palette.brand.usingColorSpace(.sRGB)))
+        let red = fill(of: unpin.confirm)
+        #expect((red?.redComponent ?? 0) > 0.8 && (red?.greenComponent ?? 1) < 0.35)
+        #expect(pin.confirm.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == .white)
+    }
+
     // One view shows one question after another, as SwiftUI keeps it.
     @Test
     func aViewShowsTheNextQuestionsWords() {
