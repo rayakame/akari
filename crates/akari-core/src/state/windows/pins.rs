@@ -196,7 +196,7 @@ impl Windows {
         let list = self.pins.entry(channel).or_default();
         let before = match load {
             PinsLoad::First => None,
-            PinsLoad::More => Some(list.items[list.confirmed - 1].pinned_at),
+            PinsLoad::More => Some(list.items.get(list.confirmed.checked_sub(1)?)?.pinned_at),
         };
         self.pin_counter += 1;
         list.ticket = self.pin_counter;
@@ -502,8 +502,10 @@ fn take_current_reactions(
     page: &mut [Pin],
 ) -> HashSet<MessageId> {
     let current = |id: MessageId| -> Option<Option<Arc<[Reaction]>>> {
-        let listed = list.items[..list.confirmed]
+        let listed = list
+            .items
             .iter()
+            .take(list.confirmed)
             .find(|pin| pin.message.id == id)
             .map(|pin| pin.message.reactions.clone());
         listed.or_else(|| {
