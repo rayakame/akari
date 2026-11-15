@@ -68,6 +68,7 @@ public final class PinsModel {
     @ObservationIgnored private var state = PinsState.notLoaded
     @ObservationIgnored private var opened = false
     @ObservationIgnored private var asking = false
+    @ObservationIgnored private var askAgain = false
 
     /// `jump` jumps to a message of the channel and closes the popout unless Shift (its second
     /// argument) is held; `ask` asks before an unpin, `confirm` offers to try a failed one again
@@ -171,14 +172,19 @@ public final class PinsModel {
         }
     }
 
+    // A new session during a load drops its page, so a call meanwhile asks once more after it.
     private func load() async {
         guard !asking else {
+            askAgain = true
             return
         }
         asking = true
         defer { asking = false }
-        try? await account.loadPins(channelId: channelId)
-        reread()
+        repeat {
+            askAgain = false
+            try? await account.loadPins(channelId: channelId)
+            reread()
+        } while askAgain
     }
 
     private func reread() {

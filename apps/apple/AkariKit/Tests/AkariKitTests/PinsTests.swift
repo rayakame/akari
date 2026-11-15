@@ -302,8 +302,9 @@ final class PinsModelTests {
         session.close()
     }
 
+    // One at a time; the core asks Discord again only where the list still needs it.
     @Test
-    func batchesInARowAskForTheListOnce() async throws {
+    func batchesWhileTheListLoadsAskTheCoreOnceMoreAfterIt() async throws {
         store.update { $0.pins[id(11)] = self.pins([103]) }
         let session = session()
         let pins = try await opened(session)
@@ -313,11 +314,38 @@ final class PinsModelTests {
         store.update { $0.pins[id(11)] = self.pins([103], state: .notLoaded) }
         session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
         session.apply(EventBatch([.ready]))
+        session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
 
         try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2 }
         account.pinLoadReplies.send(())
-        try await eventually { self.shown(pins) == [104, 103] }
-        #expect(store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2)
+        try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 3 }
+        #expect(shown(pins) == [104, 103])
+        account.pinLoadReplies.send(())
+        try await eventually { self.store.pins(channelId: id(11)).state == .loaded }
+        #expect(store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 3)
+        session.close()
+    }
+
+    // The core drops a page asked before a new session, which leaves the list `.notLoaded`.
+    @Test
+    func aNewSessionWhileTheFirstPageLoadsAsksAgainOnceItEnds() async throws {
+        account.holdPinLoads.withLock { $0 = true }
+        let session = session()
+        session.togglePins()
+        let pins = try #require(session.pins)
+        let opening = Task { await pins.open() }
+        try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 1 }
+        account.pinsAfterLoad.withLock { $0[id(11)] = self.pins([103]) }
+
+        store.update { $0.pins[id(11)] = self.pins([], state: .notLoaded) }
+        session.apply(EventBatch([.ready]))
+        account.pinLoadReplies.send(())
+        try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2 }
+        account.pinLoadReplies.send(())
+        await opening.value
+
+        try await eventually { self.shown(pins) == [103] }
+        #expect(pins.phase == .list)
         session.close()
     }
 
