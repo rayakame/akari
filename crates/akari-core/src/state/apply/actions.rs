@@ -186,9 +186,6 @@ impl State {
         // An archived thread counts where writing would reopen it; a locked one never does.
         let writable = thread
             .is_none_or(|info| !info.archived || (!info.locked && can(Permissions::SEND_MESSAGES)));
-        // A thread moderator's edit or delete reopens a locked thread first, as the official one's.
-        let reopens = thread.is_some_and(|info| info.archived && info.locked)
-            && can(Permissions::MANAGE_THREADS);
 
         let kind = u16::from(message.kind);
         let user_message = USER_MESSAGE.contains(&kind);
@@ -224,11 +221,11 @@ impl State {
                 && !sticker_alone
                 && message.flags & IS_VOICE_MESSAGE == 0
                 && !forward
-                && (writable || reopens)
+                && writable
                 && can(Permissions::SEND_MESSAGES),
             delete: (own || moderator)
                 && !deleting
-                && (writable || reopens)
+                && writable
                 && !UNDELETABLE.contains(&kind)
                 && (kind != AUTO_MODERATION_ACTION || moderator),
             pin: pinnable && !message.pinned,
