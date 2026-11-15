@@ -76,11 +76,14 @@ final class PinsModelTests {
         #expect(pins.phase == .loading)
         #expect(!pins.loadingMore, "the first page's spinner, not the one under the rows")
         #expect(pins.rows.isEmpty)
+        // A load more than asked would wait for a reply that never comes.
+        account.holdPinLoads.withLock { $0 = false }
         account.pinLoadReplies.send(())
         await opening.value
 
         #expect(pins.phase == .list)
         #expect(shown(pins) == [103, 102])
+        #expect(store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 1)
         session.close()
     }
 
@@ -420,6 +423,7 @@ final class PinsModelTests {
         session.apply(EventBatch([.ready]))
         account.pinLoadReplies.send(())
         try await eventually { self.store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2 }
+        account.holdPinLoads.withLock { $0 = false }
         account.pinLoadReplies.send(())
         await opening.value
 
