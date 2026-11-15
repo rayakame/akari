@@ -346,7 +346,6 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         failed?.isHidden = !isFailed
     }
 
-    // The editor takes the text's place; a cell that showed it lets it go.
     private func host(_ editor: MessageEditorView?) {
         if let editor {
             if editor.superview !== stack {

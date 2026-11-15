@@ -123,6 +123,47 @@ final class MessageEditorView: NSView {
         }
     }
 
+    // The table takes a row's view out of the window as it scrolls and moves the editor between
+    // cells: typing goes on where nothing else took the focus meanwhile.
+    private var refocus = false
+    private var focusWhenShown = false
+
+    /// An edit opened: the focus now, or once the row's cell is in the window.
+    func takeFocus() {
+        refocus = false
+        if let window {
+            focusWhenShown = false
+            window.makeFirstResponder(textView)
+        } else {
+            focusWhenShown = true
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil, window?.firstResponder === textView {
+            refocus = true
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else {
+            return
+        }
+        if focusWhenShown || refocus && (window.firstResponder === window || window.firstResponder == nil) {
+            window.makeFirstResponder(textView)
+        }
+        focusWhenShown = false
+        refocus = false
+    }
+
+    /// The edit ended: a later return to the window doesn't take the focus.
+    func forgetFocus() {
+        refocus = false
+        focusWhenShown = false
+    }
+
     // Its empty parts are the row's.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)

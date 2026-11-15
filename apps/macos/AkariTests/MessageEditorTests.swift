@@ -280,6 +280,7 @@ struct MessageEditorTests {
 
         edit(8, text: "message 8")
 
+        #expect(list.window.firstResponder === editor.textView, "the focus once its row shows")
         let rect = list.table.rect(ofRow: list.index(of: 8))
         #expect(rect.minY - list.clip.bounds.minY >= MessageEditorView.revealPadding - 0.5)
         #expect(rect.maxY <= list.clip.bounds.maxY)
@@ -296,6 +297,59 @@ struct MessageEditorTests {
         let bottom = list.clip.bounds.maxY - list.controller.scrollView.contentInsets.bottom
         #expect(caret.maxY <= bottom)
         #expect(caret.minY >= list.clip.bounds.minY)
+    }
+
+    // Away from the bottom the list keeps the reader's place, so only the reveal brings the
+    // caret back.
+    @Test
+    func typingPastWhatShowsInTheMiddleOfTheListBringsTheCaretBack() {
+        list.show(list.many(40))
+        edit(20, text: "message 20")
+        let rect = list.table.rect(ofRow: list.index(of: 20))
+        let bottom = list.clip.bounds.height - list.controller.scrollView.contentInsets.bottom
+        list.clip.scroll(to: NSPoint(x: 0, y: rect.maxY - bottom))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        #expect(!list.controller.isPinnedToBottom)
+
+        #expect(list.window.firstResponder === editor.textView, "a scroll keeps the focus")
+
+        type(String(repeating: "\nline", count: 12))
+
+        let caret = editor.convert(editor.caretRect, to: list.table)
+        #expect(caret.maxY <= list.clip.bounds.maxY - list.controller.scrollView.contentInsets.bottom)
+        #expect(caret.minY >= list.clip.bounds.minY)
+    }
+
+    func scroll(to y: CGFloat) {
+        list.clip.scroll(to: NSPoint(x: 0, y: y))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        list.window.layoutIfNeeded()
+    }
+
+    @Test
+    func theEditorScrolledAwayAndBackKeepsTheFocus() throws {
+        list.show(list.many(40))
+        edit(40, text: "message 40")
+        let bottom = list.clip.bounds.minY
+
+        scroll(to: 0)
+        scroll(to: bottom)
+
+        #expect(editor.window != nil)
+        #expect(list.window.firstResponder === editor.textView)
+    }
+
+    @Test
+    func theEditorScrolledBackLeavesTheFocusWhereTheUserPutIt() throws {
+        list.show(list.many(40))
+        edit(40, text: "message 40")
+        let bottom = list.clip.bounds.minY
+        scroll(to: 0)
+
+        list.window.makeFirstResponder(list.table)
+        scroll(to: bottom)
+
+        #expect(list.window.firstResponder === list.table)
     }
 
     @Test

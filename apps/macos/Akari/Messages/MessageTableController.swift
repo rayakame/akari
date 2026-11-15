@@ -1705,11 +1705,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         window.makeFirstResponder(editor.textView)
     }
 
-    // A new opening takes the edited row's text and the focus, and scrolls the row into view; a
-    // new reason changes only the row's height.
     private func editingChanged(from old: EditModel.Editing?) {
         let new = state.editing
         let opened = new != nil && (old?.messageId != new?.messageId || old?.opening != new?.opening)
+        if new == nil {
+            editor.forgetFocus()
+        }
         if opened, let actions {
             editor.load(actions.editText())
         }
@@ -1726,11 +1727,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reload(rows)
         if opened, let index = editedIndex {
             revealRow(index)
-            editor.window?.makeFirstResponder(editor.textView)
+            editor.takeFocus()
         }
     }
 
-    // The editor's text changed its height: the row follows, keeping the reader's place.
     private func editorResized() {
         guard let index = editedIndex, case .message(let row, let startsGroup) = timeline.items[index],
             let width = tableView.tableColumns.first?.width, width > 0
@@ -1764,7 +1764,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollClip(to: y)
     }
 
-    // Typing or moving the caret past what shows brings its line back.
     private func revealCaret() {
         guard editorFocused else {
             return

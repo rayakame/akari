@@ -81,6 +81,7 @@ struct EditedMessageTests {
         func top(_ view: NSView) -> CGFloat { cell.convert(view.bounds, from: view).maxY }
         #expect(top(extras) < top(stickers), "below the stickers")
         #expect(top(reactions) < top(extras), "above the reactions")
+        #expect(extras.string == "(edited)", "without the space it has after a text")
         let storage = try #require(extras.textStorage)
         let tip = storage.attribute(
             .toolTip, at: (storage.string as NSString).range(of: "(edited)").location, effectiveRange: nil)

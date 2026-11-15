@@ -1,5 +1,6 @@
 import AkariKit
 import AppKit
+import SwiftUI
 import Testing
 
 @testable import Akari
@@ -119,6 +120,9 @@ struct DeleteMessageTests {
         #expect([view.cancel.title, view.delete.title] == ["Cancel", "Delete"])
         #expect(view.box.frame.minY == view.message.frame.maxY + 20)
         #expect(view.tip.frame.minY == view.box.frame.maxY + 20)
+
+        view.show(question(message, tip: false), images: nil, maxHeight: 800)
+        #expect(view.tip.isHidden, "the bar's question has no tip")
     }
 
     @Test
@@ -134,6 +138,40 @@ struct DeleteMessageTests {
         #expect(view.delete.keyEquivalent == "\r")
         #expect(view.cancel.keyEquivalent == "\u{1b}")
         #expect(view.delete.hasDestructiveAction)
+    }
+
+    // Hosted as the session hosts it: SwiftUI in a key panel over the dimmed window.
+    @Test
+    func returnInThePanelDeletesAndEscapeClosesIt() throws {
+        let window = TestWindow.make(size: NSSize(width: 800, height: 600))
+        let windows = ChildWindows(keyable: true)
+        windows.focus = WindowFocus(makeKey: { _ in })
+        var answers: [Bool] = []
+        windows.onClose = { answers.append(false) }
+        let question = question(row(1, at: noon, content: "goodbye"), tip: true)
+        let frame = DeleteLayout.frame(for: question, in: window.frame.size)
+            .offsetBy(dx: window.frame.minX, dy: window.frame.minY)
+        windows.show(
+            AnyView(
+                DeleteMessagePanel(question: question, size: frame.size, maxHeight: 520) {
+                    answers.append($0)
+                }), at: frame, in: window, dimmed: true)
+        let panel = try #require(windows.panel)
+        panel.layoutIfNeeded()
+        func key(_ characters: String, _ code: UInt16) throws -> NSEvent {
+            try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: panel.windowNumber, context: nil, characters: characters,
+                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+        }
+
+        panel.sendEvent(try key("\r", 36))
+        #expect(answers == [true])
+        panel.sendEvent(try key("\u{1b}", 53))
+        #expect(answers == [true, false])
+        windows.tearDown(refocus: false)
+        window.close()
     }
 
     @Test
