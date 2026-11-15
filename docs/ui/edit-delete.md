@@ -42,10 +42,11 @@ attachments, embeds, stickers, reactions and the thread's box. The text gives wa
   words.
 - The row stays lit with the hover tint while it is edited, and opens no message menu (the text
   has its own). The hover bar still shows over it.
-- The editor takes the focus when it opens, with the caret at the end; the composer takes it
-  back when the edit ends. The list scrolls the row into view with 64 around it, and keeps the
-  caret's line in view as the text grows; a row above the reader grows without moving what they
-  read.
+- The editor takes the focus when it opens, with the caret at the end, also on a row the list
+  first scrolls to, and keeps it through the row's updates and the list's scrolling; the composer
+  takes it back when the edit ends. The list scrolls the row into view with 64 around it, and
+  keeps the caret's line in view as the text grows; a row above the reader grows without moving
+  what they read.
 
 *Akari:*
 
