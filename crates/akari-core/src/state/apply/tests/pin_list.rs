@@ -301,7 +301,6 @@ fn a_new_session_keeps_the_pins_shown_and_asks_for_them_again() {
     assert_eq!(page(&state).state, PinsState::NotLoaded);
     assert_eq!(listed(&state), [3, 2, 1], "shown until the reload");
     assert!(dropped.is_empty(), "asked before the READY: {dropped:?}");
-    assert!(begin(&mut state, PinsLoad::More).0.is_none());
     assert!(begin(&mut state, PinsLoad::First).0.is_some());
 }
 
@@ -352,6 +351,39 @@ fn an_empty_page_that_says_more_ends_the_list() {
 
     assert!(!page(&state).has_more);
     assert!(begin(&mut state, PinsLoad::More).0.is_none());
+}
+
+// Its cursor couldn't move past pins it left out.
+#[test]
+fn a_page_that_leaves_out_every_pin_ends_the_list() {
+    let mut state = three_pins();
+    let elsewhere = json!({"pinned_at": iso(at(0)), "message": pinned(9, VOICE)});
+
+    load(&mut state, PinsLoad::More, &[elsewhere], true);
+
+    assert_eq!(listed(&state), [3, 2, 1]);
+    assert!(!page(&state).has_more);
+    assert!(begin(&mut state, PinsLoad::More).0.is_none());
+}
+
+// No pin of this connection is left to go on from.
+#[test]
+fn more_asks_for_the_first_page_once_every_pin_of_this_connection_went() {
+    let mut state = three_pins();
+    apply(
+        &mut state,
+        "MESSAGE_DELETE_BULK",
+        json!({"ids": ["1", "2", "3"], "channel_id": GENERAL.to_string()}),
+    );
+    assert!(listed(&state).is_empty() && page(&state).has_more);
+
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    let more = more.expect("nothing asked");
+    assert_eq!(more.before, None);
+    finish(&mut state, more, &[pin(0, 0)], false);
+
+    assert_eq!(listed(&state), [0]);
+    assert!(!page(&state).has_more);
 }
 
 #[test]
@@ -477,7 +509,7 @@ fn a_reload_for_a_newer_pin_keeps_the_pages_after_it() {
 }
 
 #[test]
-fn a_new_session_asks_nothing_more_after_its_first_page_failed() {
+fn a_new_session_whose_first_page_failed_asks_it_again_also_by_more() {
     let mut state = three_pins();
     apply(&mut state, "READY", ready_value());
     let (ask, _) = begin(&mut state, PinsLoad::First);
@@ -485,8 +517,11 @@ fn a_new_session_asks_nothing_more_after_its_first_page_failed() {
 
     assert_eq!(page(&state).state, PinsState::Failed);
     assert_eq!(listed(&state), [3, 2, 1], "an earlier connection's, shown");
-    assert!(begin(&mut state, PinsLoad::More).0.is_none());
-    assert!(begin(&mut state, PinsLoad::First).0.is_some());
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    let more = more.expect("nothing asked");
+    assert_eq!(more.before, None);
+    finish(&mut state, more, &[pin(3, 3), pin(2, 2)], false);
+    assert_eq!(listed(&state), [3, 2], "1 unpinned meanwhile");
 }
 
 #[test]
@@ -841,7 +876,23 @@ fn a_pin_placed_before_the_reload_of_a_new_session_doesnt_page_on() {
     whole(&mut state, 10, true, "hi");
 
     assert_eq!(listed(&state), [10, 3, 2, 1]);
-    assert!(begin(&mut state, PinsLoad::More).0.is_none());
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    assert_eq!(more.expect("nothing asked").before, None);
+}
+
+#[test]
+fn a_first_page_that_failed_after_a_new_pin_is_asked_again() {
+    let mut state = three_pins();
+    apply(&mut state, "READY", ready_value());
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    whole(&mut state, 10, true, "hi");
+    last_pin(&mut state, 9);
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    state.fail_pins(ask.unwrap(), &mut Vec::new());
+
+    assert_eq!(listed(&state), [10, 3, 2, 1]);
+    assert!(begin(&mut state, PinsLoad::First).0.is_some());
 }
 
 #[test]

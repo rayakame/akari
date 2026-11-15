@@ -234,8 +234,8 @@ impl Account {
         self.shared.load_pins(channel, PinsLoad::First).await
     }
 
-    /// Asks for the page after the loaded pins while [`PinsPage::has_more`](crate::state::PinsPage)
-    /// says so, also after a failed one; nothing otherwise.
+    /// Asks for the next page while [`PinsPage::has_more`](crate::state::PinsPage) says so, also
+    /// after a failed one: after this connection's last pin, or the first page when none is left.
     pub async fn load_more_pins(&self, channel: ChannelId) -> Result<(), RequestError> {
         self.shared.load_pins(channel, PinsLoad::More).await
     }

@@ -116,12 +116,17 @@ impl PinsList {
 
     fn wants(&self, load: PinsLoad, last_pin: Option<Timestamp>) -> bool {
         match (load, self.state) {
-            (_, PinsState::Loading) | (PinsLoad::More, PinsState::NotLoaded) => false,
+            (_, PinsState::Loading) => false,
             (PinsLoad::First, PinsState::NotLoaded) => true,
-            (PinsLoad::First, PinsState::Failed) if self.confirmed == 0 => true,
+            (PinsLoad::First, PinsState::Failed) if self.starts_over() => true,
             (PinsLoad::First, _) => self.behind(last_pin),
-            (PinsLoad::More, _) => self.confirmed > 0 && self.more,
+            (PinsLoad::More, _) => self.more,
         }
+    }
+
+    // No page of this connection landed, or none of its pins is left to go on from.
+    fn starts_over(&self) -> bool {
+        !self.fresh || self.confirmed == 0
     }
 
     fn complete(&self) -> bool {
@@ -198,8 +203,12 @@ impl Windows {
             PinsLoad::More => self.pins.get_mut(&channel)?,
         };
         let before = match load {
-            PinsLoad::First => None,
-            PinsLoad::More => Some(list.items.get(list.confirmed.checked_sub(1)?)?.pinned_at),
+            PinsLoad::More if !list.starts_over() => list
+                .confirmed
+                .checked_sub(1)
+                .and_then(|last| list.items.get(last))
+                .map(|pin| pin.pinned_at),
+            _ => None,
         };
         self.pin_counter += 1;
         list.ticket = self.pin_counter;
@@ -210,7 +219,7 @@ impl Windows {
             channel,
             before,
             ticket: list.ticket,
-            seen: last_pin.filter(|_| load == PinsLoad::First),
+            seen: last_pin.filter(|_| before.is_none()),
         };
         events.push(StoreEvent::PinsChanged {
             channel_id: channel,
@@ -252,11 +261,11 @@ impl Windows {
             return;
         }
         let channel = ask.channel;
-        let more = page.has_more && !page.items.is_empty();
         let recent = self
             .windows
             .get(&channel)
             .map_or(&[][..], |window| window.messages.as_slice());
+        let has_more = page.has_more;
         let mut seen = HashSet::new();
         let arrived: Vec<_> = page
             .items
@@ -286,6 +295,8 @@ impl Windows {
                 named: true,
             });
         }
+        // A page that leaves nothing would be asked again from the same cursor.
+        let more = has_more && !page.is_empty();
         let window = self.windows.get(&channel).filter(|window| !window.stale);
         let Some(list) = self.pins.get_mut(&channel) else {
             return;

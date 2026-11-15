@@ -701,8 +701,8 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// Asks for the page after the loaded pins while `PinsPage.has_more` says so, also after a
-    /// failed one; nothing otherwise.
+    /// Asks for the next page while `PinsPage.has_more` says so, also after a failed one: after
+    /// this connection's last pin, or the first page when none is left.
     pub async fn load_more_pins(&self, channel_id: ChannelId) -> Result<(), RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
