@@ -101,6 +101,164 @@ struct MessageEditorTests {
     }
 
     @Test
+    func anEmptyEditorIsALineTall() {
+        threeMessages()
+
+        edit(1, text: "")
+
+        #expect(editor.height(width: 400) == MessageEditorView.top + 56 + 7 + EditorHint.height + 7)
+    }
+
+    @Test
+    func theCaretOnANewLastLineIsThatLine() {
+        threeMessages()
+        edit(1, text: "first")
+        let first = editor.caretRect
+
+        type("\n")
+
+        let second = editor.caretRect
+        #expect(abs(second.minY - first.minY - ComposerTextView.lineHeight) <= 0.5)
+        #expect(second.height >= ComposerTextView.lineHeight)
+        editor.textView.setSelectedRange(NSRange(location: 2, length: 0))
+        #expect(editor.caretRect.height >= ComposerTextView.lineHeight, "a line's height in its middle")
+    }
+
+    @Test
+    func aLongReasonWrapsAndTheRowMakesItsRoom() throws {
+        threeMessages()
+        edit(1, text: "first")
+        let reason = String(repeating: "This community doesn't allow these words. ", count: 7)
+
+        edit(1, text: "first", problem: .refused(.MessageBlocked(reason: reason)))
+
+        #expect(editor.problem.frame.height > 2 * TypeScale.small.line)
+        #expect(abs(height(of: 1) - (try fittingHeight(of: 1))) <= 0.5)
+        #expect(editor.problem.frame.minX == -2, "its text on the box's edge")
+    }
+
+    @Test
+    func anEditOpenedWithFewCharactersLeftShowsTheCounter() {
+        threeMessages()
+        list.actions.left = 150
+
+        edit(1, text: "first")
+
+        #expect(!editor.counter.isHidden)
+        #expect(editor.counter.stringValue == "150")
+    }
+
+    @Test
+    func eachOpeningStartsItsOwnUndoApartFromTheWindows() throws {
+        threeMessages()
+        edit(1, text: "first")
+        type(" draft")
+        let undo = try #require(editor.textView.undoManager)
+        #expect(undo.canUndo)
+        #expect(undo !== list.window.undoManager)
+
+        edit(2, text: "second", opening: 2)
+
+        #expect(editor.textView.undoManager?.canUndo == false)
+    }
+
+    @Test
+    func theEditorsEmptyPartsAndItsBoxAreTheRows() throws {
+        threeMessages()
+        list.actions.left = 150
+        edit(1, text: "first")
+        let parent = try #require(editor.superview)
+        func hit(_ point: NSPoint) -> NSView? {
+            editor.hitTest(editor.convert(point, to: parent))
+        }
+
+        #expect(hit(NSPoint(x: 10, y: editor.textView.frame.maxY + 3)) == nil, "between the box and the hint")
+        #expect(hit(NSPoint(x: editor.bounds.maxX - 4, y: editor.textView.frame.midY)) == nil, "the box beside the counter")
+        #expect(hit(NSPoint(x: editor.textView.frame.midX - 40, y: editor.textView.frame.midY)) === editor.textView)
+    }
+
+    @Test
+    func theCounterSitsOnTheLastLineAndIsPlainAtZero() {
+        threeMessages()
+        edit(1, text: "first\nsecond\nthird")
+        list.actions.left = 0
+
+        type("!")
+
+        let lastLine = editor.textView.frame.maxY - ComposerTextView.insets.height - ComposerTextView.lineHeight / 2
+        #expect(abs(editor.counter.frame.midY - lastLine) <= 1)
+        #expect(editor.counter.textColor == Palette.textDefault)
+    }
+
+    @Test
+    func theBoxsBorderFollowsTheFocus() throws {
+        threeMessages()
+        edit(1, text: "first")
+        let box = try #require(editor.subviews.compactMap { $0 as? EditorBox }.first)
+        func border(_ color: NSColor) -> CGColor? {
+            var resolved: CGColor?
+            box.effectiveAppearance.performAsCurrentDrawingAppearance { resolved = color.cgColor }
+            return resolved
+        }
+        box.displayIfNeeded()
+        #expect(box.focused)
+        #expect(box.layer?.borderColor == border(Palette.borderSubtle))
+
+        list.window.makeFirstResponder(list.table)
+        box.displayIfNeeded()
+
+        #expect(!box.focused)
+        #expect(box.layer?.borderColor == border(Palette.borderMuted))
+    }
+
+    @Test
+    func theEditorHasItsVoiceOverLabelAndShiftPageUpJumpsToUnread() {
+        threeMessages()
+        edit(1, text: "first")
+
+        editor.textView.doCommand(by: #selector(NSResponder.pageUpAndModifySelection(_:)))
+
+        #expect(editor.textView.accessibilityLabel() == "Edit Message")
+        #expect(list.actions.calls.last == "unread")
+    }
+
+    @Test
+    func theHintsLinksAreDrawnInTheLinksColorAndRedrawnUnderThePointer() throws {
+        threeMessages()
+        edit(1, text: "first")
+        let hint = editor.hint
+        func drawn() throws -> NSBitmapImageRep {
+            let rep = try #require(hint.bitmapImageRepForCachingDisplay(in: hint.bounds))
+            hint.cacheDisplay(in: hint.bounds, to: rep)
+            return rep
+        }
+        func blue(in rect: NSRect, of rep: NSBitmapImageRep) -> Bool {
+            let scale = CGFloat(rep.pixelsWide) / hint.bounds.width
+            for x in Int(rect.minX * scale)..<Int(rect.maxX * scale) {
+                for y in Int(rect.minY * scale)..<Int(rect.maxY * scale) {
+                    if let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                        color.blueComponent - color.redComponent > 0.25, color.alphaComponent > 0.5
+                    {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        let plain = try drawn()
+        #expect(blue(in: hint.save.frame, of: plain))
+        #expect(!blue(in: NSRect(x: 0, y: 0, width: hint.cancel.frame.minX, height: hint.bounds.height), of: plain))
+
+        list.window.displayIfNeeded()
+        let layer = try #require(hint.layer)
+        try #require(!layer.needsDisplay())
+        hint.save.isHovered = true
+        #expect(layer.needsDisplay())
+        let hovered = try drawn()
+        #expect(hovered.tiffRepresentation != plain.tiffRepresentation, "the underline")
+    }
+
+    @Test
     func theEditorTakesTheFocusWhenItOpens() {
         threeMessages()
 
