@@ -396,6 +396,45 @@ async fn each_refusal_of_a_pin_is_told_apart() {
     }
 }
 
+#[tokio::test]
+async fn a_rate_limit_or_a_server_error_is_returned_as_it_is() {
+    let limited = pinning().await;
+    limited
+        .answer(
+            "PUT",
+            "/pins/",
+            ResponseTemplate::new(429).set_body_json(
+                json!({"message": "You are being rate limited.", "retry_after": 0.02, "global": false}),
+            ),
+        )
+        .await;
+    let broken = pinning().await;
+    broken
+        .answer("PUT", "/pins/", ResponseTemplate::new(500))
+        .await;
+
+    let rate_limited = limited.account.pin(general(), target()).await;
+    let server_error = broken.account.pin(general(), target()).await;
+
+    assert!(
+        matches!(
+            rate_limited,
+            Err(PinError::Request(RequestError::RateLimited {
+                retry_after: Some(_)
+            }))
+        ),
+        "{rate_limited:?}"
+    );
+    assert_eq!(limited.lines().await.len(), 2, "waited out once");
+    assert!(
+        matches!(
+            server_error,
+            Err(PinError::Request(RequestError::ServerError { status: 500 }))
+        ),
+        "{server_error:?}"
+    );
+}
+
 // What the user wanted: the pin went with the message.
 #[tokio::test]
 async fn unpinning_a_message_that_is_gone_is_done() {
