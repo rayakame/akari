@@ -44,6 +44,9 @@ its ring 3). The official badge's size wasn't read.*
 
 - *View > Show Pinned Messages (Hide while open) carries ⌘P; the File menu's Print, which would
   hold ⌘P, is gone: Akari prints nothing.*
+- *While the delete, pin or unpin question waits for its answer, ⌘P does nothing: it neither
+  opens the popout over the question nor closes one under it (the menu item is disabled). The
+  official popout would open under the modal.*
 - *The popout is a key panel attached to the window over a clear shield, as the Threads popout:
   a click outside closes it and goes no further.*
 
@@ -77,7 +80,7 @@ its ring 3). The official badge's size wasn't read.*
   direct message doesn't have\nany pinned messages... yet."), 16 medium in `textDefault`,
   centered, the line break kept, 20 under the illustration's 120, 8 above and 32 below; then the
   footer at the popout's bottom: "Protip:" at 14 semibold in `statusPositive` and "Users with the
-  'Pin Messages' permission can pin a message from its context menu." (a DM: "You can pin a
+  ‘Pin Messages’ permission can pin a message from its context menu." (a DM: "You can pin a
   message from its context menu.") at 14, centered, on `hoverBackground` (#97979f at 12 %), 16
   around and 10 more above and below. *Akari: the words in `textMuted`, as the questions' tips;
   their color wasn't read.*
@@ -89,7 +92,9 @@ its ring 3). The official badge's size wasn't read.*
 - *A first page that failed says "Akari couldn't load the pinned messages." with "Try Again"; the
   official client shows such a channel as empty. After a later page failed, "Load more messages"
   stays and asks again (the official client offers nothing more and stops paging), and scrolling
-  doesn't ask again.*
+  doesn't ask again; nor does it after a page that brought no new card. While Discord has more
+  but no pin of this connection is left to go on from (all of them deleted or unpinned), "Load
+  more messages" asks for the first page again.*
 - *The cards take no pointer: links, spoilers, images and reactions open from the list, after
   Jump. The official client's rows are as interactive as the list's. The cards show no
   reactions.*
@@ -109,7 +114,7 @@ its ring 3). The official badge's size wasn't read.*
   pushpin and the slashed pushpin), in the message's menu (after Copy Text), and the popout's ✕,
   where `MessageActions` allows them; never for a failed send.
 - **Shift** at the click pins or unpins at once, from the bar, the menu and the ✕.
-- **The pin question:** "Pin It. Pin It Good.", "Hey, just double checking that you want to pin
+- **The pin question:** "Pin It. Pin It Good.", "Hey, just double-checking that you want to pin
   this message to #channel for posterity and greatness?" (a DM or a group DM: "to the current
   channel"), the message in its box ([edit-delete.md](edit-delete.md#deleting)), Cancel and "Oh
   yeah. Pin it" in the brand's color.
@@ -124,7 +129,7 @@ its ring 3). The official badge's size wasn't read.*
 | Why | Title | Text |
 |---|---|---|
 | 250 pins already | The Pin Broke | Discord is unable to pin that message. You may have hit the limit of 250 pins in channel #name. (a DM: "in this channel.") |
-| No permission | No Access | You do not have permission to pin messages in this channel. |
+| No permission (*Akari:* every 403) | No Access | You do not have permission to pin messages in this channel. |
 | Not in this channel | Invalid Channel Type | This message cannot be pinned in this channel. |
 | An archived thread | Invalid Thread Archive State | This message cannot be pinned in an archived thread. |
 | A system message | Invalid Message Type | This message is a system message and cannot be pinned. |
@@ -140,8 +145,12 @@ its ring 3). The official badge's size wasn't read.*
 
 - *The questions are Akari's modal, as the delete question: a key panel over the dimmed window,
   440 wide, Return answers yes and Escape, Cancel and a press outside no; it stays while another
-  app is active and closes when its message is deleted meanwhile. Asked from the popout it stands
-  over it, and the popout has the key again afterwards.*
+  app is active and closes when its message is deleted meanwhile, or pinned or unpinned elsewhere
+  so that its yes would have nothing to do. Asked from the popout it stands over it, and the
+  popout has the key again afterwards.*
+- *Every 403 is "No Access" with its words, also 50013 and other codes, as for edits: the official
+  client has "No Access" only for 50001 and shows "The Pin Broke" with Discord's message for the
+  rest, which for 50013 is "Missing Permissions" and says less.*
 - *The bar's button isn't busy while its request runs: a second click asks again, which Discord
   takes as the same pin (the requests are idempotent).*
 - *The alerts' button is macOS's "OK" for the official "Okay"; Try Again isn't red.*

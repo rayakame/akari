@@ -155,8 +155,9 @@ Voice, notifications and settings come later.
   words, its tip and its confirm button's color (`PanelButton`: the brand's, gray or red).
 - **Pins** (`docs/ui/pins.md`): `PinsButton` in `ChannelHeader`, after Threads, is selected while
   the popout is open, carries the dot (`SessionModel.pinsUnread`) and is disabled behind the age
-  gate; View > Show Pinned Messages (⌘P, in place of File > Print, `PinsCommands`) and a pin
-  line's "pinned messages" (`akari://pins`) toggle it too. `SessionView` shows `PinsPanel` in a
+  gate; View > Show Pinned Messages (⌘P, in place of File > Print, `PinsCommands`; disabled while
+  a question about a message waits) and a pin line's "pinned messages" (`akari://pins`) toggle it
+  too. `SessionView` shows `PinsPanel` in a
   key `ChildWindows` panel under the button over a clear shield, as the Threads popout, framed by
   `PinsLayout` from Discord's numbers; `PinsPopoutView` is the header and the list, the spinner,
   the empty state with `PinsFooter`'s protip, or Akari's failed state. A `PinnedCard` holds a

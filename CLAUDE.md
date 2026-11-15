@@ -101,8 +101,9 @@ a media or forum post hides download options, and gives a media post's thumbnail
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
 answers a message) and tail messages with their reactions and what a reply answers, edit and
 delete a message, react, take a reaction back and list who reacted, list a channel's pins, pin
-and unpin a message, list what the emoji picker offers in a channel or search it, show where a channel's unread state,
-mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+and unpin a message, list what the emoji picker offers in a channel or search it, show where a
+channel's unread state, mentions and pins dot come from, and get an image as the app would for
+a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,

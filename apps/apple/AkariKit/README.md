@@ -202,10 +202,11 @@ request; Shift at the click deletes at once; otherwise `SessionModel.deleteQuest
 `answerDeleteQuestion(_:)`; a refusal waits in `messageActionFailure`), Pin and Unpin (Shift at
 the click at once; otherwise `SessionModel.pinQuestion`, a `MessageActionsModel.PinQuestion` with
 the row, the official words and, for Unpin, its protip as a `MessageTip`, until
-`answerPinQuestion(_:)`; nothing changes before the gateway says so; a refused pin is the
-official alert for its `PinError` in `messageActionFailure`, a refused unpin the one "The Pin Is
-Stuck!" with Try Again in `messageConfirmation`, whose `destructive` is false), and Retry for a
-failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
+`answerPinQuestion(_:)`, the message's deletion or a pin or unpin elsewhere; nothing changes before
+the gateway says so; a refused pin is the official alert for its `PinError` in
+`messageActionFailure`, a refused unpin the one "The Pin Is Stuck!" with Try Again in
+`messageConfirmation`, whose `destructive` is false), and Retry for a failed send.
+`markUnread(from:)` (the item, the button, an Option-click) puts the list's
 new messages line over the message at once, asks `Account.markUnread`, and on a refusal puts the
 line back and leaves one `messageActionFailure` on the session, in Akari's words, until
 `dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
@@ -305,15 +306,17 @@ Threads" (`ThreadPeek`): up to three active threads the list doesn't show; while
 names the channel it shows for, `peekedThreads` follows the store.
 `pinsChannel` is the channel whose pins the header's pins button shows (the open message
 list's: a text or announcement channel, a thread, a DM or a group DM; not the system DM),
-`pinsUnread` its dot and `pinsDisabled` the age gate in front of it; `togglePins()` (the button,
-⌘P) opens `pins`, its `PinsModel`, or closes it, `togglePins(of:)` (a pin line's "pinned
-messages") opens the line's channel first, and another channel or the Threads browser closes it.
+`pinsUnread` its dot and `pinsDisabled` the age gate in front of it; `togglePins()` (the button, ⌘P)
+opens `pins`, its `PinsModel`, or closes it (neither while `asksAboutMessage`: a delete, pin or
+unpin question waits), `togglePins(of:)` (a pin line's "pinned messages") opens the line's channel
+first, and another channel or the Threads browser closes it.
 `PinsModel.open()` acks the channel's pins and leaves the first page to the core
 (`Account.loadPins`, which asks Discord only when the list needs it); `phase` says what shows:
 the spinner, the `rows` (the pinned messages as `MessageListModel.Row`s, the newest pin first, a
 reply with its line), the empty state in the official words for a channel or a conversation
-(`emptyText`, `protip`) or, *Akari*, the failed first page with `retry()`. `reachedEnd()` (the
-list's end came near) loads the next page while Discord has more and the last page came,
+(`emptyText`, `protip`) or, *Akari*, the failed first page with `retry()`; a load asked while one
+runs (a new session meanwhile) asks the core once more after it. `reachedEnd()` (the list's end
+came near) loads the next page while Discord has more and the last page came and moved a row,
 `loadMore()` ("Load more messages", `offersMore`) also after a failed one, `loadingMore` the
 spinner under the rows. `jump(to:shift:)` jumps in the channel's list and closes the popout unless
 Shift is held; `unpin(_:shift:)` is a row's ✕ (`canUnpin(_:)`: the core's `unpin`), the question

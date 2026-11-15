@@ -580,7 +580,10 @@ kind of channel (`PIN_LIMIT`).
   (a pin whose MESSAGE_UPDATE never came; an empty list has seen the time the channel had when
   it was asked). Otherwise nothing: a page on its way, or a list that is current. The official
   client asks again only after a failure or a new connection. **`load_more_pins`** asks for the
-  page after the last pin of this connection while `has_more`, also after a failed one.
+  page after the last pin of this connection while `has_more`, also after a failed one. With no
+  such pin to go on from (no page of this connection landed yet, or all its pins went: a bulk
+  delete, unpins elsewhere) it asks for the first page, which reconciles from the start. A page
+  that leaves out every pin it lists ends the list: the next would be asked from the same pin.
 - **A page takes the place of the pins whose times it covers**: from its last pin's time up to
   `before` (the first page: up to now), everything older when Discord has no more. A pin listed
   twice is listed once, as the page has it; a message of another channel is left out; every
@@ -590,7 +593,8 @@ kind of channel (`PIN_LIMIT`).
 - **Kept current on every copy of the message** ([dispatches.md](dispatches.md#message-windows)):
   MESSAGE_UPDATE patches a listed message and `pinned: false` takes it out; deletes and bulk
   deletes take it out; reactions count on it; the user's own edits and deletes reach it as every
-  copy. `Store::reactions` and `Store::message_actions` answer for a message only the list has.
+  copy, and a page loaded while an edit waits shows the saved text, in its pins and the reply
+  lines. `Store::reactions` and `Store::message_actions` answer for a message only the list has.
 - **A new pin** (`pinned: true` for a message the list lacks) goes to the front when a copy the
   store holds (a window's, a held message, a viewed thread's starter) said it wasn't pinned, or
   when the list is complete (every page of this connection loaded); else it waits for its page,

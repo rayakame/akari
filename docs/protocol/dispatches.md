@@ -607,11 +607,11 @@ and applies each event.
   `latest` to false, like Discord's "jump to present"; live messages then wait until newer
   history brings the window back to the present. Every trim emits `MessagesTrimmed`.
 - A new session marks every window stale (`MessagesStale`) instead of clearing it, so a UI
-  keeps its scroll position, and leaves every pins list shown but `NotLoaded` (`PinsChanged`). Edits and deletes still apply, but new messages are held back
-  until the window is refreshed and reconciled, because appending them could leave a gap.
-  `Account` refreshes stale windows right after READY; a window that is current again sends
-  `MessagesRefreshed`, also when the refresh found nothing new. See
-  [messages.md](messages.md#after-a-new-session).
+  keeps its scroll position, and leaves every pins list shown but `NotLoaded` (`PinsChanged`).
+  Edits and deletes still apply, but new messages are held back until the window is refreshed
+  and reconciled, because appending them could leave a gap. `Account` refreshes stale windows
+  right after READY; a window that is current again sends `MessagesRefreshed`, also when the
+  refresh found nothing new. See [messages.md](messages.md#after-a-new-session).
 - A channel's first page can show the cache's copy of the channel while it loads: if the
   copy is read before the page arrives (or the page fails), it fills the empty window as
   stale (`MessagesLoaded`, then `MessagesStale`), and the page then reconciles it like a

@@ -494,8 +494,9 @@ reactions), a new session left it `NotLoaded`, or the list was let go (10 lists 
 - `Account.load_pins(channel_id)` asks for the first page (25 pins) when the list is `NotLoaded`,
   its first page failed or Discord named a newer pin than it has; otherwise it returns at once.
   Call it whenever the list shows and reads `NotLoaded`: on opening and after `PinsChanged`.
-  `load_more_pins(channel_id)` asks for the next page while `has_more`, also after a failed one;
-  a host asks near the list's end. Both throw a `RequestError` and leave the list `Failed`.
+  `load_more_pins(channel_id)` asks for the next page while `has_more`, also after a failed one
+  (the first page again when no pin of this connection is left to go on from); a host asks near
+  the list's end and from its button. Both throw a `RequestError` and leave the list `Failed`.
 - `pin(channel_id, message_id)` and `unpin(…)` take the row's IDs (a thread's starter row pins
   the parent's message) or a pinned message's own, by `MessageActions.pin` and `.unpin`; an
   archived thread is opened first. Nothing changes until the gateway's update (D162): keep the
