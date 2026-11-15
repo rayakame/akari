@@ -94,8 +94,10 @@ and the inverse when the request fails.
   is answered with success, since nothing failed for it. When the request is answered, the
   next one goes out only if Discord doesn't have what the user wants now. React, unreact,
   react in quick succession is one PUT; twenty toggles are at most the request that ran and
-  one more. A wish to react is met by a reaction of either kind; a wish to take one back names
-  the kind the store showed as the user's (the plain one first).
+  one more. A wish to react is met by a reaction of either kind. Taking one back takes the kind
+  the store shows as the user's (the plain one first). A click that reacts makes the wish a
+  reaction until the plain one is taken back; otherwise every kind taken back while the
+  requests run is asked to go, the plain one first.
 - **While requests run, the store shows the wish.** From the first click until the requests
   for that message and emoji are over, the user's own MESSAGE_REACTION_ADD and
   MESSAGE_REACTION_REMOVE for that emoji change nothing on screen: they are noted as what
@@ -111,7 +113,7 @@ and the inverse when the request fails.
   while it ran: then the gateway already said so, and also whatever happened after (a
   moderator's removal between the echo and the answer stands). An answer that came before its
   echo stands in for it, so the echo, when it comes, says nothing new; a dispatch that isn't
-  the echo owed is newer knowledge and is believed.
+  the echo owed for its kind is newer knowledge and is believed.
 - **When the requests are over**, because Discord has what the user wants or refused it, the
   store is set to what Discord has, both kinds in one change. After requests that went
   through this usually changes nothing. After **a refusal** it puts back what the click took
@@ -124,12 +126,17 @@ and the inverse when the request fails.
 - **A wish made while a refused request ran** is asked next unless Discord has it so already:
   a reaction taken back before its PUT was refused asks nothing more, and a removed super
   reaction clicked again before the DELETE was refused stays the super reaction Discord kept
-  (the plain one the click showed makes way for it). After a refusal the same request is never
-  sent again without a new click.
-- **Not covered:** an echo that comes after the requests are over is a dispatch like any
-  other. It changes nothing unless a later request's echo is late as well: a reaction taken
-  back whose two echoes both arrive after the DELETE was answered shows for the moment between
-  them.
+  (the plain one the click showed makes way for it); taken back once more before the refusal,
+  the super reaction is still wanted gone, and the refusal is the last call's error. After a
+  refusal the same request is never sent again without a new click.
+- **Echoes after the requests.** Answers that came before their echoes stand in for them after
+  the requests are over too, kind by kind, until the echoes come: a reaction taken back whose
+  two echoes both arrive after the DELETE was answered never shows again, not even between
+  them. Any other dispatch of the user's own with that emoji shows as it comes and ends the
+  wait for its kind, and so does a removal of the emoji or of all for a kind whose last owed
+  echo adds: Discord made that request after the removal, so its echo shows. At most 16
+  reactions wait so, the oldest's echoes then show as they come; a new session (READY) waits
+  for none.
 - *Akari:* the official client has no such guard (its inverse dispatch is unconditional), no
   latest-wish rule (every click is its own request), and shows every echo as it comes.
 
@@ -141,8 +148,9 @@ need the message's `remove_reactions` action (Manage Messages; never in a DM), e
 `InvalidRequest` without a request. They change nothing in the store: the gateway's
 MESSAGE_REACTION_REMOVE, REMOVE_ALL or REMOVE_EMOJI does, as in the official client, whose
 optimistic removal of another user's reaction touches only its list of users.
-`remove_reaction` for the user's own ID is `unreact` with the location `Message` (the
-reactions window's ✕ on one's own row).
+`remove_reaction` for the user's own ID takes back the kind it names as `unreact` does, with
+the location `Message` (the reactions window's ✕ on one's own row); a kind that isn't the
+user's asks nothing.
 
 ## The users who reacted
 
