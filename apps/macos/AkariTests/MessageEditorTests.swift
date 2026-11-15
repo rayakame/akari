@@ -244,6 +244,31 @@ struct MessageEditorTests {
         #expect(list.actions.editorFocus.last == false)
     }
 
+    @Test(arguments: [150, 400, -1234])
+    func theCounterHoldsItsWholeTextInsideTheBox(left: Int) throws {
+        threeMessages()
+        edit(1, text: "first")
+        let one = height(of: 1)
+
+        list.actions.left = left
+        type("!")
+
+        let counter = editor.counter
+        let text = counter.attributedStringValue.size().width
+        let cell = try #require(counter.cell).cellSize.width
+        #expect(counter.frame.width >= max(text, cell), "\(counter.stringValue): \(counter.frame.width) for \(text)")
+        let box = NSRect(
+            x: 0, y: MessageEditorView.top, width: editor.bounds.width,
+            height: editor.textView.frame.height)
+        #expect(box.contains(counter.frame))
+        #expect(box.maxX - counter.frame.maxX == MessageEditorView.counterTrailing)
+        #expect(
+            editor.textView.frame.maxX - ComposerTextView.insets.width <= counter.frame.minX,
+            "the text wraps before the counter")
+        #expect(height(of: 1) == one)
+        #expect(abs(height(of: 1) - (try fittingHeight(of: 1))) <= 0.5)
+    }
+
     @Test
     func aRefusalsReasonStandsUnderTheBoxAndTheRowMakesRoom() throws {
         threeMessages()

@@ -7,7 +7,7 @@ final class MessageEditorView: NSView {
     static let top: CGFloat = 6
     static let radius: CGFloat = 8
     static let lineGap: CGFloat = 7
-    // The counter's room at the box's right edge while it shows.
+    // The text's room beside a count of three digits, as the official editor's.
     static let counterRoom: CGFloat = 32
     static let counterTrailing: CGFloat = 14
     /// Around the edited row as it scrolls into view, as the official list's 16 + 48.
@@ -168,7 +168,7 @@ final class MessageEditorView: NSView {
 
     private func boxHeight(width: CGFloat) -> CGFloat {
         let inset = ComposerTextView.insets
-        let textWidth = max(1, width - 2 * inset.width - (counter.isHidden ? 0 : Self.counterRoom))
+        let textWidth = max(1, width - 2 * inset.width - textRoom)
         let text = textView.string
         measureStorage.setAttributedString(
             NSAttributedString(string: text, attributes: ComposerTextView.attributes))
@@ -176,6 +176,20 @@ final class MessageEditorView: NSView {
         measureLayout.ensureLayout(for: measureContainer)
         let used = max(measureLayout.usedRect(for: measureContainer).height, ComposerTextView.lineHeight)
         return ceil(used) + 2 * inset.height
+    }
+
+    // The label's cell, with its insets: its intrinsic width cut off the last digit's edge.
+    private var counterSize: NSSize {
+        let size = counter.cell?.cellSize ?? counter.intrinsicContentSize
+        return NSSize(width: ceil(size.width), height: ceil(size.height))
+    }
+
+    // A wider count, a negative one past the limit, takes more.
+    private var textRoom: CGFloat {
+        guard !counter.isHidden else {
+            return 0
+        }
+        return max(Self.counterRoom, counterSize.width + Self.counterTrailing + 2 - ComposerTextView.insets.width)
     }
 
     private func problemHeight(width: CGFloat) -> CGFloat {
@@ -189,8 +203,8 @@ final class MessageEditorView: NSView {
         box.frame = boxFrame
         textView.frame = NSRect(
             x: boxFrame.minX, y: boxFrame.minY,
-            width: boxFrame.width - (counter.isHidden ? 0 : Self.counterRoom), height: boxFrame.height)
-        let counterSize = counter.intrinsicContentSize
+            width: boxFrame.width - textRoom, height: boxFrame.height)
+        let counterSize = self.counterSize
         // Its middle on the last line's, as the composer's counter.
         let lastLine = boxFrame.maxY - ComposerTextView.insets.height - ComposerTextView.lineHeight / 2
         counter.frame = NSRect(
