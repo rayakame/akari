@@ -2,7 +2,41 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-enum DeleteLayout {
+/// A question about a message, asked with the message in the official box: Delete, Pin, Unpin.
+@MainActor
+protocol MessageQuestion {
+    var id: UUID { get }
+    var row: MessageListModel.Row { get }
+    var words: MessageQuestionWords { get }
+}
+
+struct MessageQuestionWords: Equatable {
+    let title: String
+    let message: String
+    let tip: MessageTip?
+    let confirm: String
+    let cancel: String
+    let confirmKind: PanelButton.Kind
+}
+
+extension MessageActionsModel.DeleteQuestion: MessageQuestion {
+    var words: MessageQuestionWords {
+        MessageQuestionWords(
+            title: Self.title, message: Self.message,
+            tip: showsTip ? MessageTip(label: nil, text: Self.tip, bold: Self.tipBold) : nil,
+            confirm: Self.confirm, cancel: Self.cancel, confirmKind: .critical)
+    }
+}
+
+extension MessageActionsModel.PinQuestion: MessageQuestion {
+    var words: MessageQuestionWords {
+        MessageQuestionWords(
+            title: title, message: message, tip: tip, confirm: confirm, cancel: cancel,
+            confirmKind: destructive ? .critical : .primary)
+    }
+}
+
+enum MessageQuestionLayout {
     static let width: CGFloat = 440
     static let margin: CGFloat = 40
     static let inset: CGFloat = 24
@@ -15,9 +49,9 @@ enum DeleteLayout {
     // The least of the message that shows before the box scrolls.
     static let minimumBox: CGFloat = 80
 
-    static func frame(for question: MessageActionsModel.DeleteQuestion, in area: CGSize) -> CGRect {
+    static func frame(for question: some MessageQuestion, in area: CGSize) -> CGRect {
         let width = min(Self.width, max(0, area.width - 2 * margin))
-        let height = DeleteMessageView.sizing.height(
+        let height = MessageQuestionView.sizing.height(
             for: question, width: width, maxHeight: max(0, area.height - 2 * margin))
         return CGRect(
             x: ((area.width - width) / 2).rounded(), y: ((area.height - height) / 2).rounded(),
@@ -25,19 +59,18 @@ enum DeleteLayout {
     }
 }
 
-final class DeleteMessageView: NSView {
-    typealias Question = MessageActionsModel.DeleteQuestion
+final class MessageQuestionView: NSView {
+    static let sizing = MessageQuestionView()
 
-    static let sizing = DeleteMessageView()
-
-    let title = DeleteMessageView.label(Question.title, style: TypeScale.emptyTitle, color: Palette.textStrong)
-    let message = DeleteMessageView.label(Question.message, style: TypeScale.body, color: Palette.textDefault)
+    let title = MessageQuestionView.label("", style: TypeScale.emptyTitle, color: Palette.textStrong)
+    let message = MessageQuestionView.label("", style: TypeScale.body, color: Palette.textDefault)
     let box = MessagePreviewBox()
-    let tip = DeleteMessageView.label("", style: TypeScale.detail, color: Palette.textMuted)
-    let cancel = PanelButton(Question.cancel, kind: .secondary)
-    let delete = PanelButton(Question.confirm, kind: .critical)
+    let tip = MessageQuestionView.label("", style: TypeScale.detail, color: Palette.textMuted)
+    let cancel = PanelButton("", kind: .secondary)
+    let confirm = PanelButton("", kind: .critical)
     var answer: (Bool) -> Void = { _ in }
-    private var question: Question?
+    private var row: MessageListModel.Row?
+    private var words: MessageQuestionWords?
     private var maxHeight: CGFloat = .greatestFiniteMagnitude
 
     override var isFlipped: Bool { true }
@@ -46,41 +79,53 @@ final class DeleteMessageView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = DeleteLayout.radius
+        layer?.cornerRadius = MessageQuestionLayout.radius
         layer?.borderWidth = 1
         title.setAccessibilityRole(.staticText)
-        tip.attributedStringValue = Self.tipText
         cancel.keyEquivalent = "\u{1b}"
         cancel.target = self
         cancel.action = #selector(cancelled)
-        delete.keyEquivalent = "\r"
-        delete.hasDestructiveAction = true
-        delete.target = self
-        delete.action = #selector(confirmed)
-        for view in [title, message, box, tip, cancel, delete] as [NSView] {
+        confirm.keyEquivalent = "\r"
+        confirm.target = self
+        confirm.action = #selector(confirmed)
+        for view in [title, message, box, tip, cancel, confirm] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(Question.title)
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
-    func show(_ question: Question, images: ImageCache?, maxHeight: CGFloat) {
-        self.question = question
+    func show(_ question: some MessageQuestion, images: ImageCache?, maxHeight: CGFloat) {
         self.maxHeight = maxHeight
-        tip.isHidden = !question.showsTip
+        row = question.row
+        put(question.words)
         box.show(question.row, images: images)
         needsLayout = true
     }
 
-    func height(for question: Question, width: CGFloat, maxHeight: CGFloat) -> CGFloat {
-        tip.isHidden = !question.showsTip
+    func height(for question: some MessageQuestion, width: CGFloat, maxHeight: CGFloat) -> CGFloat {
+        put(question.words)
         return frames(width: width, row: question.row, maxHeight: maxHeight).height
+    }
+
+    private func put(_ words: MessageQuestionWords) {
+        guard words != self.words else {
+            return
+        }
+        self.words = words
+        title.stringValue = words.title
+        message.stringValue = words.message
+        tip.isHidden = words.tip == nil
+        tip.attributedStringValue = words.tip.map(Self.tipText) ?? NSAttributedString()
+        cancel.show(words.cancel, kind: .secondary)
+        confirm.show(words.confirm, kind: words.confirmKind)
+        confirm.hasDestructiveAction = words.confirmKind == .critical
+        setAccessibilityLabel(words.title)
     }
 
     private struct Frames {
@@ -89,37 +134,37 @@ final class DeleteMessageView: NSView {
         var box = NSRect.zero
         var tip = NSRect.zero
         var cancel = NSRect.zero
-        var delete = NSRect.zero
+        var confirm = NSRect.zero
         var height: CGFloat = 0
     }
 
     private func frames(width: CGFloat, row: MessageListModel.Row, maxHeight: CGFloat) -> Frames {
-        let inset = DeleteLayout.inset
+        let inset = MessageQuestionLayout.inset
         let inner = max(0, width - 2 * inset)
         var frames = Frames()
         var y = inset
         frames.title = NSRect(x: inset, y: y, width: inner, height: Self.height(of: title, width: inner))
-        y = frames.title.maxY + DeleteLayout.titleGap
+        y = frames.title.maxY + MessageQuestionLayout.titleGap
         frames.message = NSRect(x: inset, y: y, width: inner, height: Self.height(of: message, width: inner))
-        y = frames.message.maxY + DeleteLayout.boxGap
-        let tipHeight = tip.isHidden ? 0 : DeleteLayout.boxGap + Self.height(of: tip, width: inner)
+        y = frames.message.maxY + MessageQuestionLayout.boxGap
+        let tipHeight = tip.isHidden ? 0 : MessageQuestionLayout.boxGap + Self.height(of: tip, width: inner)
         let buttons = PanelButton.height
-        let rest = tipHeight + DeleteLayout.buttonsGap + buttons + inset
-        let room = max(DeleteLayout.minimumBox, maxHeight - y - rest)
+        let rest = tipHeight + MessageQuestionLayout.buttonsGap + buttons + inset
+        let room = max(MessageQuestionLayout.minimumBox, maxHeight - y - rest)
         let box = min(MessagePreviewBox.height(of: row, width: inner), room)
         frames.box = NSRect(x: inset, y: y, width: inner, height: box)
         y = frames.box.maxY
         if !tip.isHidden {
             frames.tip = NSRect(
-                x: inset, y: y + DeleteLayout.boxGap, width: inner, height: Self.height(of: tip, width: inner))
+                x: inset, y: y + MessageQuestionLayout.boxGap, width: inner, height: Self.height(of: tip, width: inner))
             y = frames.tip.maxY
         }
-        y += DeleteLayout.buttonsGap
-        let deleteWidth = delete.width
+        y += MessageQuestionLayout.buttonsGap
+        let confirmWidth = confirm.width
         let cancelWidth = cancel.width
-        frames.delete = NSRect(x: width - inset - deleteWidth, y: y, width: deleteWidth, height: buttons)
+        frames.confirm = NSRect(x: width - inset - confirmWidth, y: y, width: confirmWidth, height: buttons)
         frames.cancel = NSRect(
-            x: frames.delete.minX - DeleteLayout.buttonGap - cancelWidth, y: y, width: cancelWidth,
+            x: frames.confirm.minX - MessageQuestionLayout.buttonGap - cancelWidth, y: y, width: cancelWidth,
             height: buttons)
         frames.height = (y + buttons + inset).rounded(.up)
         return frames
@@ -127,17 +172,17 @@ final class DeleteMessageView: NSView {
 
     override func layout() {
         super.layout()
-        guard let question else {
+        guard let row else {
             return
         }
-        let frames = frames(width: bounds.width, row: question.row, maxHeight: maxHeight)
+        let frames = frames(width: bounds.width, row: row, maxHeight: maxHeight)
         // A label's text starts 2 into its frame.
         title.frame = frames.title.insetBy(dx: -2, dy: 0)
         message.frame = frames.message.insetBy(dx: -2, dy: 0)
         box.frame = frames.box
         tip.frame = frames.tip.insetBy(dx: -2, dy: 0)
         cancel.frame = frames.cancel
-        delete.frame = frames.delete
+        confirm.frame = frames.confirm
     }
 
     override func updateLayer() {
@@ -153,12 +198,28 @@ final class DeleteMessageView: NSView {
         answer(true)
     }
 
-    static var tipText: NSAttributedString {
-        let text = NSMutableAttributedString(
-            string: Question.tip,
-            attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textMuted])
-        let bold = (Question.tip as NSString).range(of: Question.tipBold)
-        text.addAttribute(.font, value: TypeScale.detail.weight(.semibold).nsFont, range: bold)
+    static func tipText(_ tip: MessageTip) -> NSAttributedString {
+        let text = NSMutableAttributedString()
+        if let label = tip.label {
+            text.append(
+                NSAttributedString(
+                    string: label + " ",
+                    attributes: [
+                        .font: TypeScale.detail.weight(.semibold).nsFont,
+                        .foregroundColor: Palette.statusPositive,
+                    ]))
+        }
+        let start = text.length
+        text.append(
+            NSAttributedString(
+                string: tip.text,
+                attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textMuted]))
+        let bold = (tip.text as NSString).range(of: tip.bold)
+        if bold.location != NSNotFound {
+            text.addAttribute(
+                .font, value: TypeScale.detail.weight(.semibold).nsFont,
+                range: NSRange(location: start + bold.location, length: bold.length))
+        }
         return text
     }
 
@@ -177,23 +238,23 @@ final class DeleteMessageView: NSView {
     }
 }
 
-struct DeleteMessagePanel: NSViewRepresentable {
-    let question: MessageActionsModel.DeleteQuestion
+struct MessageQuestionPanel: NSViewRepresentable {
+    let question: any MessageQuestion
     let size: CGSize
     let maxHeight: CGFloat
     let answer: (Bool) -> Void
     @Environment(\.imageCache) private var images
 
-    func makeNSView(context: Context) -> DeleteMessageView {
-        DeleteMessageView()
+    func makeNSView(context: Context) -> MessageQuestionView {
+        MessageQuestionView()
     }
 
-    func updateNSView(_ view: DeleteMessageView, context: Context) {
+    func updateNSView(_ view: MessageQuestionView, context: Context) {
         view.answer = answer
         view.show(question, images: images, maxHeight: maxHeight)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeleteMessageView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MessageQuestionView, context: Context) -> CGSize? {
         size
     }
 }
@@ -201,14 +262,14 @@ struct DeleteMessagePanel: NSViewRepresentable {
 // An NSButton's bezel color shows only while its window is key, so these draw BrandButton's.
 final class PanelButton: NSButton {
     enum Kind {
-        case secondary, critical
+        case primary, secondary, critical
     }
 
     static let height: CGFloat = 40
     static let minWidth: CGFloat = 100
     static let padding: CGFloat = 16
 
-    let kind: Kind
+    private(set) var kind: Kind
     private(set) var isHovered = false {
         didSet { needsDisplay = true }
     }
@@ -230,6 +291,13 @@ final class PanelButton: NSButton {
         nil
     }
 
+    func show(_ title: String, kind: Kind) {
+        self.title = title
+        self.kind = kind
+        updateTitle()
+        needsDisplay = true
+    }
+
     var width: CGFloat {
         let text = (title as NSString).size(withAttributes: [.font: TypeScale.button.nsFont]).width
         return max(Self.minWidth, text.rounded(.up) + 2 * Self.padding)
@@ -242,13 +310,14 @@ final class PanelButton: NSButton {
             string: title,
             attributes: [
                 .font: TypeScale.button.nsFont, .paragraphStyle: paragraph,
-                .foregroundColor: kind == .critical ? NSColor.white : Palette.textStrong,
+                .foregroundColor: kind == .secondary ? Palette.textStrong : NSColor.white,
             ])
     }
 
     override func updateLayer() {
         let fill: NSColor =
             switch kind {
+            case .primary: isHovered ? Palette.brandHover : Palette.brand
             case .secondary: isHovered ? Palette.backgroundModStrong : Palette.backgroundModNormal
             case .critical: isHovered ? Palette.dangerHover : Palette.danger
             }

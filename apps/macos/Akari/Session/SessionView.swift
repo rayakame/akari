@@ -73,21 +73,7 @@ struct SessionView<MessageArea: View>: View {
         .overlay {
             GeometryReader { proxy in
                 if let question = session.deleteQuestion {
-                    let frame = DeleteLayout.frame(for: question, in: proxy.size)
-                    ChildWindowsHost(
-                        content: AnyView(
-                            DeleteMessagePanel(
-                                question: question, size: frame.size,
-                                maxHeight: max(0, proxy.size.height - 2 * DeleteLayout.margin),
-                                answer: session.answerDeleteQuestion
-                            )
-                            .imageEnvironment(session)),
-                        frame: frame, browser: true, dimmed: true,
-                        label: MessageActionsModel.DeleteQuestion.title, closesOnDeactivate: false,
-                        onClose: { session.answerDeleteQuestion(false) }, refocus: session.refocusChannel
-                    )
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .id(question.id)
+                    ask(question, in: proxy.size, answer: session.answerDeleteQuestion)
                 }
             }
         }
@@ -138,6 +124,25 @@ struct SessionView<MessageArea: View>: View {
         }
         // Akari's stand-in for the official client's shake when Discord refuses a reaction.
         .onChange(of: session.refusedReactions) { refusalSound() }
+    }
+
+    // A key panel over the dimmed window, which stays while another app is active.
+    private func ask(
+        _ question: some MessageQuestion, in area: CGSize, answer: @escaping (Bool) -> Void
+    ) -> some View {
+        let frame = MessageQuestionLayout.frame(for: question, in: area)
+        return ChildWindowsHost(
+            content: AnyView(
+                MessageQuestionPanel(
+                    question: question, size: frame.size,
+                    maxHeight: max(0, area.height - 2 * MessageQuestionLayout.margin), answer: answer
+                )
+                .imageEnvironment(session)),
+            frame: frame, browser: true, dimmed: true, label: question.words.title,
+            closesOnDeactivate: false, onClose: { answer(false) }, refocus: session.refocusChannel
+        )
+        .frame(width: area.width, height: area.height)
+        .id(question.id)
     }
 
     private var threadMenu: ThreadMenu? {
