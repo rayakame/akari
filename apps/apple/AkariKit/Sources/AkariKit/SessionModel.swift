@@ -154,6 +154,11 @@ public final class SessionModel {
     /// What Pin and Unpin ask, with the message, until `answerPinQuestion(_:)`, the message's
     /// deletion, or a pin or unpin elsewhere that leaves nothing to ask.
     public private(set) var pinQuestion: MessageActionsModel.PinQuestion?
+    /// Delete, Pin or Unpin waits for its answer: ⌘P neither opens nor closes the pins popout
+    /// meanwhile.
+    public var asksAboutMessage: Bool {
+        deleteQuestion != nil || pinQuestion != nil
+    }
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
     public private(set) var reactors: ReactorsModel?
@@ -929,9 +934,12 @@ public final class SessionModel {
         pinsChannel.map { ageGate(of: $0) != .open } ?? false
     }
 
-    /// The header's pins button and ⌘P: opens the popout of `pinsChannel`, or closes the open
-    /// one, which also closes the Threads browser.
+    /// The header's pins button and ⌘P: opens the popout of `pinsChannel` (closing the Threads
+    /// browser) or closes the open one; nothing while `asksAboutMessage`.
     public func togglePins() {
+        guard !asksAboutMessage else {
+            return
+        }
         if pins != nil {
             closePins()
             return

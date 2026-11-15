@@ -343,4 +343,31 @@ final class SessionPinQuestionTests {
         #expect(session.pinQuestion == nil)
         session.close()
     }
+
+    // The question is modal: ⌘P waits for its answer, both ways.
+    @Test
+    func thePinsPopoutNeitherOpensNorClosesWhileAQuestionWaits() throws {
+        let list = try list()
+        let actions = session.messageActions(for: list) { _ in }
+        let row = try #require(list.rows.first)
+
+        actions.perform(.pin, on: row)
+        #expect(session.asksAboutMessage)
+        session.togglePins()
+        #expect(session.pins == nil)
+        session.answerPinQuestion(false)
+        session.togglePins()
+        let pins = try #require(session.pins)
+
+        store.update { $0.allow(allowed(delete: true), message: 100, in: 11) }
+        actions.perform(.delete, on: row)
+        #expect(session.asksAboutMessage)
+        session.togglePins()
+        #expect(session.pins === pins)
+        session.answerDeleteQuestion(false)
+        #expect(!session.asksAboutMessage)
+        session.togglePins()
+        #expect(session.pins == nil)
+        session.close()
+    }
 }
