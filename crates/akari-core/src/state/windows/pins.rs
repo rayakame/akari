@@ -9,9 +9,8 @@ use crate::state::events::StoreEvent;
 use crate::state::reactions::{Reaction, ReactionChange, react};
 use crate::state::types::{Message, User};
 
-/// How many pins a page asks for, as the official client does.
+// The official client's page size.
 pub(crate) const PINS_PAGE: u8 = 25;
-// Lists kept, by when they were last asked for.
 const KEPT: usize = 10;
 
 /// A channel's pinned messages as loaded: see [`Store::pins`](crate::state::Store::pins).
@@ -40,9 +39,8 @@ pub struct PinnedMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum PinsState {
-    /// Not asked for in this connection:
-    /// [`Account::load_pins`](crate::Account::load_pins) asks. Items shown are an earlier
-    /// connection's, kept until the answer replaces them.
+    /// Not asked for in this connection ([`Account::load_pins`](crate::Account::load_pins)
+    /// asks); items shown are an earlier connection's until the answer replaces them.
     #[default]
     NotLoaded,
     /// A page is on its way.
@@ -53,14 +51,12 @@ pub enum PinsState {
     Failed,
 }
 
-/// Which page of a channel's pins to ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PinsLoad {
     First,
     More,
 }
 
-/// A page of a channel's pins being asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PinsAsk {
     pub(crate) channel: ChannelId,
@@ -91,7 +87,7 @@ pub(super) struct PinsList {
     // A page of this connection landed.
     fresh: bool,
     state: PinsState,
-    // Its state before the page on its way.
+    // Restored when the request is dropped.
     previous: PinsState,
     // The newest pin time of the channel's that the list has placed.
     newest: Option<Timestamp>,

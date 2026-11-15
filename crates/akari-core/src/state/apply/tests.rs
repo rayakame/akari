@@ -962,7 +962,6 @@ fn load_page(
     events.iter().map(describe).collect()
 }
 
-// The channel's pins list as one complete page of `messages` brings it, the first pinned last.
 fn pinned_only(state: &mut State, channel: u64, messages: &[Value]) {
     let items: Vec<Value> = messages
         .iter()

@@ -95,7 +95,6 @@ fn update(state: &mut State, message_id: u64, fields: Value) -> Vec<String> {
     apply(state, "MESSAGE_UPDATE", update)
 }
 
-// The whole message, as an edit or a pin brings it.
 fn whole(state: &mut State, message_id: u64, pinned: bool, text: &str) -> Vec<String> {
     let mut update = message(message_id, GENERAL);
     update["pinned"] = pinned.into();

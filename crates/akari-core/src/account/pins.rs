@@ -225,11 +225,8 @@ impl Shared {
 }
 
 impl Account {
-    /// Asks for the first page of the channel's pins ([`Store::pins`], 25 a page) when its list
-    /// isn't loaded in this connection, its first page failed, or Discord named a pin newer
-    /// than the list has; otherwise nothing, as while a page loads or for a current list. Call
-    /// it whenever the list shows and reads `NotLoaded`: on opening, and after a new session.
-    /// A failure leaves the list `Failed` and is returned.
+    /// Asks for the first page of the channel's pins ([`Store::pins`]) where the list needs one;
+    /// a failure leaves it `Failed` and is returned. Call it whenever the list shows `NotLoaded`.
     pub async fn load_pins(&self, channel: ChannelId) -> Result<(), RequestError> {
         self.shared.load_pins(channel, PinsLoad::First).await
     }
@@ -240,10 +237,8 @@ impl Account {
         self.shared.load_pins(channel, PinsLoad::More).await
     }
 
-    /// Pins the message the row shows (a thread's starter row pins the parent's message),
-    /// opening an archived thread first. Nothing changes in the store until the gateway says so.
-    /// `Request(InvalidRequest)`, without a request, where
-    /// [`MessageActions::pin`](crate::state::MessageActions) is false.
+    /// Pins the message the row shows, opening an archived thread first; the store changes with
+    /// the gateway. Without `MessageActions::pin`: `Request(InvalidRequest)`, nothing asked.
     pub async fn pin(&self, channel: ChannelId, message: MessageId) -> Result<(), PinError> {
         self.shared.change_pin(channel, message, true).await
     }
@@ -254,9 +249,8 @@ impl Account {
         self.shared.change_pin(channel, message, false).await
     }
 
-    /// The user sees the channel's pins: while [`Store::pins_unread`] says so, the dot goes at
-    /// once and Discord is told, tried up to three times; nothing otherwise. Call it when the
-    /// pins show, and again on `PinsUnreadChanged` while they do.
+    /// Acks the channel's pins while [`Store::pins_unread`] says so: the dot goes at once. Call it
+    /// when the pins show, and again on `PinsUnreadChanged` while they do.
     pub fn ack_pins(&self, channel: ChannelId) {
         if !self.shared.store.ack_pins(channel) {
             return;

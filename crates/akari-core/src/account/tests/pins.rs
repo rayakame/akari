@@ -40,7 +40,6 @@ struct Online {
     _fake: FakeGateway,
 }
 
-// Online with #general viewed and someone's message in its window.
 async fn pinning() -> Online {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
@@ -57,7 +56,6 @@ async fn pinning() -> Online {
     }
 }
 
-// Answers once the test lets it.
 struct Held {
     arrived: std::sync::mpsc::Sender<()>,
     release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -120,13 +118,11 @@ impl Online {
             .await;
     }
 
-    // The events since the last call, once everything sent so far is applied.
     async fn events(&mut self) -> Vec<String> {
         self.seq += 1;
         sync(&mut self.connection, &self.subscription, self.seq).await
     }
 
-    // Method, path and query of every request but the window's loads.
     async fn lines(&self) -> Vec<String> {
         self.server
             .received_requests()

@@ -15,7 +15,6 @@ impl State {
         })
     }
 
-    // `None` for a channel the store doesn't have, or when the list asks nothing.
     pub(crate) fn begin_pins(
         &mut self,
         channel: ChannelId,

@@ -466,7 +466,6 @@ pub(crate) struct Windows {
     // The message each channel's pending reply answers: its target stays without the window.
     holds: HashMap<ChannelId, MessageId>,
     pins: HashMap<ChannelId, pins::PinsList>,
-    // Tickets and uses of the pins lists.
     pin_counter: u64,
 }
 
@@ -1544,7 +1543,6 @@ impl Windows {
         window.release_or_drop_held(channel_id, limit, events);
     }
 
-    // The message as the window, a held message or a viewed thread's starter has it.
     fn known_copy(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         let window = self.windows.get(&channel);
         window

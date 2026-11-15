@@ -576,7 +576,6 @@ impl Store {
         });
     }
 
-    // `false` when the dot doesn't show: nothing to ack.
     pub(crate) fn ack_pins(&self, channel: ChannelId) -> bool {
         if !self.pins_unread(channel) {
             return false;
@@ -1598,11 +1597,10 @@ impl Store {
     /// locked state. Nothing for a message the store doesn't have; a message only the pins list
     /// has answers there, and one the list has is pinned whatever an older copy says. Read
     /// again when the message, its channel or the user's permissions change. A viewed thread's
-    /// starter row (the
-    /// thread's ID and the row's) answers for the message it shows, in that message's channel:
-    /// requests take the IDs of [`Store::shown_message`]. It allows no reply: one sent in the
-    /// thread can't name a message of the parent channel. Its `mark_unread` is the
-    /// thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
+    /// starter row (the thread's ID and the row's) answers for the message it shows, in that
+    /// message's channel: requests take the IDs of [`Store::shown_message`]. It allows no reply:
+    /// one sent in the thread can't name a message of the parent channel. Its `mark_unread` is
+    /// the thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
     /// row's own IDs.
     pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
         let now = self.now_millis();
@@ -1723,7 +1721,7 @@ impl Store {
     /// none or isn't loaded. Read again on `MessageReactionsChanged`, and with the message
     /// itself on `MessageUpdated`. A viewed thread's starter row answers for the message it
     /// shows, a forum post's ID in both places for its first message, and a message only the
-    /// pins list has as there (`PinsChanged`).
+    /// pins list has answers there too (read again on `PinsChanged`).
     pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
         self.read(|inner| inner.state.reactions(channel, message))
     }
@@ -1747,12 +1745,8 @@ impl Store {
         self.read(|inner| inner.state.pins_unread(channel, now))
     }
 
-    /// The channel's pinned messages as loaded in their own list, the newest pin first:
-    /// [`Account::load_pins`](crate::Account::load_pins) and
-    /// [`load_more_pins`](crate::Account::load_more_pins) fill it a page at a time, the gateway
-    /// keeps it current (edits, reactions, deletes, pins and unpins), and a new session leaves
-    /// it shown but `NotLoaded`. `PinsChanged` says to read it again. Only the 10 channels whose
-    /// pins were asked for last keep their list.
+    /// The channel's pinned messages, the newest pin first, a page at a time from
+    /// [`Account::load_pins`](crate::Account::load_pins); read it again on `PinsChanged`.
     pub fn pins(&self, channel: ChannelId) -> PinsPage {
         self.read(|inner| inner.state.pins(channel))
     }

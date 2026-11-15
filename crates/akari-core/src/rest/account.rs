@@ -829,7 +829,6 @@ impl AccountRest {
         Ok(Reactors { users, received })
     }
 
-    // Newest pin first; a pin that doesn't decode is skipped.
     pub(crate) async fn list_pins(
         &self,
         channel: ChannelId,

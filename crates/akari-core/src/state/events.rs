@@ -71,8 +71,7 @@ pub enum StoreEvent {
     PinsUnreadChanged {
         channel_id: ChannelId,
     },
-    /// The channel's pins list changed: a page began, came, failed or was given up, a pin came
-    /// or went, a pinned message changed, or a new session left it to be asked for again. Read
+    /// The channel's pins list changed (a page, a pin, a pinned message, a new session): read
     /// [`Store::pins`](super::Store::pins) again.
     PinsChanged {
         channel_id: ChannelId,
