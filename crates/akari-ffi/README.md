@@ -429,10 +429,11 @@ host shows: `TooMany` (the official client's alert "We appreciate the enthusiasm
 and `Request { error }` for the rest.
 
 `remove_reaction(channel_id, message_id, emoji, kind, user_id)` is the reactions window's ✕:
-`kind` is the tab's (`Normal` or `Burst`). The user's own row goes as `unreact` does, at once;
-anyone else's needs `MessageActions.remove_reactions`, and the store changes when the gateway
-says so, as for `remove_reactions(channel_id, message_id, emoji)`, which removes every reaction
-with one emoji, or all of them with `nil`.
+`kind` is the tab's (`Normal` or `Burst`). The user's own row goes as `unreact` does, at once,
+taking that kind only (a kind that isn't theirs asks nothing); anyone else's needs
+`MessageActions.remove_reactions`, and the store changes when the gateway says so, as for
+`remove_reactions(channel_id, message_id, emoji)`, which removes every reaction with one emoji,
+or all of them with `nil`.
 
 `reactors(channel_id, message_id, emoji, kind, after, limit)` asks Discord for the users who
 reacted: a `ReactorsPage` with `users` (`User` records, with the avatar key) in Discord's order

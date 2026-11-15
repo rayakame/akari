@@ -192,9 +192,9 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// Removes `user_id`'s reaction (the reactions window's ✕); the store changes when the
-    /// gateway says so. The user's own goes as `unreact` does; anyone else's needs
-    /// `MessageActions.remove_reactions`, else `InvalidRequest` before asking.
+    /// Removes `user_id`'s reaction of `kind` (the reactions window's ✕). The user's own goes as
+    /// `unreact` does, that kind only; anyone else's needs `MessageActions.remove_reactions`,
+    /// else `InvalidRequest` before asking, and the store changes when the gateway says so.
     pub async fn remove_reaction(
         &self,
         channel_id: ChannelId,
