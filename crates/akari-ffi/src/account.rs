@@ -6,7 +6,9 @@ use akari_core::model::{
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
-use crate::errors::{CreateThreadError, GatewayError, ImageError, ReactionError, RequestError};
+use crate::errors::{
+    CreateThreadError, EditError, GatewayError, ImageError, ReactionError, RequestError,
+};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::{
     EmojiSource, ForumView, LoadReport, MarkOutcome, ReactionEmoji, ReactorsPage, SourceGuild,
@@ -637,6 +639,52 @@ impl Account {
     /// Drops a failed message.
     pub fn discard_message(&self, channel_id: ChannelId, pending_id: MessageId) {
         self.core.discard_message(channel_id, pending_id);
+    }
+
+    /// Saves `content` as the new text of the message the row shows (a thread's starter row
+    /// edits the parent's message). Every place shows it at once with `Message.edit` `Pending`
+    /// (`MessageUpdated`) until Discord's answer or its echo, whichever comes first; a refusal
+    /// shows Discord's text again and leaves `Failed` with the saved text and the reason, which
+    /// the error repeats. A save while one runs replaces it, and that call returns without an
+    /// error. Text the message shows already sends nothing. `Request { InvalidRequest }` before
+    /// asking where `MessageActions.edit` says no, or for blank text on a message without
+    /// attachments or stickers (offer to delete it instead); `Request { TooLong }` past
+    /// `Store::message_length_limit`.
+    pub async fn edit_message(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        content: String,
+    ) -> Result<(), EditError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.edit_message(channel_id, message_id, &content).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Deletes the message the row shows. A failed send goes at once, without a request
+    /// (`MessageDeleted`). Any other has `Message.deleting` (dim the row) until Discord
+    /// answers, then goes everywhere (`MessageDeleted`); a refusal undims it and is returned.
+    /// `InvalidRequest` where `MessageActions.delete` says no.
+    pub async fn delete_message(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+    ) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.delete_message(channel_id, message_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Forgets a refused edit (by the message's own IDs): the editor took its text back, or the
+    /// user gave it up. Nothing for an edit on its way.
+    pub fn dismiss_edit(&self, channel_id: ChannelId, message_id: MessageId) {
+        self.core.dismiss_edit(channel_id, message_id);
     }
 }
 
