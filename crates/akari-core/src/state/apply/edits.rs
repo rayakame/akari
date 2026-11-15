@@ -197,12 +197,9 @@ impl State {
         if !self.message_actions(channel, row, now_millis).delete {
             return None;
         }
-        let failed = self.messages(channel).is_some_and(|window| {
-            window
-                .pending
-                .iter()
-                .any(|message| message.id == row && message.delivery == Delivery::Failed)
-        });
+        let failed = self
+            .acted_on(channel, row)
+            .is_some_and(|message| message.delivery == Delivery::Failed);
         if failed {
             self.windows.discard(channel, row, events);
             return Some(DeleteStart::Discarded);
