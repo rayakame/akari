@@ -108,6 +108,18 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
         return ReactorsPage(users: [person(5, "Ann", "ann")], hasMore: false)
     }
 
+    let editCalls = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+    override func editMessage(channelId: ChannelId, messageId: MessageId, content: String) async throws {
+        editCalls.withLock { $0.append("edit \(messageId.rawValue): \(content)") }
+    }
+
+    override func deleteMessage(channelId: ChannelId, messageId: MessageId) async throws {
+        editCalls.withLock { $0.append("delete \(messageId.rawValue)") }
+    }
+
+    override func dismissEdit(channelId: ChannelId, messageId: MessageId) {}
+
     override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
         formattedStore.channel(id: threadId) != nil
     }
@@ -376,10 +388,18 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     /// Set: every message can be answered, with the ping and its switch.
     let answerable = OSAllocatedUnfairLock(initialState: false)
 
+    /// Set: every message is the user's to edit and delete.
+    let editable = OSAllocatedUnfairLock(initialState: false)
+
+    override func newestEditableMessage(channelId: ChannelId) -> MessageId? {
+        editable.withLock { $0 } && has(channelId) ? newest(of: channelId) : nil
+    }
+
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        let edits = editable.withLock { $0 }
         var actions = testMessageActions(
             createThread: canStartThread(channelId: channelId, messageId: messageId),
-            reply: answerable.withLock { $0 })
+            reply: answerable.withLock { $0 }, edit: edits, delete: edits)
         let reacts = reactable.withLock { $0 }
         actions.react = reacts
         actions.toggleReaction = reacts
