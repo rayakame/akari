@@ -15,6 +15,8 @@ use crate::subscription::StoreEvent;
 
 const WAVE: u64 = 700_000_000_000_000_001;
 const DANCE: u64 = 700_000_000_000_000_002;
+const LOST: u64 = 700_000_000_000_000_003;
+const SUBS: u64 = 700_000_000_000_000_004;
 const NEWEST: EmojiVersion = EmojiVersion {
     major: 18,
     minor: 0,
@@ -58,9 +60,21 @@ fn emojis_of(emoji: &str) -> Vec<&'static str> {
 fn the_catalog_crosses_in_its_groups() {
     let groups = unicode_emoji(NEWEST);
 
-    assert_eq!(groups.len(), 9);
-    assert_eq!(groups[0].group, EmojiGroup::SmileysAndEmotion);
-    assert_eq!(groups[8].group, EmojiGroup::Flags);
+    let order: Vec<EmojiGroup> = groups.iter().map(|group| group.group).collect();
+    assert_eq!(
+        order,
+        [
+            EmojiGroup::SmileysAndEmotion,
+            EmojiGroup::PeopleAndBody,
+            EmojiGroup::AnimalsAndNature,
+            EmojiGroup::FoodAndDrink,
+            EmojiGroup::TravelAndPlaces,
+            EmojiGroup::Activities,
+            EmojiGroup::Objects,
+            EmojiGroup::Symbols,
+            EmojiGroup::Flags,
+        ]
+    );
     let up = groups[1]
         .emojis
         .iter()
@@ -141,6 +155,8 @@ async fn the_pickers_reads_cross() {
             ready["guilds"][0]["emojis"] = json!([
                 {"id": WAVE.to_string(), "name": "wave"},
                 {"id": DANCE.to_string(), "name": "dance", "animated": true},
+                {"id": LOST.to_string(), "name": "lost", "available": false},
+                {"id": SUBS.to_string(), "name": "subs", "roles": ["500000000000000009"]},
             ]);
         })
         .await;
@@ -150,21 +166,32 @@ async fn the_pickers_reads_cross() {
     let sections = store.custom_emoji_sections(GENERAL);
     assert_eq!(sections.len(), 1);
     assert_eq!(sections[0].guild_id, GUILD);
-    let listed: Vec<(String, EmojiAccess)> = sections[0]
-        .emojis
-        .iter()
-        .map(|emoji| (emoji.name.clone(), emoji.access))
-        .collect();
+    let custom = |id: u64, name: &str, animated: bool, access: EmojiAccess| CustomEmoji {
+        id: EmojiId::new(id),
+        guild_id: GUILD,
+        name: name.to_owned(),
+        animated,
+        key: ImageKey::Emoji {
+            emoji_id: EmojiId::new(id),
+            animated,
+        },
+        access,
+    };
     assert_eq!(
-        listed,
+        sections[0].emojis,
         [
-            ("wave".to_owned(), EmojiAccess::Usable),
-            ("dance".to_owned(), EmojiAccess::NitroLocked)
+            custom(WAVE, "wave", false, EmojiAccess::Usable),
+            custom(DANCE, "dance", true, EmojiAccess::NitroLocked),
+            custom(LOST, "lost", false, EmojiAccess::Unavailable),
         ]
     );
     assert_eq!(
         store.emoji_access(GENERAL, EmojiId::new(WAVE)),
         Some(EmojiAccess::Usable)
+    );
+    assert_eq!(
+        store.emoji_access(GENERAL, EmojiId::new(SUBS)),
+        Some(EmojiAccess::RoleLocked)
     );
     assert_eq!(store.emoji_access(GENERAL, EmojiId::new(9)), None);
     assert_eq!(
