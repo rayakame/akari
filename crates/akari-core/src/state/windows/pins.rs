@@ -324,7 +324,6 @@ impl Windows {
         }
     }
 
-    // The channel's newest pin time names the newest pin the gateway placed without one.
     pub(crate) fn name_pin(
         &mut self,
         channel: ChannelId,
@@ -450,8 +449,7 @@ impl Windows {
         }
     }
 
-    // A new session may have missed pins and unpins: every list is asked for again, its pins
-    // shown meanwhile, and a page asked before is dropped.
+    // A new session may have missed pins and unpins.
     pub(super) fn stale_pins(&mut self, events: &mut Vec<StoreEvent>) {
         let mut channels: Vec<ChannelId> = self.pins.keys().copied().collect();
         channels.sort_unstable();
@@ -534,8 +532,7 @@ fn take_current_reactions(
     took
 }
 
-// The page takes the place of the pins whose times it covers: from its last pin's time up to
-// `before`, or everything older when Discord has no more.
+// Pin times say which of the list's pins a page answers for.
 fn reconcile(
     list: &mut PinsList,
     ask: PinsAsk,
