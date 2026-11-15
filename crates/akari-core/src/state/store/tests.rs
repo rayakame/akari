@@ -2311,12 +2311,15 @@ fn note_reaction(store: &Store, emoji: &str) {
     });
 }
 
-fn quick_names(store: &Store) -> Vec<String> {
-    store
-        .quick_reactions(general(), crate::emoji::EmojiVersion::NEWEST)
+fn picker_names(emojis: &[PickerEmoji]) -> Vec<String> {
+    emojis
         .iter()
         .map(|emoji| emoji.name().into_owned())
         .collect()
+}
+
+fn quick_names(store: &Store) -> Vec<String> {
+    picker_names(&store.quick_reactions(general(), crate::emoji::EmojiVersion::NEWEST))
 }
 
 // The emoji the user reacts with are Akari's, not READY's: the pump's READY keeps them, one noted
@@ -2372,5 +2375,35 @@ fn search_finds_the_users_custom_emoji_and_unicodes() {
         store
             .search_emoji(general(), "::", crate::emoji::EmojiVersion::NEWEST, 10)
             .is_empty()
+    );
+}
+
+// 🫩 came with Emoji 16.0: a host whose font stops at 15.1 never gets it, one at 16.0 does.
+#[test]
+fn the_hosts_version_reaches_every_read() {
+    let store = ready_store();
+    note_reaction(&store, "🫩");
+    let bags = "face_with_bags_under_eyes";
+
+    let older = crate::emoji::EmojiVersion::new(15, 1);
+    assert_eq!(
+        picker_names(&store.quick_reactions(general(), older)),
+        ["100", "laughing", "sparkling_heart"]
+    );
+    assert!(store.recent_reactions(general(), older).is_empty());
+    assert!(store.search_emoji(general(), bags, older, 10).is_empty());
+
+    let drawn = crate::emoji::EmojiVersion::new(16, 0);
+    assert_eq!(
+        picker_names(&store.quick_reactions(general(), drawn))[0],
+        bags
+    );
+    assert_eq!(
+        picker_names(&store.recent_reactions(general(), drawn)),
+        [bags]
+    );
+    assert_eq!(
+        picker_names(&store.search_emoji(general(), bags, drawn, 10)),
+        [bags]
     );
 }

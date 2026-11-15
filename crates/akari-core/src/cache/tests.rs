@@ -817,11 +817,11 @@ fn the_settings_tables_exist() {
     }
 }
 
-// Their attachments (before 6) and embeds (before 7) have no scan version, which would cover
-// their media as pending scans; before 8 a reply has no line and a message no reactions.
+// Before 6 attachments and before 7 embeds have no scan version (their media would wait as
+// pending scans), before 8 replies no line and messages no reactions, before 9 emoji no names.
 #[test]
 fn files_from_before_media_kept_their_scans_are_discarded() {
-    for version in [4, 5, 6, 7] {
+    for version in [4, 5, 6, 7, 8] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());
