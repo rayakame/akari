@@ -228,6 +228,68 @@ final class EditModelTests {
     }
 
     @Test
+    func aSaveOfExactlyTheLimitGoes() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = String(repeating: "a", count: 2000)
+
+        list.editor.save()
+        await finished(list.editor.saving)
+
+        #expect(list.editor.editing == nil)
+        #expect(edits.count == 1)
+    }
+
+    // Trimmed away from the reader: the message may still be there, so the edit stays open.
+    @Test
+    func aSaveOfAMessageTheListNoLongerShowsClosesTheEditorAndSendsNothing() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "changed"
+        store.update { $0.windows[id(10)] = window([102, 103]) }
+        list.apply(EventBatch([.messagesTrimmed(channelId: here, first: id(102), last: id(103))]))
+        #expect(list.editor.editing != nil)
+
+        list.editor.save()
+        await finished(list.editor.saving)
+
+        #expect(list.editor.editing == nil)
+        #expect(edits.isEmpty)
+    }
+
+    @Test
+    func anEmptiedSaveOfAStickerWithTextSavesNoText() async throws {
+        store.update { state in
+            state.messages[id(103)]?.attachments = []
+            state.messages[id(103)]?.content = "caption"
+            state.messages[id(103)]?.stickers = [
+                Sticker(id: id(7), name: "wave", format: .png, key: .sticker(stickerId: id(7), format: .png))
+            ]
+        }
+        let list = list()
+        list.editor.start(try row(103, in: list))
+        list.editor.text = ""
+
+        list.editor.save()
+        await finished(list.editor.saving)
+
+        #expect(edits == [.edit(here, id(103), "")])
+        #expect(deleteAsked.isEmpty)
+    }
+
+    @Test
+    func theTooLongReasonStaysAcrossAChannelSwitch() throws {
+        let first = list()
+        first.editor.start(try row(101, in: first))
+        first.editor.text = String(repeating: "a", count: 2001)
+        first.editor.save()
+
+        let back = list()
+
+        #expect(back.editor.editing?.problem == .tooLong(by: 1, limit: 2000))
+    }
+
+    @Test
     func theCounterShowsFromATenthOfTheLimit() throws {
         let list = list()
         list.editor.start(try row(101, in: list))
@@ -376,6 +438,90 @@ final class EditModelTests {
 
         #expect(list.editor.editing?.problem == .refused(.Request(error: .InvalidRequest)))
         #expect(list.editor.text == "new")
+    }
+
+    @Test
+    func aRefusalOpensWithANewSession() {
+        let list = list()
+        store.update { state in
+            state.messages[id(102)]?.edit = .failed(content: "saved", error: .Forbidden)
+        }
+
+        list.apply(EventBatch([.ready]))
+
+        #expect(list.editor.editing?.messageId == id(102))
+    }
+
+    @Test
+    func aRefusalOfAMessageALoadBringsOpens() {
+        store.update { state in
+            state.windows[id(10)] = window([102, 103], oldest: false)
+            state.messages[id(101)]?.edit = .failed(content: "saved", error: .Forbidden)
+        }
+        let list = list()
+        #expect(list.editor.editing == nil)
+
+        store.update { $0.windows[id(10)] = window([100, 101, 102, 103]) }
+        list.apply(EventBatch([.messagesLoaded(channelId: here, first: id(100), last: id(101))]))
+
+        #expect(list.editor.editing?.messageId == id(101))
+    }
+
+    @Test
+    func theNewestRefusalOpensFirst() {
+        store.update { state in
+            state.messages[id(101)]?.edit = .failed(content: "older", error: .Forbidden)
+            state.messages[id(102)]?.edit = .failed(content: "newer", error: .Forbidden)
+        }
+
+        let list = list()
+
+        #expect(list.editor.editing?.messageId == id(102))
+        list.editor.cancel()
+        #expect(list.editor.editing?.messageId == id(101))
+    }
+
+    // The editor took the refusal; a row read before the core forgot it still shows `.failed`.
+    @Test
+    func anEditOfARowReadBeforeTheCoreForgotATakenRefusalTakesTheMessagesText() throws {
+        store.update { state in
+            state.messages[id(101)]?.edit = .failed(content: "saved", error: .Forbidden)
+        }
+        let list = list()
+        #expect(list.editor.editing?.messageId == id(101))
+        let stale = try row(101, in: list)
+
+        list.editor.cancel()
+        list.editor.start(stale)
+
+        #expect(list.editor.text == "my first")
+        #expect(list.editor.editing?.problem == nil)
+    }
+
+    @Test
+    func aLaterSavesRefusalOpensAgainThoughTheEarlierOneWasTaken() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "rude words"
+        account.editError.withLock { $0 = .Forbidden }
+        list.editor.save()
+        await finished(list.editor.saving)
+        list.editor.cancel()
+
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "rude again"
+        account.holdEdits.withLock { $0 = true }
+        list.editor.save()
+        try await eventually { self.edits.filter { if case .edit = $0 { true } else { false } }.count == 2 }
+        store.update { state in
+            state.messages[id(101)]?.edit = .failed(content: "rude again", error: .Forbidden)
+        }
+        list.apply(updated(101))
+
+        #expect(list.editor.editing?.messageId == id(101))
+        #expect(list.editor.text == "rude again")
+        account.editReplies.send(())
+        await finished(list.editor.saving)
     }
 
     @Test
@@ -710,6 +856,18 @@ struct EditProblemTests {
         #expect(text(.refused(.TooManyEdits(retryAfter: 61))) == start + "2 minutes.")
         #expect(text(.refused(.TooManyEdits(retryAfter: 30))) == start + "1 minute.")
         #expect(text(.refused(.TooManyEdits(retryAfter: nil))) == start + "1 minute.")
+        #expect(text(.refused(.TooManyEdits(retryAfter: 0))) == start + "1 minute.")
+    }
+
+    @Test
+    func aRateLimitsWaitIsSaidInSecondsThenMinutes() {
+        let wait = { (seconds: TimeInterval) in
+            self.text(.refused(.RateLimited(retryAfter: seconds)))
+        }
+        #expect(wait(1) == "You're editing too quickly. Try again in 1 second.")
+        #expect(wait(59) == "You're editing too quickly. Try again in 59 seconds.")
+        #expect(wait(60) == "You're editing too quickly. Try again in 1 minute.")
+        #expect(wait(90) == "You're editing too quickly. Try again in 2 minutes.")
     }
 
     @Test
@@ -727,5 +885,9 @@ struct EditProblemTests {
                 == "Discord refused this edit as too long or malformed.")
         #expect(text(.refused(.Request(error: .TooLong(limit: 2000)))) == "This message is longer than 2,000 characters.")
         #expect(text(.refused(.Request(error: .Closed))) == "Akari isn't connected. Reconnect to edit messages.")
+        #expect(
+            text(.refused(.Request(error: .Discord(status: 400, code: 50006, message: "Cannot send an empty message"))))
+                == "Discord refused this edit: Cannot send an empty message")
+        #expect(text(.refused(.Request(error: .InvalidRequest))) == "This message can't be edited now.")
     }
 }

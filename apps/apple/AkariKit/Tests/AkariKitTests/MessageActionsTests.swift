@@ -208,6 +208,21 @@ final class MessageActionsTests {
         #expect(deleteQuestions.isEmpty)
     }
 
+    // The core maps a starter row's IDs to the message it shows.
+    @Test
+    func aStarterRowsDeleteGoesWithTheRowsOwnIds() async throws {
+        store.update { $0.channels[id(31)] = thread(31, in: 11) }
+        let starter = MessageListModel.Row(
+            id: id(31), message: message(31, in: 31, kind: .threadStarterMessage),
+            starter: .loaded(message(7, in: 11)))
+        store.update { $0.allow(allowed(delete: true), message: 31, in: 31) }
+
+        model().perform(.delete, on: starter, shift: true, from: .menu)
+
+        try await eventually { self.store.log.calls.contains(.delete(id(31), id(31))) }
+        #expect(!store.log.calls.contains(.delete(id(11), id(7))))
+    }
+
     @Test
     func aFailedSendGoesWithoutAQuestionOrARequest() {
         let failed = row(100, allowed(delete: true), delivery: .failed)
@@ -724,6 +739,21 @@ final class SessionMessageActionsTests {
         session.open(channel: id(11))
 
         #expect(session.messages?.editor.editing == nil)
+        session.close()
+    }
+
+    @Test
+    func anEmptiedEditsRefusedDeleteAlerts() async throws {
+        let list = try ownMessages()
+        account.deleteError.withLock { $0 = .Network(kind: .connect) }
+        list.editor.start(try #require(list.rows.last))
+        list.editor.text = ""
+        list.editor.save()
+
+        session.answerDeleteQuestion(true)
+
+        try await eventually { self.session.messageActionFailure != nil }
+        #expect(session.messageActionFailure?.title == "Couldn't Delete Message")
         session.close()
     }
 
