@@ -76,6 +76,24 @@ struct DeleteMessageTests {
         #expect(frame.height == height - 20)
         let text = try #require(descendants(of: box).compactMap { $0 as? MessageTextView }.first { !$0.isHidden })
         #expect(box.convert(text.bounds, from: text).minX == 72)
+        #expect(box.convert(text.bounds, from: text).maxY <= height - 10 + 0.5, "inside the room it counts")
+    }
+
+    @Test
+    func theBoxShowsTheListsNameTheReplyLineAndTheSessionsImages() throws {
+        let box = MessagePreviewBox()
+        let base = replyRow(2, at: noon, content: "goodbye", to: 1, target())
+        let message = MessageListModel.Row(
+            id: base.id, message: base.message, authorName: "Nick", reply: base.reply)
+        let images = ImageCache(source: FakeImageSource.serving(URL(filePath: "/nonexistent"), pixels: 1))
+        box.show(message, images: images)
+        _ = shown(box, height: MessagePreviewBox.height(of: message, width: 440))
+
+        #expect(box.preview.cell.images === images)
+        #expect(!box.preview.cell.replyLine.isHiddenOrHasHiddenAncestor)
+        let names = descendants(of: box).compactMap { $0 as? NSTextField }.map(\.stringValue)
+            + descendants(of: box).compactMap { $0 as? NSTextView }.map(\.string)
+        #expect(names.contains { $0.contains("Nick") })
     }
 
     @Test
@@ -92,6 +110,9 @@ struct DeleteMessageTests {
         #expect(view.box.frame.height >= DeleteLayout.minimumBox)
         let scroll = try #require(view.box.subviews.first as? NSScrollView)
         #expect(try #require(scroll.documentView).frame.height > scroll.contentSize.height)
+        #expect(
+            try #require(scroll.documentView).frame.height == MessagePreviewBox.height(of: long, width: 392),
+            "the row and its 10 above and below")
     }
 
     @Test
@@ -123,6 +144,52 @@ struct DeleteMessageTests {
 
         view.show(question(message, tip: false), images: nil, maxHeight: 800)
         #expect(view.tip.isHidden, "the bar's question has no tip")
+    }
+
+    @Test
+    func theButtonsAreTheOfficialModalsAndTheQuestionHasItsVoiceOverLabel() throws {
+        let message = row(1, at: noon, content: "goodbye")
+        let view = DeleteMessageView()
+        let height = view.height(for: question(message, tip: false), width: 440, maxHeight: 800)
+        view.show(question(message, tip: false), images: nil, maxHeight: 800)
+        _ = shown(view, height: height)
+        func fill(_ button: PanelButton) -> CGColor? {
+            button.displayIfNeeded()
+            return button.layer?.backgroundColor
+        }
+        func resolved(_ color: NSColor, in button: NSView) -> CGColor? {
+            var cg: CGColor?
+            button.effectiveAppearance.performAsCurrentDrawingAppearance { cg = color.cgColor }
+            return cg
+        }
+
+        #expect(fill(view.delete) == resolved(Palette.danger, in: view.delete))
+        #expect(fill(view.cancel) == resolved(Palette.backgroundModNormal, in: view.cancel))
+        let title = view.delete.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+        #expect(title as? NSColor == .white)
+        #expect(view.cancel.frame.width >= 100 && view.delete.frame.width >= 100)
+        #expect(view.cancel.frame.maxX == view.delete.frame.minX - 12)
+        #expect(view.accessibilityLabel() == "Delete Message")
+
+        let event = try #require(NSEvent.mouseEvent(
+            with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+        view.delete.mouseEntered(with: event)
+        #expect(fill(view.delete) == resolved(Palette.dangerHover, in: view.delete))
+        view.delete.mouseExited(with: event)
+        #expect(fill(view.delete) == resolved(Palette.danger, in: view.delete))
+    }
+
+    @Test
+    func aTallMessagesQuestionKeepsToTheWindowWithTheTipAndShowsAtLeast80OfIt() throws {
+        let long = row(1, at: noon, content: String(repeating: "a long message that wraps ", count: 120))
+        let view = DeleteMessageView()
+
+        #expect(view.height(for: question(long, tip: true), width: 440, maxHeight: 400) <= 400)
+        #expect(DeleteLayout.frame(for: question(long, tip: true), in: CGSize(width: 1200, height: 600)).height <= 520)
+        view.show(question(long, tip: false), images: nil, maxHeight: 200)
+        _ = shown(view, height: view.height(for: question(long, tip: false), width: 440, maxHeight: 200))
+        #expect(view.box.frame.height == DeleteLayout.minimumBox)
     }
 
     @Test

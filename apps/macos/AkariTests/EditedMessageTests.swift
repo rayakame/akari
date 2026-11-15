@@ -88,6 +88,25 @@ struct EditedMessageTests {
         #expect(tip as? String == MessageFormat.fullDate(list.noon + 60, calendar: berlin, locale: .current))
     }
 
+    @Test
+    func aThreadsBoxComesAfterTheEditedMarkOfAMessageWithoutText() throws {
+        let list = MessageListFixture()
+        let base = row(1, at: list.noon, content: "", stickers: ["wave"], edited: list.noon + 60)
+        let shown = MessageListModel.Row(
+            id: base.id, message: base.message,
+            threadBox: ThreadBox(
+                threadId: ChannelId(rawValue: 20), name: "t1", link: "2 Messages ›",
+                bottom: .noRecentMessages, time: list.noon))
+        list.show([shown])
+        let cell = try #require(list.table.view(atColumn: 0, row: list.index(of: 1), makeIfNecessary: true) as? MessageCell)
+        cell.layoutSubtreeIfNeeded()
+
+        let extras = try #require(textViews(in: cell).first { !$0.isHiddenOrHasHiddenAncestor && $0.string.contains("(edited)") })
+        let box = try #require(ThreadBoxViewTests.boxView(in: cell))
+        func top(_ view: NSView) -> CGFloat { cell.convert(view.bounds, from: view).maxY }
+        #expect(top(box) < top(extras), "the box under \"(edited)\"")
+    }
+
     func changed(_ row: MessageListModel.Row, _ change: (inout Message) -> Void) -> MessageListModel.Row {
         var message = row.message
         change(&message)
@@ -132,6 +151,8 @@ struct EditedMessageTests {
 
         let dimmed = try cell(1)
         #expect(dimmed.subviews.contains { $0.alphaValue == MessageCell.deletingAlpha })
+        let avatar = try #require(dimmed.subviews.first { $0 is ImageLayerView })
+        #expect(avatar.alphaValue == MessageCell.deletingAlpha, "the avatar too")
         #expect(try cell(2).subviews.allSatisfy { $0.alphaValue == 1 })
 
         list.show([changed(going) { $0.deleting = false }, row(2, at: list.noon + 10)])

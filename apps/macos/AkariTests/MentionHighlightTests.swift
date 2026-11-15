@@ -112,6 +112,17 @@ struct MentionHighlightTests {
         #expect(try matches(try pixel(cell, x: 560), [Palette.hoverBackground]))
     }
 
+    // The reply's tint takes the hover's place: its hovered color while the row is edited.
+    @Test
+    func anEditedReplyTargetHasTheRepliesLitTint() throws {
+        let cell = cell(mentioned: false)
+        cell.isReplyTarget = true
+
+        cell.isEditing = true
+
+        #expect(try matches(try pixel(cell, x: 300), [Palette.replyingBackgroundHover]))
+    }
+
     // The official client keeps the 16 before a group outside the message, so two highlighted
     // groups in a row show a gap.
     @Test
