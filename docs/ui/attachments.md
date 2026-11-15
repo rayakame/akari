@@ -107,7 +107,8 @@ in the chat's color. They leave media under 40 pt, and only as many as fit show 
 - **Images and GIFs** show no Download. For the user's own messages Discord adds "Modify
   Attachment" (a pencil) and "Remove Message Attachment" (a trash can, red under the pointer);
   over a GIF its "GIF" badge (top left, 6 in) gives way to a star that adds it to the user's
-  favorite GIFs. *Akari edits no messages and keeps no favorite GIFs yet, so none of them show.*
+  favorite GIFs. *Akari changes no attachments and keeps no favorite GIFs yet, so none of them
+  show; an edit changes only a message's text ([edit-delete.md](edit-delete.md)).*
 
 ## Alt text
 

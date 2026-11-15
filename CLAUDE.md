@@ -113,8 +113,10 @@ UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, the composer with its pending reply
 (one per channel, the ping's switch, ended by the send, ✕, Escape and the answered message's
-deletion), what the line over a reply shows and the jump to the message it answers with the way
-back, the media viewer, the
+deletion), the edit of a message in its row (one per channel, kept with its text, Up arrow's
+pick, nothing sent unchanged, an emptied one asking to delete, a refusal opened again with the
+saved text and why) and the delete question, what the line over a reply shows and the jump to
+the message it answers with the way back, the media viewer, the
 forum page and its form for a new post, and what a message's hover bar and menu list: the
 official client's order for the plain and the Shift-held bar and the menu's groups as values,
 later features' places included, with Mark Unread moving the new messages line; a message's
@@ -177,6 +179,11 @@ switch, ✕), the answered row tinted and Escape cancelling it before anything i
 reply has the line about the message it answers over its header (the small avatar and the name,
 the text on one line, the official client's words for a deleted or not loaded one, the spine),
 whose click jumps to that message, and the bar over the list's bottom leads back to the reply;
+Edit in the bar and the menu and Up arrow in an empty composer open the editor in the text's
+place (the composer's box, Return saves, Escape cancels, the counter, the hint line's links, the
+row following its height with the reader's place kept), a saved edit and a delete are dimmed
+until Discord answers, "(edited)" has the edit's date as its tooltip, and Delete (the Shift-held
+bar, the menu) asks the official question with the message in its box unless Shift is held;
 the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and

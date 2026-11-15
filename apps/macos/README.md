@@ -23,8 +23,9 @@ header, list and composer; `docs/ui/layout.md`), the thread header's and the spl
 thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserContainers.swift`:
 the header's Threads button and its popout, the "See all threads" modal, and the channel list's
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
-`ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
-composer (a locked thread's banner), avatars and icons in every place (`docs/ui/images.md`), and a
+`ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), the
+composer (a locked thread's banner), editing a message in its row and deleting one after the
+official question (`docs/ui/edit-delete.md`), avatars and icons in every place (`docs/ui/images.md`), and a
 message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
 embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
 (`EmbedView.swift`, `docs/ui/embeds.md`), and the media viewer (`Viewer/`, `docs/ui/viewer.md`).
@@ -133,8 +134,19 @@ Voice, notifications and settings come later.
   changes a message's height or a message is deleted. A bar above the composer jumps to the
   present, and so does Escape, from the list or the composer (`docs/ui/message-list.md`); in the
   split view Escape does it for both lists (`PaneTables` reaches both tables).
-- **Up arrow** in an empty composer is reserved for editing the last message, which isn't
-  built yet.
+- **Editing and deleting** (`docs/ui/edit-delete.md`): Edit in the bar and the menu, and Up
+  arrow in an empty composer, open `MessageEditorView` in the row in the text's place: one per
+  list, owned by the table's controller and hosted by the edited row's cell, a `ComposerTextView`
+  on TextKit 1 in the composer's box, the counter, a refusal's reason and the hint line
+  (`EditorHint`, its links `EditorLink`). The row's height comes from the editor's own measure
+  (`height(width:)`), noted on every change of the text while the reader's place is kept; the
+  controller scrolls the row into view on opening, keeps the caret's line in sight and puts the
+  focus back after the row's updates. A saved edit is dimmed until Discord takes it, a delete
+  until it answers. "(edited)" carries the edit's date as its tooltip after the text, under a
+  code block and after the accessories. Delete in the Shift-held bar and the menu asks
+  `DeleteMessageView` (a key panel over the dimmed window, `DeleteMessage.swift`) unless Shift is
+  held; its message is a `MessagePreviewBox`, the non-interactive `MessagePreviewView` in the
+  official box, which the thread form shows selectable.
 - **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale
   changes.
 - **Formatting** (`docs/ui/markdown.md`): `MessageText` builds a message's attributed string

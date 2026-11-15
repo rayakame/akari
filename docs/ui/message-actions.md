@@ -193,7 +193,7 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 | 1 | up to 3 quick reactions, then a separator | `react` | yes: the user's most used, then 💯, 😆 and 💖 ([reactions.md](reactions.md#quick-reactions)) |
 | 2 | Add Reaction | `react` | yes: opens the emoji picker left of the bar ([emoji-picker.md](emoji-picker.md)) |
 | 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
-| 4 | Edit | `edit` | with editing |
+| 4 | Edit | `edit` | yes: opens the editor in the row ([edit-delete.md](edit-delete.md)) |
 | 5 | Forward | | left out |
 | 6 | Create Thread | `create_thread` | yes |
 | 7 | View Thread | `view_thread` | yes |
@@ -212,7 +212,7 @@ With **Shift held**, the bar changes at once, the pointer still, and back when S
 | 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
 | 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | yes |
 | 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
-| 9 | Delete | `delete`; no question asked | with deleting |
+| 9 | Delete | `delete`; no question asked | yes: deletes at once; with Shift let go at the click it asks first ([edit-delete.md](edit-delete.md#deleting)) |
 | 10 | More | only where Delete isn't | yes |
 
 The Shift key counts as it is at the click: a click on a button of the longer bar, and on a
@@ -226,7 +226,8 @@ menu item, reads it then.
   action on there and its button and menu item appear in their places.*
 - *The official client's letter keys on a message with keyboard focus (E, R, P, Backspace, +, F,
   T, Alt+Enter) are left out: Akari's rows take no keyboard focus yet. The bar's actions are
-  not VoiceOver custom actions of the row either; the rows have none.*
+  not VoiceOver custom actions of the row either; the rows have none. Up arrow in an empty
+  composer edits ([edit-delete.md](edit-delete.md#starting-an-edit)).*
 
 ## The message menu
 
@@ -238,9 +239,9 @@ client's order, with what Akari has in bold:
 | Group | Items |
 |---|---|
 | Reactions | **Add Reaction** (its submenu: up to twelve emoji, then "View More", the picker), **View Reactions** (a message with reactions) |
-| Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
+| Writing | **Edit Message**, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
-| Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red; today a failed send's only) |
+| Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red: asks first, with the Shift tip, unless Shift is held; a failed send goes at once; [edit-delete.md](edit-delete.md#deleting)) |
 | Developer | Copy Message ID (developer mode) |
 
 *Akari:*
