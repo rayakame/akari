@@ -687,10 +687,8 @@ impl Account {
         self.core.dismiss_edit(channel_id, message_id);
     }
 
-    /// Asks for the first page of the channel's pins (`Store::pins`, 25 a page) when its list
-    /// isn't loaded in this connection, its first page failed, or Discord named a pin newer than
-    /// the list has; otherwise nothing. Call it whenever the pins show and read `NotLoaded`: on
-    /// opening, and after a new session. A failure leaves the list `Failed` and is returned.
+    /// Asks for the first page of the channel's pins (`Store::pins`) where the list needs one; a
+    /// failure leaves it `Failed` and is returned. Call it whenever the list shows `NotLoaded`.
     pub async fn load_pins(&self, channel_id: ChannelId) -> Result<(), RequestError> {
         let core = self.core.clone();
         run(
@@ -712,9 +710,8 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// Pins the message the row shows (a thread's starter row pins the parent's message),
-    /// opening an archived thread first. Nothing changes until the gateway's update.
-    /// `Request { InvalidRequest }` before asking where `MessageActions.pin` says no.
+    /// Pins the message the row shows, opening an archived thread first; the store changes with
+    /// the gateway. Without `MessageActions.pin`: `Request { InvalidRequest }`, nothing asked.
     pub async fn pin(&self, channel_id: ChannelId, message_id: MessageId) -> Result<(), PinError> {
         let core = self.core.clone();
         run(self.runtime, async move {
@@ -739,9 +736,8 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// The user sees the channel's pins: while `Store::pins_unread` says so, the dot goes at once
-    /// and Discord is told (tried up to three times); nothing otherwise. Call it when the pins
-    /// show, and again on `PinsUnreadChanged` while they do.
+    /// Acks the channel's pins while `Store::pins_unread` says so: the dot goes at once. Call it
+    /// when the pins show, and again on `PinsUnreadChanged` while they do.
     pub fn ack_pins(&self, channel_id: ChannelId) {
         self.core.ack_pins(channel_id);
     }

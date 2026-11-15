@@ -33,7 +33,6 @@ fn message_json() -> Value {
     message
 }
 
-// Online with #general viewed and someone's message in its list.
 async fn pinning() -> Pinning {
     let server = MockServer::start().await;
     let gateway = FakeGateway::start().await;

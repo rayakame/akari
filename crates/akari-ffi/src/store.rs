@@ -571,10 +571,8 @@ impl Store {
         self.core.pins_unread(channel_id)
     }
 
-    /// The channel's pinned messages as loaded, the newest pin first: `Account::load_pins` and
-    /// `load_more_pins` fill it a page at a time, the gateway keeps it current, and a new
-    /// session leaves it shown but `NotLoaded`. `PinsChanged` says to read it again. Each
-    /// message's actions and reactions read by its IDs, as a list's do.
+    /// The channel's pinned messages, the newest pin first; read again on `PinsChanged`. A
+    /// message's actions and reactions are read by its own IDs, as a list's are.
     pub fn pins(&self, channel_id: ChannelId) -> PinsPage {
         let page = self.core.pins(channel_id);
         let names = Names::new(&self.core, channel_id);
