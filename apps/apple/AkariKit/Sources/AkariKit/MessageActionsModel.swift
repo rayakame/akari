@@ -65,6 +65,12 @@ public final class MessageActionsModel {
         /// From the menu: the tip that Shift skips the question.
         public let showsTip: Bool
         public let run: @MainActor () -> Void
+
+        public init(row: MessageListModel.Row, showsTip: Bool, run: @escaping @MainActor () -> Void) {
+            self.row = row
+            self.showsTip = showsTip
+            self.run = run
+        }
     }
 
     /// A question before something that can't be undone; `run` does it.
