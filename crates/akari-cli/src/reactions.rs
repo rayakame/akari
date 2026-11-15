@@ -49,7 +49,11 @@ fn reaction_error(err: &ReactionError, add: bool) -> String {
 }
 
 // The core acts only on a message it holds.
-async fn hold(account: &Account, channel: ChannelId, message: MessageId) -> Result<(), String> {
+pub(crate) async fn hold(
+    account: &Account,
+    channel: ChannelId,
+    message: MessageId,
+) -> Result<(), String> {
     let around = MessageLoad::Around {
         id: message,
         limit: 1,

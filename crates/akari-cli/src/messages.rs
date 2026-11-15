@@ -50,6 +50,15 @@ pub enum SessionCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
     },
+    /// Edit your message: the text it says from now on.
+    Edit {
+        channel_id: u64,
+        message_id: u64,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Delete a message: yours, or anyone's with Manage Messages.
+    Delete { channel_id: u64, message_id: u64 },
     /// React to a message. The emoji is the Unicode emoji itself or a custom one as `name:id`.
     React {
         channel_id: u64,
@@ -138,6 +147,21 @@ pub async fn run<S: Accounts>(
                 let reply = reply_to(reply, no_mention);
                 send(&session, channel, text.join(" "), reply).await
             }
+        }
+        SessionCommand::Edit {
+            channel_id,
+            message_id,
+            text,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            crate::edits::edit(&session.account, channel, message, &text.join(" ")).await
+        }
+        SessionCommand::Delete {
+            channel_id,
+            message_id,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            crate::edits::delete(&session.account, channel, message).await
         }
         SessionCommand::React {
             channel_id,

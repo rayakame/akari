@@ -2,6 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod connect;
+mod edits;
 mod emoji;
 mod host;
 mod image;
@@ -349,6 +350,33 @@ mod tests {
             Command::Session(SessionCommand::Unreact { emoji, .. }) if emoji == "wave:7"
         ));
         assert!(Cli::try_parse_from(["akari-cli", "react", "1", "2"]).is_err());
+    }
+
+    #[test]
+    fn edit_takes_the_new_text_and_delete_a_channel_and_a_message() {
+        let cli = Cli::try_parse_from(["akari-cli", "edit", "1", "2", "-", "new", "text"]).unwrap();
+        let Command::Session(SessionCommand::Edit {
+            channel_id,
+            message_id,
+            text,
+        }) = cli.command
+        else {
+            panic!("expected edit");
+        };
+        assert_eq!((channel_id, message_id), (1, 2));
+        assert_eq!(text, ["-", "new", "text"]);
+        assert!(Cli::try_parse_from(["akari-cli", "edit", "1", "2", ""]).is_ok());
+        assert!(Cli::try_parse_from(["akari-cli", "edit", "1", "2"]).is_err());
+
+        let cli = Cli::try_parse_from(["akari-cli", "delete", "1", "2"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Session(SessionCommand::Delete {
+                channel_id: 1,
+                message_id: 2
+            })
+        ));
+        assert!(Cli::try_parse_from(["akari-cli", "delete", "1"]).is_err());
     }
 
     #[test]
