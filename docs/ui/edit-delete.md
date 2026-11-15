@@ -71,8 +71,8 @@ attachments, embeds, stickers, reactions and the thread's box. The text gives wa
 - The arrows move the caret; Up in an empty editor does nothing.
 - Escape from the composer or the list ends an open edit first, before a pending reply and before
   marking anything read. In the split view each pane is done whole before the other: the pane's
-  own edit, its own reply, then the other pane's edit and reply, so Escape never throws away
-  what was typed in the pane the user isn't in ([shortcuts.md](shortcuts.md)).
+  own edit, its own reply, then the other pane's edit and reply. The other pane's edit ends only
+  when the pane the key was pressed in has nothing open ([shortcuts.md](shortcuts.md)).
 
 ## Saving
 
