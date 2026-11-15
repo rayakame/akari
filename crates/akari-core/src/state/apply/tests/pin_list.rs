@@ -417,6 +417,168 @@ fn a_new_pin_of_a_message_the_window_shows_goes_to_the_front() {
         front.pinned_at.unix_millis() >= at(3),
         "never behind the list"
     );
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    assert_eq!(
+        more.unwrap().before.map(Timestamp::unix_millis),
+        Some(at(1)),
+        "the pages go on after the last one"
+    );
+}
+
+// This device's clock may be behind Discord's.
+#[test]
+fn a_new_pin_is_never_placed_behind_the_newest_one() {
+    let mut state = ready_state();
+    let future = at(60 * 24 * 365 * 100);
+    let ahead = json!({"pinned_at": iso(future), "message": pinned(3, GENERAL)});
+    load(&mut state, PinsLoad::First, &[ahead], false);
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    whole(&mut state, 10, true, "hi");
+
+    let page = page(&state);
+    assert_eq!(listed(&state), [10, 3]);
+    assert!(page.items[0].pinned_at >= page.items[1].pinned_at);
+}
+
+#[test]
+fn a_deleted_pin_leaves_the_pages_going_on_after_the_last_one() {
+    let mut state = three_pins();
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": "3", "channel_id": GENERAL.to_string()}),
+    );
+
+    let (more, _) = begin(&mut state, PinsLoad::More);
+
+    assert_eq!(
+        more.unwrap().before.map(Timestamp::unix_millis),
+        Some(at(1))
+    );
+}
+
+#[test]
+fn a_reload_for_a_newer_pin_keeps_the_pages_after_it() {
+    let mut state = three_pins();
+    last_pin(&mut state, 4);
+
+    load(&mut state, PinsLoad::First, &[pin(4, 4), pin(3, 3)], true);
+
+    assert_eq!(listed(&state), [4, 3, 2, 1]);
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    assert_eq!(
+        more.unwrap().before.map(Timestamp::unix_millis),
+        Some(at(1))
+    );
+}
+
+#[test]
+fn a_new_session_asks_nothing_more_after_its_first_page_failed() {
+    let mut state = three_pins();
+    apply(&mut state, "READY", ready_value());
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    state.fail_pins(ask.unwrap(), &mut Vec::new());
+
+    assert_eq!(page(&state).state, PinsState::Failed);
+    assert_eq!(listed(&state), [3, 2, 1], "an earlier connection's, shown");
+    assert!(begin(&mut state, PinsLoad::More).0.is_none());
+    assert!(begin(&mut state, PinsLoad::First).0.is_some());
+}
+
+#[test]
+fn a_page_leaves_out_a_message_of_another_channel_and_lists_its_own_as_pinned() {
+    let mut state = ready_state();
+    let mut unflagged = pin(3, 3);
+    unflagged["message"]
+        .as_object_mut()
+        .unwrap()
+        .remove("pinned");
+    let elsewhere = json!({"pinned_at": iso(at(2)), "message": pinned(2, VOICE)});
+
+    load(&mut state, PinsLoad::First, &[unflagged, elsewhere], false);
+
+    assert_eq!(listed(&state), [3]);
+    assert!(page(&state).items[0].message.pinned);
+}
+
+#[test]
+fn a_pinned_message_a_reply_names_answers_it_once_a_page_brings_it() {
+    let mut state = ready_state();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    let mut reply = message(20, GENERAL);
+    reply["type"] = 19.into();
+    reply["message_reference"] = json!({"message_id": "3", "channel_id": GENERAL.to_string()});
+    apply(&mut state, "MESSAGE_CREATE", reply);
+    assert_eq!(
+        state.reply_target(id(GENERAL), id(3)),
+        ReplyTarget::NotLoaded
+    );
+
+    load(&mut state, PinsLoad::First, &[pin(3, 3)], false);
+
+    assert!(matches!(
+        state.reply_target(id(GENERAL), id(3)),
+        ReplyTarget::Loaded(_)
+    ));
+}
+
+// A pin of an earlier connection may have missed reactions: the page's counts win.
+#[test]
+fn a_reload_after_a_new_session_takes_the_pages_counts() {
+    let mut state = three_pins();
+    react(&mut state, 3);
+    apply(&mut state, "READY", ready_value());
+
+    load(&mut state, PinsLoad::First, &[pin(3, 3)], false);
+
+    assert_eq!(fires(&state, 3), 0);
+}
+
+// A new session may have missed its unpin.
+#[test]
+fn a_pin_the_gateway_placed_before_a_new_session_waits_for_a_page() {
+    let mut state = three_pins();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    whole(&mut state, 10, true, "hi");
+    apply(&mut state, "READY", ready_value());
+
+    load(
+        &mut state,
+        PinsLoad::First,
+        &[pin(3, 3), pin(2, 2), pin(1, 1)],
+        false,
+    );
+
+    assert_eq!(listed(&state), [3, 2, 1]);
+}
+
+// Until a page of this connection lands, a pin not listed may be on a page not loaded yet.
+#[test]
+fn a_list_of_an_earlier_connection_isnt_complete() {
+    let mut state = ready_state();
+    load(&mut state, PinsLoad::First, &[pin(3, 3)], false);
+    apply(&mut state, "READY", ready_value());
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", pinned(10, GENERAL));
+
+    whole(&mut state, 10, true, "an edit of an old pin");
+
+    assert_eq!(listed(&state), [3]);
+}
+
+#[test]
+fn an_older_pin_time_names_no_pin() {
+    let mut state = three_pins();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    whole(&mut state, 10, true, "hi");
+
+    last_pin(&mut state, 2);
+
+    assert_ne!(page(&state).items[0].pinned_at.unix_millis(), at(2));
 }
 
 #[test]

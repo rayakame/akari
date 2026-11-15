@@ -344,7 +344,7 @@ async fn a_pin_the_message_doesnt_allow_is_refused_before_asking() {
 #[tokio::test]
 async fn each_refusal_of_a_pin_is_told_apart() {
     type Expected = fn(&PinError) -> bool;
-    let cases: [(ResponseTemplate, Expected); 8] = [
+    let cases: [(ResponseTemplate, Expected); 9] = [
         (
             refusal(400, 30003, "Maximum number of pins reached (250)"),
             |err| matches!(err, PinError::TooMany { limit: PIN_LIMIT }),
@@ -368,6 +368,9 @@ async fn each_refusal_of_a_pin_is_told_apart() {
             matches!(err, PinError::Forbidden)
         }),
         (refusal(403, 50013, "Missing Permissions"), |err| {
+            matches!(err, PinError::Forbidden)
+        }),
+        (refusal(403, 40333, "Something else"), |err| {
             matches!(err, PinError::Forbidden)
         }),
         (refusal(404, 10008, "Unknown Message"), |err| {
@@ -606,4 +609,45 @@ async fn a_refused_pins_ack_is_not_asked_again() {
     assert_eq!(ack_requests(&online, 1).await.len(), 1);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(online.lines().await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_rate_limited_pins_ack_is_asked_again_after_its_wait() {
+    let mut online = pinning().await;
+    Mock::given(method("POST"))
+        .and(path_regex("/pins/ack$"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(
+            json!({"message": "You are being rate limited.", "retry_after": 0.05, "global": false}),
+        ))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    online
+        .answer("POST", "/pins/ack$", ResponseTemplate::new(204))
+        .await;
+    unread_pins(&mut online).await;
+
+    online.account.ack_pins(general());
+
+    assert_eq!(ack_requests(&online, 2).await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_pin_answered_401_ends_the_session() {
+    let online = pinning().await;
+    online
+        .answer("PUT", "/pins/", ResponseTemplate::new(401))
+        .await;
+
+    let failed = online.account.pin(general(), target()).await;
+
+    assert!(
+        matches!(failed, Err(PinError::Request(RequestError::Unauthorized))),
+        "{failed:?}"
+    );
+    assert!(matches!(
+        online.account.store().connection(),
+        ConnectionState::Closed { .. }
+    ));
 }
