@@ -36,7 +36,8 @@ kept.
 - **System DM:** the DM with a system user. No reply, edit, pin or reaction there.
 - **Writable:** not a thread, or an active thread, or an archived thread that isn't locked and
   that the user's next message would reopen (they may send in it). An archived and locked thread
-  is writable for nobody, moderators included, until it is reopened.
+  is writable for nobody, moderators included, until it is reopened; only a moderator's (Manage
+  Threads) Edit and Delete reopen it first.
 - **Silenced:** timed out, or quarantined by AutoMod. Both leave a member only View Channel and
   Read Message History (the quarantine also Change Nickname), so everything below that asks for
   a permission is gone with them. The owner and administrators are exempt.
@@ -52,8 +53,8 @@ offers nothing: the client gives it no bar and no menu. For every other message:
 | `reply` | not the system DM; Send Messages and Read Message History (a private channel grants both); a replyable type. In a thread Send Messages already says whether the user may write there: an archived thread they could reopen takes a reply, a locked one only from a moderator (Manage Threads) |
 | `reply_pings` | `reply`, and the message isn't the user's own: the reply starts with the ping on. Shift at the click turns it off (the UI's part) |
 | `mention_toggle` | `reply`, not the user's own message, not a private channel: the reply bar has the "@" switch. Webhooks and bots are no exception |
-| `edit` | not the system DM; the user's own; a user message other than type 68; not a sticker alone (a sticker with text is edited); not a voice message; not a forward; writable; Send Messages, which in a locked thread only a moderator has. A message of attachments or embeds alone is edited |
-| `delete` | the user's own, or Manage Messages; writable; not an undeletable type; an AutoMod action (24) only with Manage Messages. A locked thread that is still active doesn't stop it |
+| `edit` | not the system DM; the user's own; a user message other than type 68; not a sticker alone (a sticker with text is edited); not a voice message; not a forward; writable; Send Messages, which in a locked thread only a moderator has. In an archived and locked thread, a moderator (Manage Threads): the core reopens it first. A message of attachments or embeds alone is edited |
+| `delete` | the user's own, or Manage Messages; writable, or an archived and locked thread and Manage Threads (reopened first); not an undeletable type; an AutoMod action (24) only with Manage Messages. A locked thread that is still active doesn't stop it |
 | `edit`, `delete` while deleting | *Akari:* neither, while the user's delete of the message waits for Discord's answer (`Store::deleting`) |
 | `pin` / `unpin` | not the system DM; a user message; Pin Messages (bit 51) and Read Message History, both a private channel's; writable; not a voice or stage channel's chat; not a media channel's post. `pin` for a message that isn't pinned, `unpin` for one that is; never both. Manage Messages no longer pins |
 | `react` | a new emoji on the message: not the system DM; Add Reactions and Read Message History; writable; not a media channel's post. System messages take reactions like any other |

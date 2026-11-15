@@ -590,9 +590,16 @@ fn editing_follows_discords_rule() {
             sent(THREAD, ME, 0),
             false,
         ),
+        // The official client reopens it first for a thread moderator.
+        (
+            "archived and locked, moderator",
+            member(MEMBER | MANAGE_THREADS, archived(true)),
+            sent(THREAD, ME, 0),
+            true,
+        ),
         (
             "archived and locked",
-            owner(archived(true)),
+            member(MEMBER, archived(true)),
             sent(THREAD, ME, 0),
             false,
         ),
@@ -696,8 +703,14 @@ fn deleting_follows_discords_rule() {
             false,
         ),
         (
+            "archived and locked, moderator",
+            member(MEMBER | MANAGE_THREADS, archived(true)),
+            sent(THREAD, ME, 0),
+            true,
+        ),
+        (
             "archived and locked",
-            owner(archived(true)),
+            member(MEMBER, archived(true)),
             sent(THREAD, ME, 0),
             false,
         ),
