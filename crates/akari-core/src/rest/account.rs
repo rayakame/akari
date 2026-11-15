@@ -120,7 +120,6 @@ pub(crate) enum Failure {
     // Only for `Waiting::Create`: Discord's slowmode answer, and its other refusals as sent.
     Slowmode(Option<Duration>),
     Api(ApiError),
-    // A published message edited as often as Discord allows (20022).
     EditLimit(Option<Duration>),
 }
 

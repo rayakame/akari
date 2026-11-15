@@ -42,7 +42,6 @@ fn edit_error(failure: Failure, limit: usize) -> EditError {
 
 type Answer = oneshot::Sender<Result<(), EditError>>;
 
-// The caller waiting for one message's edit while requests for it run.
 struct Waiter {
     channel: ChannelId,
     message: MessageId,

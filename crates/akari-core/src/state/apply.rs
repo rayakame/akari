@@ -412,7 +412,6 @@ pub(crate) struct State {
     latest: HashMap<ChannelId, Arc<Message>>,
     // The user's own reactions whose requests are on their way.
     reacting: Vec<reactions::OwnReaction>,
-    // The user's edits and deletes on their way, and the edits Discord refused.
     edits: super::edits::Edits,
     // Threads messages brought before their guild was known.
     unplaced_threads: HashMap<ChannelId, model::Channel>,

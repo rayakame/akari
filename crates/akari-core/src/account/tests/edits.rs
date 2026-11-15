@@ -16,7 +16,6 @@ fn target() -> MessageId {
     Snowflake::new(TARGET)
 }
 
-// The user's own message, as MESSAGE_CREATE brings it.
 fn mine(seq: u64, id: u64) -> Value {
     let mut created = message(seq, id);
     created["d"]["author"]["id"] = ME.into();
@@ -24,7 +23,6 @@ fn mine(seq: u64, id: u64) -> Value {
     created
 }
 
-// Discord's answer to an edit: the message with `text`.
 fn edited(text: &str) -> ResponseTemplate {
     let mut answer = mine(0, TARGET)["d"].clone();
     answer["content"] = text.into();
@@ -45,7 +43,6 @@ struct Online {
     _fake: FakeGateway,
 }
 
-// Online with #general viewed and the user's message in its window.
 async fn editing() -> Online {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
@@ -62,7 +59,6 @@ async fn editing() -> Online {
     }
 }
 
-// Answers once the test lets it.
 struct Held {
     arrived: std::sync::mpsc::Sender<()>,
     release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -96,7 +92,6 @@ impl Online {
             .await;
     }
 
-    // Holds the next request of `verb`: when it arrived, and the release.
     async fn hold(
         &self,
         verb: &str,
@@ -125,7 +120,6 @@ impl Online {
             .await;
     }
 
-    // The message events since the last call, once everything sent so far is applied.
     async fn events(&mut self) -> Vec<String> {
         self.seq += 1;
         let mut events = sync(&mut self.connection, &self.subscription, self.seq).await;
@@ -133,7 +127,6 @@ impl Online {
         events
     }
 
-    // Method and path of every edit, delete and thread opening, as they went over the wire.
     async fn lines(&self) -> Vec<String> {
         self.requests()
             .await

@@ -16,7 +16,6 @@ fn id<M>(value: u64) -> Snowflake<M> {
     Snowflake::new(value)
 }
 
-// The user's own message.
 fn mine(id: u64, channel: u64) -> Value {
     let mut message = message(id, channel);
     message["author"]["id"] = ME.to_string().into();
@@ -30,7 +29,6 @@ fn viewing(channel: u64) -> State {
     state
 }
 
-// #general with the user's message 10 in its window.
 fn general() -> State {
     let mut state = viewing(GENERAL);
     apply(&mut state, "MESSAGE_CREATE", mine(10, GENERAL));
@@ -71,7 +69,6 @@ fn answer(
     (answered, events.iter().map(describe).collect())
 }
 
-// Discord's answer to an edit: the message with the text, edited at `at`.
 fn edited(id: u64, channel: u64, text: &str, at: &str) -> model::Message {
     let mut message = mine(id, channel);
     message["content"] = text.into();
@@ -155,7 +152,6 @@ fn forum_post() -> State {
     state
 }
 
-// Mira's reply to the user's message 10.
 fn reply_to_ten(id: u64) -> Value {
     let mut reply = message(id, GENERAL);
     reply["type"] = 19.into();
@@ -168,7 +164,6 @@ fn reply_to_ten(id: u64) -> Value {
 struct Copy {
     name: &'static str,
     state: State,
-    // The row the user edits, and the message it shows.
     row: (u64, u64),
     message: (u64, u64),
     read: fn(&State) -> String,

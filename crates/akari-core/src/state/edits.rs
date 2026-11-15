@@ -52,7 +52,6 @@ struct Asked {
     heard: bool,
 }
 
-// The user's edit of one message while its requests run, or after Discord refused it.
 #[derive(Debug, Clone)]
 struct OwnEdit {
     channel: ChannelId,
@@ -95,7 +94,6 @@ pub(crate) struct Saved {
     pub(crate) show: Option<Box<str>>,
 }
 
-// What the copies show once the requests are over.
 pub(crate) enum Shown {
     Answer(Box<MessageUpdate>),
     Content(Box<str>),

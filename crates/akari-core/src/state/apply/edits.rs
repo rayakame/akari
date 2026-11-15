@@ -10,7 +10,6 @@ use crate::state::types::{Delivery, Message};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WantedEdit {
-    // The message the row shows.
     pub(crate) channel: ChannelId,
     pub(crate) message: MessageId,
     // `false`: the message shows the text already; nothing to ask unless a request runs.
@@ -20,18 +19,15 @@ pub(crate) struct WantedEdit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EditAsk {
     pub(crate) content: Box<str>,
-    // A reply sent without the ping: the edit keeps it off.
     pub(crate) quiet_reply: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeleteStart {
-    // Asked of Discord for the message the row shows.
     Request {
         channel: ChannelId,
         message: MessageId,
     },
-    // A failed send, gone without a request.
     Discarded,
 }
 
@@ -48,7 +44,6 @@ impl State {
         self.edits.deleting(channel, message)
     }
 
-    // Up arrow's pick: the newest loaded message the user may edit.
     pub(crate) fn newest_editable_message(
         &self,
         channel: ChannelId,

@@ -25,7 +25,6 @@ struct Editing {
     _ws: WebSocketStream<TcpStream>,
 }
 
-// Online with the user's own message in #general's list.
 async fn editing() -> Editing {
     let server = MockServer::start().await;
     let gateway = FakeGateway::start().await;
