@@ -141,6 +141,21 @@ struct MessageEditorTests {
         #expect(top >= 0, "the edited row stays where it was")
     }
 
+    // The edited row wholly above the reader grows by a refusal's reason: what they read stays.
+    @Test
+    func anEditedRowAboveTheViewGrowsWithoutMovingWhatIsRead() throws {
+        list.show(list.many(40))
+        edit(10, text: "message 10")
+        list.window.makeFirstResponder(list.table)
+        scroll(to: list.table.rect(ofRow: list.index(of: 25)).minY)
+        try #require(!list.controller.isPinnedToBottom)
+        let reading = list.table.rect(ofRow: list.index(of: 30)).minY - list.clip.bounds.minY
+
+        edit(10, text: "message 10", problem: .refused(.Forbidden))
+
+        #expect(list.table.rect(ofRow: list.index(of: 30)).minY - list.clip.bounds.minY == reading)
+    }
+
     @Test
     func returnSavesShiftReturnAddsALineAndEscapeCancels() {
         threeMessages()
@@ -425,6 +440,155 @@ struct MessageEditorTests {
         let rect = list.table.rect(ofRow: list.index(of: 8))
         #expect(rect.minY - list.clip.bounds.minY >= MessageEditorView.revealPadding - 0.5)
         #expect(rect.maxY <= list.clip.bounds.maxY)
+    }
+
+    @Test
+    func aRowTallerThanTheListOpenedBelowTheViewShowsItsTop() {
+        var rows = list.many(40)
+        rows[19] = row(20, at: list.noon + 2400, content: Array(repeating: "line", count: 40).joined(separator: "\n"))
+        list.show(rows)
+        scroll(to: 0)
+
+        edit(20, text: rows[19].message.content)
+
+        let rect = list.table.rect(ofRow: list.index(of: 20))
+        #expect(rect.minY >= list.clip.bounds.minY - 0.5)
+        #expect(rect.minY < list.clip.bounds.maxY)
+    }
+
+    @Test
+    func anEditOpenedBelowTheViewShowsItsRowWithRoomUnderIt() {
+        list.show(list.many(40))
+        scroll(to: 0)
+
+        edit(20, text: "message 20")
+
+        let rect = list.table.rect(ofRow: list.index(of: 20))
+        let bottom = list.clip.bounds.maxY - list.controller.scrollView.contentInsets.bottom
+        #expect(abs(rect.maxY + MessageEditorView.revealPadding - bottom) <= 0.5)
+    }
+
+    @Test
+    func anEditOpenedAboveTheViewShowsItsRowBelowTheStartsRoom() {
+        list.show(list.many(40))
+        list.controller.show(MessageTableState(rows: list.rows, reachedOldest: true, startRoom: 40))
+        list.window.layoutIfNeeded()
+        #expect(list.controller.isPinnedToBottom)
+
+        list.actions.editing = "message 20"
+        list.editing = EditModel.Editing(messageId: MessageId(rawValue: 20), opening: 1)
+        list.controller.show(
+            MessageTableState(rows: list.rows, reachedOldest: true, editing: list.editing, startRoom: 40))
+        list.window.layoutIfNeeded()
+
+        let rect = list.table.rect(ofRow: list.index(of: 20))
+        #expect(abs(rect.minY - MessageEditorView.revealPadding - (list.clip.bounds.minY + 40)) <= 0.5)
+    }
+
+    @Test
+    func anEditOpenedOnTheFirstRowScrollsNoFurtherThanTheListsTop() {
+        list.show(list.many(40))
+
+        edit(1, text: "message 1")
+
+        #expect(list.clip.bounds.minY >= -0.5)
+        #expect(list.table.rect(ofRow: list.index(of: 1)).minY >= list.clip.bounds.minY - 0.5)
+    }
+
+    // The reveal is the list's own scroll, and its new place is where the reader is.
+    @Test
+    func theRevealIsNoScrollOfTheUsersAndKeepsItsPlace() {
+        list.show(list.many(40))
+        list.actions.scrolls = []
+
+        edit(8, text: "message 8")
+        let offset = list.table.rect(ofRow: list.index(of: 8)).minY - list.clip.bounds.minY
+
+        #expect(list.actions.scrolls.isEmpty)
+        list.show((1...5).map { row(UInt64(100 + $0), at: list.noon - Double(100 - $0) * 60) } + list.rows)
+        #expect(abs(list.table.rect(ofRow: list.index(of: 8)).minY - list.clip.bounds.minY - offset) <= 0.5)
+    }
+
+    @Test
+    func aRevealNearTheListsTopAsksForOlderMessages() {
+        let rows = list.many(40)
+        list.controller.show(MessageTableState(rows: rows, reachedOldest: false))
+        list.window.layoutIfNeeded()
+        list.actions.calls.removeAll()
+
+        list.actions.editing = "message 2"
+        list.editing = EditModel.Editing(messageId: MessageId(rawValue: 2), opening: 1)
+        list.controller.show(MessageTableState(rows: rows, reachedOldest: false, editing: list.editing))
+        list.window.layoutIfNeeded()
+
+        #expect(list.actions.calls.contains("more older"))
+    }
+
+    @Test
+    func theCaretMovedNearTheListsTopAsksForOlderMessages() throws {
+        var rows = list.many(40)
+        rows[2] = row(3, at: list.noon + 360, content: Array(repeating: "line", count: 80).joined(separator: "\n"))
+        list.controller.show(MessageTableState(rows: rows, reachedOldest: false))
+        list.window.layoutIfNeeded()
+        list.actions.editing = rows[2].message.content
+        list.editing = EditModel.Editing(messageId: MessageId(rawValue: 3), opening: 1)
+        let editing = MessageTableState(rows: rows, reachedOldest: false, editing: list.editing)
+        list.controller.show(editing)
+        list.window.layoutIfNeeded()
+        editor.textView.moveToEndOfDocument(nil)
+        list.window.layoutIfNeeded()
+        // Far from the top: a new state asks for nothing more, and the next ask is the caret's.
+        list.controller.show(editing)
+        list.window.layoutIfNeeded()
+        list.actions.calls.removeAll()
+
+        editor.textView.moveToBeginningOfDocument(nil)
+
+        #expect(list.actions.calls.contains("more older"))
+    }
+
+    @Test
+    func theCaretMovedAboveTheViewIsScrolledToWithRoomAboveIt() throws {
+        list.show(list.many(40))
+        edit(40, text: Array(repeating: "line", count: 30).joined(separator: "\n"))
+        editor.textView.moveToEndOfDocument(nil)
+        list.window.layoutIfNeeded()
+        let start = editor.convert(editor.caretRect, to: list.table)
+        try #require(start.minY > list.clip.bounds.minY + list.clip.bounds.height / 2)
+
+        editor.textView.moveToBeginningOfDocument(nil)
+
+        let caret = editor.convert(editor.caretRect, to: list.table)
+        #expect(caret.minY < start.minY)
+        #expect(abs(caret.minY - MessageEditorView.caretMargin - list.clip.bounds.minY) <= 0.5)
+    }
+
+    @Test
+    func nsTextViewsOwnScrollDoesNothingInTheList() throws {
+        list.show(list.many(40))
+        edit(40, text: Array(repeating: "line", count: 30).joined(separator: "\n"))
+        editor.textView.moveToEndOfDocument(nil)
+        list.window.layoutIfNeeded()
+        let start = editor.convert(editor.textView.frame, to: list.table).minY
+        try #require(start < list.clip.bounds.minY, "the text's start is out of sight")
+        let origin = list.clip.bounds.origin
+
+        editor.textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+
+        #expect(list.clip.bounds.origin == origin)
+    }
+
+    @Test
+    func aReasonArrivingWhileTheUserIsElsewhereScrollsNothing() {
+        list.show(list.many(40))
+        edit(40, text: "message 40")
+        list.window.makeFirstResponder(list.table)
+        scroll(to: 0)
+        let origin = list.clip.bounds.origin
+
+        edit(40, text: "message 40", problem: .refused(.Forbidden))
+
+        #expect(list.clip.bounds.origin == origin)
     }
 
     @Test
