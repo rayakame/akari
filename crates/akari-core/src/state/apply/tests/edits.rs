@@ -408,6 +408,20 @@ fn an_edit_from_the_gateway_reaches_a_fetched_starter_and_tells_its_row() {
 }
 
 #[test]
+fn an_update_that_changes_nothing_tells_no_starter_row() {
+    let mut copy = copies().remove(3);
+    assert_eq!(copy.name, "fetched starter");
+
+    let events = apply(
+        &mut copy.state,
+        "MESSAGE_UPDATE",
+        json!({"id": ORIGIN.to_string(), "channel_id": GENERAL.to_string(), "content": "hi"}),
+    );
+
+    assert_eq!(events, [] as [&str; 0]);
+}
+
+#[test]
 fn an_unchanged_save_asks_nothing_and_shows_nothing() {
     let mut state = general();
 
@@ -565,6 +579,43 @@ fn a_failure_after_the_gateway_showed_the_text_counts_as_done() {
     assert_eq!(text(&state, GENERAL, 10), "saved");
 }
 
+// The echo usually beats the PATCH's answer: a later save looks pending again.
+#[test]
+fn a_save_after_the_echo_of_the_one_on_its_way_is_pending_again() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "first");
+    asked(&mut state, GENERAL, 10);
+    update(&mut state, GENERAL, 10, "first", EARLIER);
+    assert_eq!(edit_of(&state, GENERAL, 10), "none");
+
+    save(&mut state, GENERAL, 10, "second");
+
+    assert_eq!(edit_of(&state, GENERAL, 10), "pending");
+    update(&mut state, GENERAL, 10, "first", EARLIER);
+    assert_eq!(
+        text(&state, GENERAL, 10),
+        "second",
+        "a repeated echo doesn't show"
+    );
+}
+
+// The gateway is in Discord's order: an edit from elsewhere after the earlier answer wins.
+#[test]
+fn an_unreadable_answer_after_an_edit_from_elsewhere_never_brings_back_an_earlier_answer() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "first");
+    asked(&mut state, GENERAL, 10);
+    save(&mut state, GENERAL, 10, "second");
+    let first = edited(10, GENERAL, "first", EARLIER);
+    answer(&mut state, GENERAL, 10, Ok(Some(first)));
+    asked(&mut state, GENERAL, 10);
+    update(&mut state, GENERAL, 10, "elsewhere", LATER);
+
+    answer(&mut state, GENERAL, 10, Ok(None));
+
+    assert_eq!(text(&state, GENERAL, 10), "elsewhere");
+}
+
 #[test]
 fn an_earlier_saves_echo_never_shows_while_a_later_one_waits() {
     let mut state = general();
@@ -629,6 +680,8 @@ fn the_answer_shows_its_edit_time_and_mentions_before_the_gateway() {
     answered.mentions = vec![wire(&json!({
         "id": MIRA.to_string(), "username": "mira", "discriminator": "0", "avatar": null,
     }))];
+    answered.mention_everyone = true;
+    answered.mention_roles = vec![id(77)];
 
     let (outcome, events) = answer(&mut state, GENERAL, 10, Ok(Some(answered)));
 
@@ -639,6 +692,31 @@ fn the_answer_shows_its_edit_time_and_mentions_before_the_gateway() {
     let mentioned: Vec<u64> = message.mentions.iter().map(|user| user.id.get()).collect();
     assert_eq!(mentioned, [MIRA]);
     assert!(message.mentions_user(id(MIRA)));
+    assert!(message.mention_everyone);
+    assert_eq!(&*message.mention_roles, [id(77)]);
+}
+
+// Ruling 3: a link preview the gateway added stays when the answer comes after it.
+#[test]
+fn the_answer_leaves_the_embeds_the_gateway_added_since() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "see https://example.com");
+    asked(&mut state, GENERAL, 10);
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        json!({
+            "id": "10", "channel_id": GENERAL.to_string(),
+            "embeds": [{"type": "link", "url": "https://example.com", "title": "Example"}],
+        }),
+    );
+
+    let answered = edited(10, GENERAL, "see https://example.com", EARLIER);
+    answer(&mut state, GENERAL, 10, Ok(Some(answered)));
+
+    let message = state.message(id(GENERAL), id(10)).unwrap();
+    assert_eq!(message.embeds.len(), 1);
+    assert_eq!(&*message.content, "see https://example.com");
 }
 
 // The gateway is in Discord's order: what it said since the request is newer than a guess.
@@ -737,6 +815,20 @@ fn a_refused_edit_keeps_the_saved_text_until_saved_again_or_dismissed() {
 }
 
 #[test]
+fn dismissing_an_edit_on_its_way_changes_nothing() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "saved");
+    asked(&mut state, GENERAL, 10);
+
+    let mut events = Vec::new();
+    state.dismiss_edit(id(GENERAL), id(10), &mut events);
+
+    assert!(events.is_empty());
+    assert_eq!(edit_of(&state, GENERAL, 10), "pending");
+    assert_eq!(text(&state, GENERAL, 10), "saved");
+}
+
+#[test]
 fn saving_a_refused_edit_again_asks_again() {
     let mut state = general();
     save(&mut state, GENERAL, 10, "saved");
@@ -794,7 +886,8 @@ fn a_refused_edit_saved_as_discords_text_is_forgotten_without_a_request() {
 #[test]
 fn refused_edits_are_kept_up_to_a_limit_and_across_a_new_session() {
     let mut state = viewing(GENERAL);
-    let count = u64::try_from(FAILED_KEPT).unwrap() + 1;
+    // Ruling 5's 16, one more.
+    let count = 17;
     for message in 10..10 + count {
         apply(&mut state, "MESSAGE_CREATE", mine(message, GENERAL));
         save(&mut state, GENERAL, message, "saved");
