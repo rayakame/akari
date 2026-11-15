@@ -71,6 +71,10 @@ final class PinsModelTests {
 
         let opening = Task { await pins.open() }
         try await eventually { pins.phase == .loading && self.store.log.calls.contains(.loadPins(id(11))) }
+        // The core says so as the page is asked for.
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        #expect(pins.phase == .loading)
+        #expect(!pins.loadingMore, "the first page's spinner, not the one under the rows")
         #expect(pins.rows.isEmpty)
         account.pinLoadReplies.send(())
         await opening.value
