@@ -325,9 +325,9 @@ public final class EmojiPickerModel {
         }
         browsing = fresh
         if Self.isBlank(query) {
-            let kept = selection.flatMap { kept($0, in: fresh) }
+            let held = selection.flatMap { kept($0, in: fresh) }
             sections = fresh
-            selection = kept ?? first(in: sections)
+            selection = held ?? first(in: sections)
             onChange(.sections(fromTop: false))
         } else {
             ask(query, again: true)
@@ -446,9 +446,9 @@ public final class EmojiPickerModel {
             selection = first(in: sections)
             onChange(.sections(fromTop: true))
         } else if results != sections {
-            let kept = selection.flatMap { kept($0, in: results) }
+            let held = selection.flatMap { kept($0, in: results) }
             sections = results
-            selection = kept ?? first(in: sections)
+            selection = held ?? first(in: sections)
             onChange(.sections(fromTop: false))
         }
         if let keepOpen = waitingPick, shownQuery == query {
