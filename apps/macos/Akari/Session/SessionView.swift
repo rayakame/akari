@@ -148,7 +148,6 @@ struct SessionView<MessageArea: View>: View {
         .onChange(of: session.refusedReactions) { refusalSound() }
     }
 
-    // A key panel over the dimmed window, which stays while another app is active.
     private func ask(
         _ question: some MessageQuestion, in area: CGSize, answer: @escaping (Bool) -> Void
     ) -> some View {

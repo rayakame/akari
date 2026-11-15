@@ -69,7 +69,6 @@ final class PinsWindowsTests {
         window.childWindows?.compactMap { $0 as? ShieldWindow } ?? []
     }
 
-    // The panel over a shield, by its VoiceOver name.
     func panel(_ label: String) -> ContainerPanel? {
         shields.lazy.compactMap { $0.childWindows?.compactMap { $0 as? ContainerPanel }.first }
             .first { $0.accessibilityLabel() == label }

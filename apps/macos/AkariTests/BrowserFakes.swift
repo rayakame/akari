@@ -30,12 +30,9 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var longFirstLine = 1
     /// Ray's first line ends in a custom emoji.
     var firstLineEmoji = false
-    /// #new's pinned messages, the newest pin first: Ray's, the user's notes, Ray's welcome, then
-    /// "Pinned message N".
     var pins = 0
     var pinsState = PinsState.loaded
     var pinsMore = false
-    /// #new has a pin the user hasn't seen.
     var pinsDot = false
     private(set) var account: BrowserAccount?
 

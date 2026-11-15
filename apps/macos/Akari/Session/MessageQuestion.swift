@@ -2,7 +2,6 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// A question about a message, asked with the message in the official box: Delete, Pin, Unpin.
 @MainActor
 protocol MessageQuestion {
     var id: UUID { get }

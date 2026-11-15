@@ -15,7 +15,6 @@ struct BrandButton: View {
     let title: String
     var size = Size.medium
     var secondary = false
-    /// As wide as its place.
     var fills = false
     let action: () -> Void
     @State private var hovered = false

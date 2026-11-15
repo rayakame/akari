@@ -29,7 +29,6 @@ protocol MessageListActions: AnyObject {
     func openThread(_ id: ChannelId, from parent: ChannelId)
     // "threads" in a "started a thread" line: the channel's Threads modal.
     func openThreads(of channel: ChannelId)
-    // "pinned messages" in a pin's line: the channel's pins popout.
     func togglePins(of channel: ChannelId)
     // "a message" in a pin's line; the table scrolls once the model has jumped.
     func jump(to message: MessageId)

@@ -161,9 +161,7 @@ final class ThreadBrowserWindowsTests {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
     }
 
-    // The popout hangs under the Threads button, its right edge on the button's (1044, the pins
-    // button's 32 and 8 left of 1084) and its top 81 from the window's top, 480 wide; the shield
-    // covers the whole window.
+    // Its right edge on the Threads button's: 1044, the pins button's 32 and 8 left of its 1084.
     @Test
     func thePopoutIsAKeyPanelOverAShieldOverTheWindow() async throws {
         try await opened(.popout)

@@ -19,8 +19,6 @@ extension NSWindow {
         NSApp.keyWindow?.isFamily(of: self) ?? isKeyWindow
     }
 
-    /// The frontmost panel attached above this window that takes the key: the pins popout under
-    /// the unpin question.
     var keyPanelAbove: NSWindow? {
         (NSWindow.windowNumbers(options: []) ?? []).lazy
             .compactMap { NSApp.window(withWindowNumber: $0.intValue) }

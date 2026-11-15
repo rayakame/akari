@@ -5,9 +5,7 @@ import Testing
 
 @testable import Akari
 
-// Pictures, not assertions: with TEST_RUNNER_AKARI_RENDERS=1 the pins popout, its questions and
-// the header's button are drawn at 2x in both themes into the test host's temporary folder (the
-// RENDER lines name the files; MEASURE lines give what was measured, in points).
+// Pictures to look at, not assertions: they run only with TEST_RUNNER_AKARI_RENDERS=1.
 @MainActor @Suite(.enabled(if: ProcessInfo.processInfo.environment["AKARI_RENDERS"] != nil))
 struct PinsRenders {
     static let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pr-g-renders")

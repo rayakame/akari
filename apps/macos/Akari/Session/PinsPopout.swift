@@ -2,7 +2,7 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// The pins popout's measures, from Discord's stylesheet (canary 671549).
+// From Discord's stylesheet (canary 671549).
 enum PinsLayout {
     static let width: CGFloat = 420
     static let minHeight: CGFloat = 200
@@ -45,14 +45,12 @@ enum PinsLayout {
     // Discord asks for the next page within 250 of the list's bottom.
     static let loadDistance: CGFloat = 250
 
-    /// Under the pins button, its right edge on the button's and its top under the header's line.
     static func frame(button: CGRect, content: CGFloat, area: CGSize) -> CGRect {
         CGRect(
             x: button.maxX - width, y: button.maxY + ThreadBrowserPlacement.gap, width: width,
             height: height(content: content, window: area.height))
     }
 
-    /// The header and the content, 200 at least and 80% of the window at most; the minimum wins.
     static func height(content: CGFloat, window: CGFloat) -> CGFloat {
         max(minHeight, min(headerHeight + content, (window * maxShare).rounded(.down)))
     }
@@ -62,7 +60,6 @@ enum PinsLayout {
         frame(button: button, content: contentHeight(pins, upTo: area.height), area: area)
     }
 
-    /// What shows under the header; a list is measured only as far as `limit`.
     @MainActor
     static func contentHeight(_ pins: PinsModel, upTo limit: CGFloat) -> CGFloat {
         switch pins.phase {
@@ -114,7 +111,6 @@ enum PinsLayout {
     }
 }
 
-/// Where the header's pins button is, for the popout under it.
 struct PinsButtonBounds: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
 
@@ -123,8 +119,6 @@ struct PinsButtonBounds: PreferenceKey {
     }
 }
 
-/// The header's pins button: selected while its popout is open, with a dot while the channel
-/// has pins the user hasn't seen, disabled behind the age gate.
 struct PinsButton: View {
     static let symbol = "pin.fill"
     static let dot: CGFloat = 8
@@ -174,7 +168,6 @@ struct PinsButton: View {
     }
 }
 
-/// The popout in its panel: Discord's surface, radius and ring.
 struct PinsPanel: View {
     let pins: PinsModel
     let size: CGSize
@@ -196,8 +189,6 @@ struct PinsPanel: View {
     }
 }
 
-/// "Pinned Messages" over the pins, the empty state with its protip, the spinner, or *Akari's*
-/// failed state.
 struct PinsPopoutView: View {
     let pins: PinsModel
     var hovered: MessageId?
@@ -270,7 +261,6 @@ struct PinsHeader: View {
     }
 }
 
-/// The pinned messages, the next page's spinner or Load more under them.
 struct PinsList: View {
     let pins: PinsModel
     var hovered: MessageId?
@@ -314,12 +304,10 @@ struct PinsList: View {
 }
 
 extension EnvironmentValues {
-    /// The modifier keys as a click reads them.
+    // The tests hold Shift through it.
     @Entry var clickModifiers: @MainActor () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
 }
 
-/// A pinned message in its card; Jump and the ✕ show while the pointer is over it, and are the
-/// card's actions for VoiceOver.
 struct PinnedCard: View {
     let row: MessageListModel.Row
     let unpins: Bool
@@ -377,7 +365,6 @@ struct PinnedCard: View {
     }
 }
 
-/// Discord's small secondary icon button with the ✕; a spinner while the unpin is on its way.
 struct UnpinButton: View {
     let busy: Bool
     let action: () -> Void
@@ -412,7 +399,7 @@ struct UnpinButton: View {
     }
 }
 
-/// A pinned message as the list shows it, taking no pointer.
+// Links, spoilers and media open from the list, after Jump.
 struct PinnedPreview: NSViewRepresentable {
     let row: MessageListModel.Row
     var now = Date()
@@ -430,7 +417,7 @@ struct PinnedPreview: NSViewRepresentable {
     }
 }
 
-/// The empty state's words under a symbol, where Discord shows its illustration.
+// Discord's illustration is a bundled picture; a symbol stands in.
 struct PinsEmptyState: View {
     let text: String
 
@@ -454,7 +441,6 @@ struct PinsEmptyState: View {
     }
 }
 
-/// Under the empty state: "Protip:" in green, then the words.
 struct PinsFooter: View {
     let text: String
 

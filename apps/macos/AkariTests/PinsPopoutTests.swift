@@ -125,7 +125,6 @@ final class PinsPopoutTests {
         return [view] + view.subviews.flatMap(all)
     }
 
-    // A card's frame in the host, from its message's.
     func card(_ index: Int, in view: ShownView) throws -> NSRect {
         let preview = try #require(previews(in: view).dropFirst(index).first)
         let frame = view.host.convert(preview.bounds, from: preview)

@@ -10,7 +10,6 @@ struct ChannelHeader: View {
     var openParent: () -> Void = {}
     /// The Threads button, where the channel has one.
     var threads: ThreadsButton?
-    /// The pins button, where the channel has one.
     var pins: PinsButton?
     /// A thread's "…".
     var menu: ThreadMenu?
