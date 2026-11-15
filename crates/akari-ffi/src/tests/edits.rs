@@ -172,17 +172,13 @@ async fn a_delete_dims_the_record_then_takes_it_away() {
     let account = editing.account.clone();
     let deleting = tokio::spawn(async move { account.delete_message(GENERAL, MESSAGE).await });
     editing.updated().await;
+    // Read first: the record read after it says the delete was still on its way.
+    let actions = editing.account.store().message_actions(GENERAL, MESSAGE);
     let dimmed = editing.record().unwrap();
     deleting.await.unwrap().unwrap();
 
     assert!(dimmed.deleting);
-    assert!(
-        !editing
-            .account
-            .store()
-            .message_actions(GENERAL, MESSAGE)
-            .delete
-    );
+    assert!(!actions.delete && !actions.edit);
     events_until(&editing.subscription, |event| {
         *event
             == StoreEvent::MessageDeleted {

@@ -302,7 +302,7 @@ async fn each_refusal_is_told_apart() {
             "errors": {"content": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": text}]}},
         }))
     };
-    let cases: [(ResponseTemplate, Expected); 10] = [
+    let cases: [(ResponseTemplate, Expected); 11] = [
         (
             refusal(400, 200_001, "No"),
             |err| matches!(err, EditError::MessageBlocked { reason } if reason == "No"),
@@ -314,6 +314,9 @@ async fn each_refusal_is_told_apart() {
             matches!(err, EditError::Forbidden)
         }),
         (refusal(403, 50013, "Missing Permissions"), |err| {
+            matches!(err, EditError::Forbidden)
+        }),
+        (refusal(400, 50001, "Missing Access"), |err| {
             matches!(err, EditError::Forbidden)
         }),
         (refusal(403, 40333, "Something else"), |err| {
@@ -364,6 +367,29 @@ async fn each_refusal_is_told_apart() {
 }
 
 #[tokio::test]
+async fn a_rate_limit_after_the_one_retry_is_told_apart() {
+    let online = editing().await;
+    let limited = ResponseTemplate::new(429).set_body_json(
+        json!({"message": "You are being rate limited.", "retry_after": 0.02, "global": false}),
+    );
+    online.answer("PATCH", limited).await;
+
+    let outcome = online.edit_to("new").await;
+
+    assert!(
+        matches!(
+            outcome,
+            Err(EditError::RateLimited {
+                retry_after: Some(_)
+            })
+        ),
+        "{outcome:?}"
+    );
+    assert!(online.edit().starts_with("failed"));
+    assert_eq!(online.lines().await.len(), 2, "asked once more");
+}
+
+#[tokio::test]
 async fn the_latest_save_wins_and_the_earlier_caller_is_answered_at_once() {
     let online = editing().await;
     let (arrived, release) = online.hold("PATCH", edited("first")).await;
@@ -395,21 +421,22 @@ async fn the_latest_save_wins_and_the_earlier_caller_is_answered_at_once() {
     assert_eq!(online.edit(), "none");
 }
 
-// A save made while the store takes Discord's answer to the one before is asked for too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_save_while_the_answer_is_taken_is_still_asked() {
+async fn a_save_between_the_stores_answer_and_its_callers_is_still_asked() {
     let online = editing().await;
     let (arrived, release) = online.hold("PATCH", edited("first")).await;
     online.answer("PATCH", edited("second")).await;
+    let (answering, answered) = std::sync::mpsc::channel();
+    online
+        .account
+        .shared
+        .editing
+        .linger_after_answer(answering, Duration::from_millis(300));
 
     let (first, second) = tokio::join!(online.edit_to("first"), async {
         arrival(&arrived).await;
-        online
-            .account
-            .store()
-            .delay_next_write(Duration::from_millis(600));
         release.send(()).unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        arrival(&answered).await;
         online.edit_to("second").await
     });
 

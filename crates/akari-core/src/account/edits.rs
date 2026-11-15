@@ -58,7 +58,39 @@ impl Waiter {
 
 // One request at a time per message; the latest save is the one that counts.
 #[derive(Default)]
-pub(super) struct Editing(Mutex<Vec<Waiter>>);
+pub(super) struct Editing {
+    waiters: Mutex<Vec<Waiter>>,
+    #[cfg(test)]
+    linger: Mutex<Option<(std::sync::mpsc::Sender<()>, std::time::Duration)>>,
+}
+
+impl Editing {
+    fn waiters(&self) -> std::sync::MutexGuard<'_, Vec<Waiter>> {
+        self.waiters.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[cfg(test)]
+    pub(super) fn linger_after_answer(
+        &self,
+        told: std::sync::mpsc::Sender<()>,
+        wait: std::time::Duration,
+    ) {
+        *self.linger.lock().unwrap_or_else(PoisonError::into_inner) = Some((told, wait));
+    }
+
+    #[cfg(test)]
+    fn lingering(&self) {
+        let linger = self
+            .linger
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((told, wait)) = linger {
+            let _ = told.send(());
+            std::thread::sleep(wait);
+        }
+    }
+}
 
 fn finish(
     waiters: &mut Vec<Waiter>,
@@ -103,11 +135,7 @@ impl Shared {
         }
         let (answer, outcome) = oneshot::channel();
         {
-            let mut waiters = self
-                .editing
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut waiters = self.editing.waiters();
             let wanted = self
                 .store
                 .want_edit(channel, row, content)
@@ -140,16 +168,11 @@ impl Shared {
             .unwrap_or(Err(EditError::Request(RequestError::Closed)))
     }
 
-    // Asks Discord until it has the text the user saved last, or refuses it.
     async fn save(&self, channel: ChannelId, message: MessageId) {
         loop {
             let ask = {
                 // So a save can't come between the store's answer and its caller's.
-                let mut waiters = self
-                    .editing
-                    .0
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
+                let mut waiters = self.editing.waiters();
                 let Some(ask) = self.store.ask_edit(channel, message) else {
                     finish(&mut waiters, channel, message, Ok(()));
                     return;
@@ -178,18 +201,16 @@ impl Shared {
                 self.failed(err);
             }
             let asked = outcome.as_ref().map(|_| ()).map_err(Clone::clone);
-            let mut waiters = self
-                .editing
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut waiters = self.editing.waiters();
             let answer = match self.store.edit_answered(channel, message, outcome) {
                 EditOutcome::Again => continue,
                 EditOutcome::Done(_) => Ok(()),
-                EditOutcome::Refused(err, _) => Err(err),
+                EditOutcome::Refused(err, ..) => Err(err),
                 // Deleted meanwhile: the caller hears what Discord said.
                 EditOutcome::Gone => asked,
             };
+            #[cfg(test)]
+            self.editing.lingering();
             finish(&mut waiters, channel, message, answer);
             return;
         }
