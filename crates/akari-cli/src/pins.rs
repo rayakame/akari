@@ -35,7 +35,6 @@ fn pin_error(err: &PinError, pin: bool) -> String {
     }
 }
 
-// Every page, the newest pin first.
 async fn lines(account: &Account, channel: ChannelId) -> Result<Vec<String>, String> {
     let failed = |err: RequestError| format!("Couldn't load the pins: {}", report(&err));
     account.load_pins(channel).await.map_err(failed)?;
