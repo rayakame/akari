@@ -49,8 +49,8 @@ final class ReplyActionTests {
     func theUsersOwnEditableMessageHasReplyOnlyWithShift() {
         let own = row(101, allowed(reply: true, edit: true, createThread: true))
 
-        #expect(bar(own) == [.createThread, .more])
-        #expect(bar(own, shift: true) == [.copyLink, .markUnread, .reply, .createThread, .more])
+        #expect(bar(own) == [.edit, .createThread, .more])
+        #expect(bar(own, shift: true) == [.copyLink, .markUnread, .reply, .edit, .createThread, .more])
     }
 
     // The core's edit flag alone places Reply; what else the row allows moves nothing.
@@ -58,8 +58,11 @@ final class ReplyActionTests {
     func replyStandsWhereTheCoresEditFlagSays(edit: Bool, delete: Bool) {
         let message = row(100, allowed(reply: true, edit: edit, delete: delete, createThread: true))
 
-        #expect(bar(message) == (edit ? [.createThread, .more] : [.reply, .createThread, .more]))
-        #expect(bar(message, shift: true) == [.copyLink, .markUnread, .reply, .createThread, .more])
+        #expect(bar(message) == (edit ? [.edit, .createThread, .more] : [.reply, .createThread, .more]))
+        #expect(
+            bar(message, shift: true)
+                == [.copyLink, .markUnread, .reply] + (edit ? [.edit] : []) + [.createThread]
+                + (delete ? [.delete] : [.more]))
     }
 
     @Test

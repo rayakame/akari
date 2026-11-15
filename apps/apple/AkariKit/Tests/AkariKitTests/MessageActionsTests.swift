@@ -33,6 +33,9 @@ final class MessageActionsTests {
     var threadsViewed: [String] = []
     var failures: [MessageActionsModel.Failure] = []
     var marks: [String] = []
+    var edited: [MessageId] = []
+    var deleteQuestions: [MessageActionsModel.DeleteQuestion] = []
+    var discarded: [MessageId] = []
 
     init() {
         account = FakeAccount(store: store)
@@ -47,7 +50,7 @@ final class MessageActionsTests {
         MessageActionsModel(
             store: store, account: account,
             copy: { [unowned self] in copied.append($0) },
-            retry: { _ in }, discard: { _ in },
+            retry: { _ in }, discard: { [unowned self] in discarded.append($0) },
             createThread: { [unowned self] in threadsCreated.append("\($0.rawValue) \($1.rawValue)") },
             viewThread: { [unowned self] in threadsViewed.append("\($0.rawValue) \($1.rawValue)") },
             marking: { [unowned self] channel, message in
@@ -58,6 +61,8 @@ final class MessageActionsTests {
                     }
                 }
             },
+            edit: { [unowned self] in edited.append($0.message.id) },
+            askDelete: { [unowned self] in deleteQuestions.append($0) },
             failed: { [unowned self] in failures.append($0) })
     }
 
@@ -134,13 +139,108 @@ final class MessageActionsTests {
         #expect(menu(kept) == [[.copyText, .retry]])
     }
 
-    // Deleting a sent message isn't built yet: only a failed send has it.
     @Test
-    func aSentMessageHasNoDeleteYet() {
+    func aDeletableMessageHasDeleteInTheShiftBarInMoresPlaceAndInTheMenu() {
         let sent = row(100, allowed(delete: true), content: "x")
 
-        #expect(bar(sent, shift: true) == [.copyLink, .markUnread, .more])
-        #expect(menu(sent) == [[.copyText, .markUnread, .copyLink]])
+        #expect(bar(sent) == [.more])
+        #expect(bar(sent, shift: true) == [.copyLink, .markUnread, .delete])
+        #expect(menu(sent) == [[.copyText, .markUnread, .copyLink], [.delete]])
+        let bar = model().bar(for: sent, shift: true)
+        #expect(bar.last?.title == "Delete")
+        #expect(bar.last?.destructive == true)
+        #expect(model().menu(for: sent).last?.first?.title == "Delete Message")
+    }
+
+    @Test
+    func anEditableMessageHasEditAndReplyMovesIntoTheShiftBar() {
+        let own = row(101, allowed(reply: true, edit: true), content: "x")
+
+        #expect(bar(own) == [.edit, .more])
+        #expect(bar(own, shift: true) == [.copyLink, .markUnread, .reply, .edit, .more])
+        #expect(menu(own) == [[.edit, .reply], [.copyText, .markUnread, .copyLink]])
+        #expect(model().bar(for: own, shift: false).first?.title == "Edit")
+        #expect(model().bar(for: own, shift: false).first?.symbol == "pencil")
+        #expect(model().menu(for: own).first?.first?.title == "Edit Message")
+    }
+
+    @Test
+    func aFailedSendHasNoEdit() {
+        let failed = row(100, allowed(edit: true, delete: true), content: "x", delivery: .failed)
+
+        #expect(!menu(failed).joined().contains(.edit))
+        #expect(bar(failed) == [.retry, .delete])
+    }
+
+    @Test
+    func editOpensTheRowsEditor() {
+        model().perform(.edit, on: row(101, allowed(edit: true)))
+
+        #expect(edited == [id(101)])
+    }
+
+    @Test
+    func deleteFromTheMenuAsksWithTheTipAndFromTheBarWithout() throws {
+        let sent = row(100, allowed(delete: true))
+        let model = model()
+
+        model.perform(.delete, on: sent, shift: false, from: .menu)
+        model.perform(.delete, on: sent, shift: false, from: .bar)
+
+        #expect(deleteQuestions.map(\.row.message.id) == [id(100), id(100)])
+        #expect(deleteQuestions.map(\.showsTip) == [true, false])
+        #expect(!store.log.calls.contains(.delete(id(11), id(100))), "nothing before the answer")
+        try #require(deleteQuestions.first).run()
+        #expect(MessageActionsModel.DeleteQuestion.title == "Delete Message")
+        #expect(
+            MessageActionsModel.DeleteQuestion.message == "Are you sure you want to delete this message?")
+        #expect(
+            MessageActionsModel.DeleteQuestion.tip
+                == "You can hold down shift when clicking delete message to bypass this "
+                + "confirmation entirely.")
+    }
+
+    @Test(arguments: [MessageActionsModel.Surface.bar, .menu])
+    func shiftDeletesAtOnce(from surface: MessageActionsModel.Surface) async throws {
+        model().perform(.delete, on: row(100, allowed(delete: true)), shift: true, from: surface)
+
+        try await eventually { self.store.log.calls.contains(.delete(id(11), id(100))) }
+        #expect(deleteQuestions.isEmpty)
+    }
+
+    @Test
+    func aFailedSendGoesWithoutAQuestionOrARequest() {
+        let failed = row(100, allowed(delete: true), delivery: .failed)
+
+        model().perform(.delete, on: failed, from: .menu)
+        model().perform(.delete, on: failed, from: .bar)
+
+        #expect(discarded == [id(100), id(100)])
+        #expect(deleteQuestions.isEmpty)
+        #expect(!store.log.calls.contains(.delete(id(11), id(100))))
+    }
+
+    @Test
+    func aMessageThatMayNotBeDeletedIsNotAsked() {
+        model().perform(.delete, on: row(100, allowed()), shift: true)
+
+        #expect(deleteQuestions.isEmpty)
+        #expect(!store.log.calls.contains(.delete(id(11), id(100))))
+    }
+
+    // The question may be answered after the host let the model go.
+    @Test
+    func aRefusedDeleteSaysSoOnce() async throws {
+        account.deleteError.withLock { $0 = .Discord(status: 403, code: 50013, message: "Missing Permissions") }
+        model().perform(.delete, on: row(100, allowed(delete: true)))
+        let question = try #require(deleteQuestions.first)
+
+        question.run()
+
+        try await eventually { !self.failures.isEmpty }
+        #expect(
+            failures
+                == [.init(title: "Couldn't Delete Message", message: "You don't have permission to do that here.")])
     }
 
     @Test
@@ -529,6 +629,7 @@ final class SessionMessageActionsTests {
         let list = try #require(session.messages)
         let model = session.messageActions(for: list) { _ in }
         let failed = MessageListModel.Row(id: id(100), message: message(100, in: 11, delivery: .failed))
+        store.update { $0.allow(allowed(delete: true), message: 100, in: 11) }
 
         model.perform(.delete, on: MessageListModel.Row(id: id(101), message: message(101, in: 11)))
         #expect(!store.log.calls.contains(.discard(id(11), id(101))), "a sent message stays")
@@ -537,6 +638,88 @@ final class SessionMessageActionsTests {
         try await eventually { self.store.log.calls.contains(.retry(id(11), id(100))) }
 
         #expect(store.log.calls.contains(.discard(id(11), id(100))))
+        session.close()
+    }
+
+    func ownMessages() throws -> MessageListModel {
+        store.update { state in
+            state.show(message(100, in: 11, content: "first"), message(101, in: 11, content: "second"))
+            state.windows[id(11)] = window([100, 101])
+            state.allow(allowed(edit: true, delete: true), message: 100, in: 11)
+            state.allow(allowed(edit: true, delete: true), message: 101, in: 11)
+        }
+        let list = try #require(session.messages)
+        list.apply(EventBatch([.messagesLoaded(channelId: id(11), first: id(100), last: id(101))]))
+        return list
+    }
+
+    @Test
+    func deleteAsksTheSessionAndOnlyItsYesDeletes() async throws {
+        let list = try ownMessages()
+        let model = session.messageActions(for: list) { _ in }
+        let row = try #require(list.rows.first)
+
+        model.perform(.delete, on: row, from: .menu)
+        #expect(session.deleteQuestion?.row.message.id == id(100))
+        #expect(session.deleteQuestion?.showsTip == true)
+        session.answerDeleteQuestion(false)
+        #expect(session.deleteQuestion == nil)
+
+        model.perform(.delete, on: row, from: .bar)
+        session.answerDeleteQuestion(true)
+        try await eventually { self.store.log.calls.contains(.delete(id(11), id(100))) }
+        #expect(store.log.calls.filter { $0 == .delete(id(11), id(100)) }.count == 1)
+        session.close()
+    }
+
+    @Test
+    func aDeleteDiscordRefusesAlerts() async throws {
+        let list = try ownMessages()
+        account.deleteError.withLock { $0 = .Network(kind: .connect) }
+
+        session.messageActions(for: list) { _ in }.perform(
+            .delete, on: try #require(list.rows.first), shift: true)
+
+        try await eventually { self.session.messageActionFailure != nil }
+        #expect(session.messageActionFailure?.title == "Couldn't Delete Message")
+        session.close()
+    }
+
+    @Test
+    func editStartsTheListsEditor() throws {
+        let list = try ownMessages()
+
+        session.messageActions(for: list) { _ in }.perform(.edit, on: try #require(list.rows.last))
+
+        #expect(list.editor.editing?.messageId == id(101))
+        session.close()
+    }
+
+    @Test
+    func anEmptiedEditAsksToDeleteWithoutTheTip() throws {
+        let list = try ownMessages()
+        list.editor.start(try #require(list.rows.last))
+        list.editor.text = ""
+
+        list.editor.save()
+
+        #expect(session.deleteQuestion?.row.message.id == id(101))
+        #expect(session.deleteQuestion?.showsTip == false)
+        session.close()
+    }
+
+    @Test
+    func escapeEndsAnEditBeforeAPendingReply() async throws {
+        let list = try ownMessages()
+        store.update { $0.allow(replying(edit: true), message: 100, in: 11) }
+        list.composer.startReply(to: try #require(list.rows.first), shift: false)
+        list.editor.start(try #require(list.rows.last))
+
+        #expect(!session.escape(from: id(11)))
+        #expect(list.editor.editing == nil)
+        #expect(list.composer.reply != nil)
+        #expect(!session.escape(from: id(11)))
+        #expect(list.composer.reply == nil)
         session.close()
     }
 

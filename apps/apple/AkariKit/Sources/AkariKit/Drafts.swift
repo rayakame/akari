@@ -7,6 +7,10 @@ final class Drafts {
     var replies: [ChannelId: PendingReply] = [:]
     // Failed replies Discord refused because the message they answer was deleted.
     var refusedReplies: Set<MessageId> = []
+    var edits: [ChannelId: EditDraft] = [:]
+    // Saves whose answer hasn't come back to the model that sent them.
+    var unansweredSaves: Set<MessageId> = []
+    var editOpenings = 0
 
     subscript(channel: ChannelId) -> String {
         get { texts[channel] ?? "" }
@@ -17,4 +21,10 @@ final class Drafts {
     func append(_ lines: [String], to channel: ChannelId) {
         self[channel] = ([self[channel]] + lines).filter { !$0.isEmpty }.joined(separator: "\n")
     }
+}
+
+struct EditDraft {
+    let messageId: MessageId
+    var text: String
+    var problem: EditProblem?
 }

@@ -141,6 +141,8 @@ public final class SessionModel {
     /// What a message action asks before it removes reactions, until
     /// `answerMessageConfirmation(_:)`.
     public private(set) var messageConfirmation: MessageActionsModel.Confirmation?
+    /// What Delete asks, with the message, until `answerDeleteQuestion(_:)`.
+    public private(set) var deleteQuestion: MessageActionsModel.DeleteQuestion?
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
     public private(set) var reactors: ReactorsModel?
@@ -563,8 +565,9 @@ public final class SessionModel {
     /// messages lines, and loads each present a list doesn't show; scrolling both to the bottom
     /// is the view's part. With nothing to mark or load in either, it ends both lines and closes
     /// the split instead, as the official client does, also with a list scrolled up, and returns
-    /// false: nothing to scroll. Before any of that it cancels a pending reply and does nothing
-    /// else: the one of the pane Escape was pressed in (`pane`) first, else the open channel's.
+    /// false: nothing to scroll. Before any of that it ends an open edit, else cancels a pending
+    /// reply, and does nothing else: the one of the pane Escape was pressed in (`pane`) first,
+    /// else the open channel's.
     @discardableResult public func escape(from pane: ChannelId? = nil) -> Bool {
         if threadForm != nil {
             closeThreadForm()
@@ -572,6 +575,10 @@ public final class SessionModel {
         }
         let lists = [messages, split].compactMap { $0 }
         let replying = lists.filter { $0.channelId == pane } + lists
+        if let editor = replying.lazy.map(\.editor).first(where: { $0.editing != nil }) {
+            editor.cancel()
+            return false
+        }
         if let composer = replying.lazy.map(\.composer).first(where: { $0.reply != nil }) {
             composer.cancelReply()
             return false
@@ -987,7 +994,23 @@ public final class SessionModel {
             reactions: list.reactions,
             viewReactions: { [weak self] row in self?.viewReactions(of: row) },
             confirm: { [weak self] in self?.messageConfirmation = $0 },
+            edit: { [weak list] row in list?.editor.start(row) },
+            askDelete: { [weak self] in self?.askDelete($0) },
             failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    /// The answer to `deleteQuestion`: "Delete" deletes the message.
+    public func answerDeleteQuestion(_ delete: Bool) {
+        let asked = deleteQuestion
+        deleteQuestion = nil
+        if delete {
+            asked?.run()
+        }
+    }
+
+    private func askDelete(_ question: MessageActionsModel.DeleteQuestion) {
+        engage()
+        deleteQuestion = question
     }
 
     public func dismissMessageActionFailure() {
@@ -1648,6 +1671,12 @@ public final class SessionModel {
             channelId: channel, userId: userId, account: account, store: store, drafts: drafts)
         list.jumpElsewhere = { [weak self] channel, message in
             self?.jump(to: message, in: channel)
+        }
+        list.editor.askDelete = { [weak self, account] row in
+            self?.askDelete(
+                MessageActionsModel.deleteQuestion(row, showsTip: false, account: account) {
+                    [weak self] in self?.messageActionFailure = $0
+                })
         }
         follow(list.reactions)
         list.bottomChanged = { [weak self, weak list] scrolledAway in

@@ -356,6 +356,74 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.discard(channelId, pendingId))
     }
 
+    // Edits as the core does them: the saved text shows at once, pending; Discord's answer ends
+    // that, a refusal puts the old text back and keeps the saved one with the reason.
+    let editError = Locked<EditError?>(nil)
+    // Refused before asking: nothing changes.
+    let editRefusedEarly = Locked<EditError?>(nil)
+    // While set, each edit and delete waits for a reply before Discord's answer.
+    let holdEdits = Locked(false)
+    let editReplies = AsyncQueue<Void>()
+    let deleteError = Locked<RequestError?>(nil)
+    let holdDeletes = Locked(false)
+    let deleteReplies = AsyncQueue<Void>()
+
+    override func editMessage(channelId: ChannelId, messageId: MessageId, content: String) async throws {
+        log.append(.edit(channelId, messageId, content))
+        if let error = editRefusedEarly.current {
+            throw error
+        }
+        var before = ""
+        fakeStore.update { state in
+            before = state.messages[messageId]?.content ?? ""
+            state.messages[messageId]?.content = content
+            state.messages[messageId]?.edit = .pending
+        }
+        if holdEdits.current {
+            _ = await editReplies.next()
+        }
+        if let error = editError.current {
+            fakeStore.update { state in
+                state.messages[messageId]?.content = before
+                state.messages[messageId]?.edit = .failed(content: content, error: error)
+            }
+            throw error
+        }
+        fakeStore.update { state in
+            state.messages[messageId]?.edit = nil
+            state.messages[messageId]?.editedTimestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        }
+    }
+
+    override func dismissEdit(channelId: ChannelId, messageId: MessageId) {
+        log.append(.dismissEdit(channelId, messageId))
+        fakeStore.update { state in
+            if case .failed = state.messages[messageId]?.edit {
+                state.messages[messageId]?.edit = nil
+            }
+        }
+    }
+
+    // As the core: dimmed until Discord answers, then gone; a refusal undims it.
+    override func deleteMessage(channelId: ChannelId, messageId: MessageId) async throws {
+        log.append(.delete(channelId, messageId))
+        fakeStore.update { $0.messages[messageId]?.deleting = true }
+        if holdDeletes.current {
+            _ = await deleteReplies.next()
+        }
+        if let error = deleteError.current {
+            fakeStore.update { $0.messages[messageId]?.deleting = false }
+            throw error
+        }
+        fakeStore.update { state in
+            state.messages[messageId] = nil
+            if var window = state.windows[channelId] {
+                window.messageIds.removeAll { $0 == messageId }
+                state.windows[channelId] = window
+            }
+        }
+    }
+
     // The threads a fetch or check finds, put into the store as akari-core would; Discord refuses
     // the rest, which also leave the store.
     let fetchedThreads = Locked<[ChannelId: Channel]>([:])
