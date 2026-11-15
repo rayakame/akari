@@ -36,10 +36,11 @@ the core ([emoji-picker.md](../protocol/emoji-picker.md)).
 - The panel takes the keyboard. A press anywhere else in the window closes it and does nothing
   else; so do Escape, the window closing, minimizing, entering or leaving full screen, and the app
   going to the background.
-- **Its message's row stays lit** with its hover bar, as for its menu: the bar's Add Reaction is
-  lit (and the row's add button when that opened it), no other row hovers, and the pointer
-  over the list changes nothing. When the picker closes the row under the pointer hovers again.
-  A post's bar isn't a row: nothing is lit for "React to Post".
+- **Its message's row stays lit** with its hover bar, as for its menu: what opened the picker is
+  lit, the bar's Add Reaction (also for "View More") or the row's add button, not both; no other
+  row hovers, and the pointer over the list changes nothing. The lit add button goes with the
+  message when its row scrolls away and back. When the picker closes the row under the pointer
+  hovers again. A post's bar isn't a row: nothing is lit for "React to Post".
 - It closes itself when its message is deleted or leaves the list, its channel or server goes,
   or "Show emoji reactions" is turned off.
 
@@ -98,8 +99,13 @@ section lists, which are dimmed and why, and how recently used is counted is the
 ([emoji-picker.md](../protocol/emoji-picker.md)). A section without emoji is left out.
 
 - The sections stay as they were when the picker opened; a pick with Shift doesn't move its
-  emoji up in Frequently Used. They are read again, the selection kept, when a server's emoji,
-  the user's servers, their member, the user or the channel change.
+  emoji up in Frequently Used. They are read again when a server's emoji, the user's servers,
+  their roles or the user change, when a server the picker lists changes, and when the user's
+  permissions in the channel (a thread's: its parent's) change; a DM's new message reads nothing.
+  The selected emoji stays selected in its own section (an emoji can also be in Frequently Used),
+  else the emoji at its place there, and the grid stays where it is. Nothing changes on screen
+  when the lists come back as they were. During a search the search is asked again, and its
+  answer keeps the selection the same way.
 - Unicode emoji newer than the system's emoji font draws are left out: Emoji 15.0 (what macOS 14
   draws) and each later version whose emoji the font all draws as one picture.
 
@@ -119,16 +125,18 @@ section lists, which are dimmed and why, and how recently used is counted is the
 | Typing | searches |
 | Up, Down | the emoji above or below, the column kept, across sections; to the last emoji of a shorter row |
 | Left, Right | the emoji before or after, across sections |
-| Return | reacts with the selected emoji and closes |
+| Return | reacts with the selected emoji and closes; before the search's answer to what was typed, with the answer's first once it comes (typing more drops it) |
 | Shift+Return | reacts with it and stays open |
 | Escape | closes, also with a search typed (the field's ✕ empties it) |
 | The pointer over an emoji | selects it; the grid doesn't scroll |
-| A click on an emoji | reacts with it and closes; with Shift it stays open |
+| A click on an emoji | reacts with it and closes, on the release over the emoji pressed (dragging off cancels); with Shift at the release it stays open |
 
 - A key that moves the selection scrolls the grid just enough to show it below the pinned band;
   a strip button scrolls the section's band to the top.
 - Over an emoji the pointer is the hand; over a dimmed one the not-allowed sign, and a click or
-  Return does nothing.
+  Return sounds the system's refusal (the footer says why) and reacts with nothing.
+- The pinned band takes no pointer: the wheel over it scrolls the grid, and a click on it picks
+  nothing.
 - A pick adds the user's reaction; an emoji that is the user's reaction already stays theirs
   (the official client's add does nothing then). The pill shows at once, as for any reaction
   ([reactions.md](reactions.md#a-click-on-a-pill)), and the emoji counts as used.
@@ -142,6 +150,8 @@ section lists, which are dimmed and why, and how recently used is counted is the
 
 - *Left and Right move the selection, not the field's caret, as Up and Down do.*
 - *Escape closes the picker even with a search typed, as the Threads browser does.*
+- *Return before the search's answer waits for it rather than reacting with what showed before:
+  what the user typed is what they get.*
 
 ## Left out
 
