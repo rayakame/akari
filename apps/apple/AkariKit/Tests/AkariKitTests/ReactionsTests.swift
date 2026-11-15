@@ -289,6 +289,8 @@ final class ReactionsModelTests {
 
         #expect(menu.map(\.name) == [":laughing:", ":wave:", ":100:"])
         #expect(menu.map(\.mine) == [false, false, true])
+        #expect(store.reads.contains(.recentReactions(id(11), EmojiCatalog.newest)))
+        #expect(store.reads.contains(.quickReactions(id(11), EmojiCatalog.newest)))
     }
 
     @Test

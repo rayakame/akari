@@ -65,9 +65,12 @@ final class EmojiPickerTests {
                 == [.recent, .server(id(1)), .server(id(2))]
                 + EmojiCatalog.groups.map { .unicode($0.group) })
         #expect(
-            picker.sections.map(\.title).prefix(5)
-                == ["Frequently Used", "Home", "Other", "Smileys & Emotion", "People & Body"])
-        #expect(picker.sections.last?.title == "Flags")
+            picker.sections.map(\.title)
+                == [
+                    "Frequently Used", "Home", "Other", "Smileys & Emotion", "People & Body",
+                    "Animals & Nature", "Food & Drink", "Travel & Places", "Activities", "Objects",
+                    "Symbols", "Flags",
+                ])
         #expect(store.reads.contains(.recentReactions(here, EmojiCatalog.newest)))
         #expect(store.reads.contains(.customEmojiSections(here)))
     }
@@ -98,7 +101,12 @@ final class EmojiPickerTests {
         #expect(sections[1].icon == .guildIcon(guildId: id(1), hash: "abc"))
         #expect(sections[1].symbol == nil)
         #expect(sections[0].symbol == "clock")
-        #expect(sections.dropFirst(3).compactMap(\.symbol).count == 9)
+        #expect(
+            sections.dropFirst(3).map(\.symbol)
+                == [
+                    "face.smiling", "hand.wave", "pawprint", "fork.knife", "car", "basketball", "lightbulb",
+                    "heart", "flag",
+                ])
     }
 
     @Test
@@ -438,11 +446,33 @@ final class EmojiPickerTests {
     @Test(arguments: ["   ", ":", " :: "])
     func spacesAndColonsAloneSearchNothing(query: String) throws {
         let picker = try picker()
+        picker.select(at(2, 1))
+        changes = []
 
         picker.search(query)
 
+        #expect(picker.searches == 0)
+        #expect(picker.query == query)
         #expect(picker.sections.first?.kind == .recent)
-        #expect(calls.isEmpty)
+        #expect(picker.selection == at(2, 1))
+        #expect(changes.isEmpty)
+    }
+
+    @Test
+    func aNewSearchSelectsItsFirstResultAndEndingItTheFirstEmoji() async throws {
+        store.update { $0.emojiSearch = { _ in [pickerEmoji(7, "wave"), pickerEmoji("👋"), pickerEmoji("🌊")] } }
+        let picker = try picker()
+        picker.select(at(0, 2))
+
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+
+        #expect(picker.selection == at(0, 0))
+        picker.move(.right)
+        picker.move(.right)
+        picker.search("")
+        #expect(picker.sections.first?.kind == .recent)
+        #expect(picker.selection == at(0, 0))
     }
 
     // MARK: Picking
@@ -588,7 +618,7 @@ final class EmojiPickerTests {
 
     @Test(arguments: [
         StoreEvent.guildUpdated(guildId: id(2)), .currentMemberUpdated(guildId: id(1)), .currentUserUpdated,
-        .serverListChanged,
+        .serverListChanged, .ready,
     ])
     func whatDecidesWhichEmojiMayBeUsedReadsThemAgain(event: StoreEvent) throws {
         let picker = try picker()
@@ -622,6 +652,20 @@ final class EmojiPickerTests {
 
         try await eventually { self.calls.count == 2 }
         #expect(picker.sections.first?.kind == .results)
+    }
+
+    @Test
+    func aChangeDuringASearchShowsWhenItEnds() async throws {
+        store.update { $0.emojiSearch = { _ in [pickerEmoji(7, "wave")] } }
+        let picker = try picker()
+        picker.search("wa")
+        try await eventually { picker.sections.first?.kind == .results }
+        store.update { $0.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "new"), at: 0) }
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+
+        picker.search("")
+
+        #expect(picker.sections[1].items.map(\.name) == [":new:", ":wave:", ":cat:", ":gone:"])
     }
 
     // A DM's channel changes with each of its messages; nothing the lists depend on changes.
@@ -725,6 +769,19 @@ final class EmojiPickerTests {
 
         #expect(picker.selection == at(smileys, smiley))
         #expect(changes.last == .sections(fromTop: false))
+    }
+
+    // A server may have two emoji of one name; the official client shows the second as wave~1.
+    @Test
+    func aNewEmojiOfTheSameNameLeavesTheSelectionOnItsOwn() throws {
+        let picker = try picker()
+        picker.select(at(1, 0))
+        store.update { $0.emojiSections[id(11)]?[0].emojis.insert(customEmoji(6, "wave"), at: 0) }
+
+        reactions.apply(EventBatch([.guildEmojisChanged(guildId: id(1))]))
+
+        #expect(picker.selection == at(1, 1))
+        #expect(picker.selected?.key == .emoji(emojiId: id(7), animated: false))
     }
 
     @Test

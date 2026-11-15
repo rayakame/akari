@@ -61,8 +61,10 @@ final class ReactionActionsTests {
 
     @Test
     func theBarsQuickReactionsGoWithAddReactionAndLeaveWithShift() {
+        store.update { $0.recentReactions[id(11)] = [pickerEmoji("🔥")] }
+
         #expect(model().quickReactions(for: row()).map(\.emoji.name) == ["💯", "😆", "💖"])
-        #expect(model().menuReactions(for: row()).map(\.emoji.name) == ["💯", "😆", "💖"])
+        #expect(model().menuReactions(for: row()).map(\.emoji.name) == ["🔥", "💯", "😆", "💖"])
         #expect(model(without: true).menuReactions(for: row()).isEmpty)
         #expect(model().quickReactions(for: row(), shift: true).isEmpty)
         #expect(model().quickReactions(for: row(reacting(react: false))).isEmpty)
