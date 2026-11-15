@@ -596,6 +596,12 @@ fn editing_follows_discords_rule() {
             sent(THREAD, ME, 0),
             false,
         ),
+        (
+            "archived and locked, thread moderator",
+            member(MEMBER | MANAGE_THREADS, archived(true)),
+            sent(THREAD, ME, 0),
+            false,
+        ),
         ("locked", member(MEMBER, locked), sent(THREAD, ME, 0), false),
         (
             "locked, moderator",
@@ -698,6 +704,12 @@ fn deleting_follows_discords_rule() {
         (
             "archived and locked",
             owner(archived(true)),
+            sent(THREAD, ME, 0),
+            false,
+        ),
+        (
+            "archived and locked, thread moderator",
+            member(MEMBER | MANAGE_THREADS, archived(true)),
             sent(THREAD, ME, 0),
             false,
         ),
