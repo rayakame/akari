@@ -52,6 +52,21 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlayPreferenceValue(PinsButtonBounds.self) { anchor in
+            GeometryReader { proxy in
+                if let pins = session.pins, let anchor {
+                    let frame = PinsLayout.frame(of: pins, button: proxy[anchor], area: proxy.size)
+                    ChildWindowsHost(
+                        content: AnyView(
+                            PinsPanel(pins: pins, size: frame.size).imageEnvironment(session)),
+                        frame: frame, browser: true, label: PinsModel.title,
+                        onClose: session.closePins, refocus: session.refocusChannel
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .id(ObjectIdentifier(pins))
+                }
+            }
+        }
         .overlay {
             GeometryReader { proxy in
                 if let reactors = session.reactors {
@@ -194,6 +209,14 @@ struct SessionView<MessageArea: View>: View {
                     session.openThreadBrowser(of: parent, as: .popout)
                 }
             }
+        }
+    }
+
+    private var pinsButton: PinsButton? {
+        session.pinsChannel.map { _ in
+            PinsButton(
+                selected: session.pins != nil, unread: session.pinsUnread,
+                disabled: session.pinsDisabled, toggle: session.togglePins)
         }
     }
 
@@ -398,7 +421,8 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(
                 channel: openChannel, name: openName, parent: openParent,
-                openParent: session.openParent, threads: threadsButton, menu: threadMenu
+                openParent: session.openParent, threads: threadsButton, pins: pinsButton,
+                menu: threadMenu
             ) { item in
                 if let open = openChannel, let menu = threadMenu {
                     act(item, on: open.id, in: menu)

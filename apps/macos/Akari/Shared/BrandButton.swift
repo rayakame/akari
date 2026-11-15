@@ -15,6 +15,8 @@ struct BrandButton: View {
     let title: String
     var size = Size.medium
     var secondary = false
+    /// As wide as its place.
+    var fills = false
     let action: () -> Void
     @State private var hovered = false
 
@@ -22,7 +24,7 @@ struct BrandButton: View {
         Button(action: action) {
             Text(title)
         }
-        .buttonStyle(Style(size: size, secondary: secondary, hovered: hovered))
+        .buttonStyle(Style(size: size, secondary: secondary, hovered: hovered, fills: fills))
         .onHover { hovered = $0 }
         .background(CursorArea(.pointingHand))
     }
@@ -37,6 +39,7 @@ struct BrandButton: View {
         let size: Size
         let secondary: Bool
         let hovered: Bool
+        let fills: Bool
 
         private func fill(pressed: Bool) -> NSColor {
             if secondary {
@@ -51,7 +54,9 @@ struct BrandButton: View {
                 .foregroundStyle(secondary ? Color(nsColor: Palette.textStrong) : .white)
                 .lineLimit(1)
                 .padding(.horizontal, size.padding)
-                .frame(minWidth: size.minWidth, minHeight: size.height, maxHeight: size.height)
+                .frame(
+                    minWidth: size.minWidth, maxWidth: fills ? .infinity : nil, minHeight: size.height,
+                    maxHeight: size.height)
                 .background(
                     Color(nsColor: fill(pressed: configuration.isPressed)),
                     in: RoundedRectangle(cornerRadius: 8)

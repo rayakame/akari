@@ -6,7 +6,8 @@ import Testing
 @testable import Akari
 
 // "Ray pinned a message to this channel. See all pinned messages." (TB3.4): the actor, "a
-// message" and "pinned messages" white and medium, the rest gray; "a message" jumps to the pin.
+// message" and "pinned messages" white and medium, the rest gray; "a message" jumps to the pin,
+// "pinned messages" opens the channel's pins.
 @MainActor
 struct PinnedMessageLineTests {
     let list = MessageTableTests()
@@ -91,19 +92,33 @@ struct PinnedMessageLineTests {
         #expect(try underline("Ray") == nil)
     }
 
-    // "See all pinned messages" opens the pins popout, which Akari doesn't have yet.
+    // The line's own channel: a thread's line in the split opens the thread's pins.
     @Test
-    func pinnedMessagesIsntALinkYet() throws {
+    func pinnedMessagesTogglesTheLinesChannelsPins() throws {
+        let actions = MessageTableTests.RecordingActions()
+        list.controller.actions = actions
+        let (_, text) = try shown()
+        let link = try #require(try attribute(.link, of: "pinned messages", in: text))
+        #expect((link as? URL)?.absoluteString == "akari://pins")
+
+        actions.calls = []
+        text.clicked(onLink: link, at: try index(of: "pinned messages", in: text))
+
+        #expect(actions.calls == ["pins of 10"])
+    }
+
+    @Test
+    func pinnedMessagesShowsThePointerAndAnUnderlineOnHover() throws {
         let (_, text) = try shown()
         let layout = try #require(text.layoutManager)
+        #expect(text.cursor(at: try middle(of: "pinned messages", in: text)) == .pointingHand)
 
         text.underline(at: try middle(of: "pinned messages", in: text))
 
-        #expect(try attribute(.link, of: "pinned messages", in: text) == nil)
         #expect(
             layout.temporaryAttribute(
                 .underlineStyle, atCharacterIndex: try index(of: "pinned messages", in: text),
-                effectiveRange: nil) == nil)
+                effectiveRange: nil) as? Int == NSUnderlineStyle.single.rawValue)
     }
 
     @Test

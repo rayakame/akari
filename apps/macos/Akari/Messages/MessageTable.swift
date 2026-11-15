@@ -58,6 +58,7 @@ struct MessageArea: View {
     // A thread and the channel whose line names it.
     let openThread: (ChannelId, ChannelId) -> Void
     var openThreads: (ChannelId) -> Void = { _ in }
+    var togglePins: (ChannelId) -> Void = { _ in }
     // What this list's messages offer in their hover bars and menus.
     var messageActions: MessageActionsModel?
     // A clicked emoji's or sticker's popout.
@@ -96,7 +97,8 @@ struct MessageArea: View {
     @ViewBuilder private var list: some View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
-            openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
+            openThreads: openThreads, togglePins: togglePins, openGuild: openGuild,
+            markServerRead: markServerRead,
             escapeAll: escape, messageActions: messageActions, expressions: expressions,
             followPost: followPost)
         GeometryReader { geometry in
@@ -186,6 +188,7 @@ final class MessageListBridge: MessageListActions {
     let go: (ChannelId) -> Void
     let thread: (ChannelId, ChannelId) -> Void
     let threads: (ChannelId) -> Void
+    let pins: (ChannelId) -> Void
     let guild: (GuildId) -> Void
     let serverRead: () -> Void
     let escapeAll: (() -> Void)?
@@ -198,6 +201,7 @@ final class MessageListBridge: MessageListActions {
         go: @escaping (ChannelId) -> Void,
         openThread: @escaping (ChannelId, ChannelId) -> Void = { _, _ in },
         openThreads: @escaping (ChannelId) -> Void = { _ in },
+        togglePins: @escaping (ChannelId) -> Void = { _ in },
         openGuild: @escaping (GuildId) -> Void = { _ in },
         markServerRead: @escaping () -> Void,
         escapeAll: (() -> Void)? = nil,
@@ -211,6 +215,7 @@ final class MessageListBridge: MessageListActions {
         self.go = go
         thread = openThread
         threads = openThreads
+        pins = togglePins
         guild = openGuild
         serverRead = markServerRead
         self.escapeAll = escapeAll
@@ -350,6 +355,10 @@ final class MessageListBridge: MessageListActions {
 
     func openThreads(of channel: ChannelId) {
         threads(channel)
+    }
+
+    func togglePins(of channel: ChannelId) {
+        pins(channel)
     }
 
     func jump(to message: MessageId) {

@@ -1221,6 +1221,10 @@ struct MessageTableTests {
             calls.append("threads of \(channel.rawValue)")
         }
 
+        func togglePins(of channel: ChannelId) {
+            calls.append("pins of \(channel.rawValue)")
+        }
+
         func jump(to message: MessageId) {
             calls.append("jump to \(message.rawValue)")
         }

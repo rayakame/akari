@@ -30,6 +30,13 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var longFirstLine = 1
     /// Ray's first line ends in a custom emoji.
     var firstLineEmoji = false
+    /// #new's pinned messages, the newest pin first: Ray's, the user's notes, Ray's welcome, then
+    /// "Pinned message N".
+    var pins = 0
+    var pinsState = PinsState.loaded
+    var pinsMore = false
+    /// #new has a pin the user hasn't seen.
+    var pinsDot = false
     private(set) var account: BrowserAccount?
 
     @MainActor
@@ -37,7 +44,10 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
         let store = BrowserStore(
             empty: empty, extra: extra, more: more, lines: lines, creation: creation,
             threadSlowmode: threadSlowmode, longFirstLine: longFirstLine,
-            firstLineEmoji: firstLineEmoji)
+            firstLineEmoji: firstLineEmoji,
+            pins: PinsPage(
+                items: (0..<pins).map(Self.pinned), hasMore: pinsMore, state: pinsState),
+            pinsDot: pinsDot)
         let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
@@ -46,6 +56,32 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
         ) { _ in }
         session.open(.guild(Self.guild))
         return session
+    }
+
+    static let pinTexts = [
+        "The release is on Friday. Please test the build before then!",
+        "Notes from today's call:\n- the pins popout is in\n- reactions on cards next week",
+        "Welcome to #new! Read the pinned messages first.",
+    ]
+
+    // Each a day older than the one before; Ray's but the second.
+    nonisolated static func pinned(_ index: Int) -> PinnedMessage {
+        let date = now - TimeInterval(86_400 * (index + 1))
+        let id = MessageId(rawValue: snowflake(date))
+        let author = index == 1 ? me : ray
+        let name = author == me ? "rayakame" : "Ray"
+        let content = index < pinTexts.count ? pinTexts[index] : "Pinned message \(index + 1)"
+        let message = Message(
+            id: id, channelId: parent, kind: .default,
+            author: User(
+                id: author, username: name, globalName: nil, displayName: name, bot: false,
+                system: false, avatar: .defaultAvatar(index: UInt8(author.rawValue % 6))),
+            fromWebhook: false, content: content, timestamp: date, editedTimestamp: nil, pinned: true,
+            mentionEveryone: false, attachments: [], embeds: [], stickers: [], componentsV2: false,
+            delivery: .sent, formatted: formattedText(content: content), mentionsMe: false,
+            reference: nil, hasThread: false, mentions: [], call: nil, roleSubscription: nil,
+            purchasedProduct: nil, actor: nil, applicationName: nil, embedFields: [])
+        return PinnedMessage(message: message, pinnedAt: date)
     }
 
     // A snowflake at `date`, and back.
@@ -111,6 +147,29 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
     override func setReading(channelIds: [ChannelId]) {}
 
     override func setOpenChannels(channelIds: [ChannelId]) {}
+
+    // "load", "more", "ack", "pin <message>", "unpin <message>", as asked.
+    let pinCalls = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+    override func loadPins(channelId: ChannelId) async throws {
+        pinCalls.withLock { $0.append("load") }
+    }
+
+    override func loadMorePins(channelId: ChannelId) async throws {
+        pinCalls.withLock { $0.append("more") }
+    }
+
+    override func ackPins(channelId: ChannelId) {
+        pinCalls.withLock { $0.append("ack") }
+    }
+
+    override func pin(channelId: ChannelId, messageId: MessageId) async throws {
+        pinCalls.withLock { $0.append("pin \(messageId.rawValue)") }
+    }
+
+    override func unpin(channelId: ChannelId, messageId: MessageId) async throws {
+        pinCalls.withLock { $0.append("unpin \(messageId.rawValue)") }
+    }
 }
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
@@ -128,6 +187,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let firstLineEmoji: Bool
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
+    private let pinsPage: PinsPage
+    private let pinsDot: Bool
     static let lineIds = (1...3).map {
         MessageId(rawValue: FakeBrowserStore.snowflake(FakeBrowserStore.now - 3600) + $0)
     }
@@ -135,8 +196,11 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     init(
         empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false,
         creation: ThreadCreation = ThreadCreation(public: false, private: false),
-        threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1, firstLineEmoji: Bool = false
+        threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1, firstLineEmoji: Bool = false,
+        pins: PinsPage = PinsPage(items: [], hasMore: false, state: .loaded), pinsDot: Bool = false
     ) {
+        pinsPage = pins
+        self.pinsDot = pinsDot
         self.longFirstLine = longFirstLine
         self.firstLineEmoji = firstLineEmoji
         self.empty = empty
@@ -184,7 +248,18 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     }
 
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
-        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+        testMessageActions(
+            createThread: canStartThread(channelId: channelId, messageId: messageId),
+            unpin: pinsPage.items.contains { $0.message.id == messageId })
+    }
+
+    override func pins(channelId: ChannelId) -> PinsPage {
+        channelId == FakeBrowserStore.parent
+            ? pinsPage : PinsPage(items: [], hasMore: false, state: .notLoaded)
+    }
+
+    override func pinsUnread(channelId: ChannelId) -> Bool {
+        pinsDot && channelId == FakeBrowserStore.parent
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {

@@ -10,6 +10,8 @@ struct ChannelHeader: View {
     var openParent: () -> Void = {}
     /// The Threads button, where the channel has one.
     var threads: ThreadsButton?
+    /// The pins button, where the channel has one.
+    var pins: PinsButton?
     /// A thread's "…".
     var menu: ThreadMenu?
     var act: (ThreadMenu.Item) -> Void = { _ in }
@@ -52,14 +54,14 @@ struct ChannelHeader: View {
                 }
             }
             Spacer(minLength: 0)
-            if let threads {
+            HStack(spacing: 8) {
                 threads
-                    .padding(.trailing, menu == nil ? 8 : 0)
+                pins
+                if let menu {
+                    ThreadMenuButton(menu: menu, act: act)
+                }
             }
-            if let menu {
-                ThreadMenuButton(menu: menu, act: act)
-                    .padding(.trailing, 8)
-            }
+            .padding(.trailing, 8)
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)

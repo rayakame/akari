@@ -27,6 +27,7 @@ struct AkariApp: App {
         .commands {
             AccountCommands(app: launch.app)
             ThreadCommands(app: launch.app)
+            PinsCommands(app: launch.app)
             ThemeCommands()
             FullScreenCommands()
         }

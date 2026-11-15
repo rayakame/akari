@@ -145,7 +145,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             embeds?.detectsExpressions = expressionsEnabled
         }
     }
-    private var message: Message?
+    private(set) var message: Message?
     private var mentioned = false {
         didSet {
             if mentioned != oldValue {
