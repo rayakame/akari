@@ -1292,11 +1292,16 @@ struct MessageTableTests {
             return groups + (copies.isEmpty ? [] : [copies])
         }
 
-        /// The rows the actions were asked to act on, as they were handed over.
+        /// The rows the actions were asked to act on, as they were handed over, and where.
         var performed: [MessageListModel.Row] = []
+        var surfaces: [MessageActionsModel.Surface] = []
 
-        func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
+        func perform(
+            _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+            from surface: MessageActionsModel.Surface
+        ) {
             performed.append(row)
+            surfaces.append(surface)
             let name = action == .createThread ? "create thread from" : "\(action)"
             calls.append("\(name) \(row.message.id.rawValue)\(shift ? " shift" : "")")
         }

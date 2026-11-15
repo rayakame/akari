@@ -388,8 +388,11 @@ final class MessageListBridge: MessageListActions {
         messageActions?.menu(for: row) ?? []
     }
 
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
-        messageActions?.perform(action, on: row, shift: shift)
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface
+    ) {
+        messageActions?.perform(action, on: row, shift: shift, from: surface)
     }
 
     func markUnread(from row: MessageListModel.Row) {

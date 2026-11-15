@@ -44,7 +44,9 @@ protocol MessageListActions: AnyObject {
     func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem]
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]]
     // A button's or an item's click, with Shift as it was then.
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool)
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface)
     // An Option-click on a message.
     func markUnread(from row: MessageListModel.Row)
     // The emoji before the bar's buttons.
@@ -99,7 +101,10 @@ extension MessageListActions {
     func lastShownJump() -> Int { .max }
     func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] { [] }
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] { [] }
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface
+    ) {}
     func markUnread(from row: MessageListModel.Row) {}
     func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] { [] }
     func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] { [] }

@@ -1531,7 +1531,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             openPicker(for: row, from: .picker, beside: button)
             return
         }
-        actions?.perform(action, on: row, shift: modifiers().contains(.shift))
+        actions?.perform(
+            action, on: row, shift: modifiers().contains(.shift), from: button == nil ? .menu : .bar)
     }
 
     // A click on a pill: the row as it is now says whether the reaction is the user's.

@@ -70,6 +70,27 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                if let question = session.deleteQuestion {
+                    let frame = DeleteLayout.frame(for: question, in: proxy.size)
+                    ChildWindowsHost(
+                        content: AnyView(
+                            DeleteMessagePanel(
+                                question: question, size: frame.size,
+                                maxHeight: max(0, proxy.size.height - 2 * DeleteLayout.margin),
+                                answer: session.answerDeleteQuestion
+                            )
+                            .imageEnvironment(session)),
+                        frame: frame, browser: true, dimmed: true,
+                        label: MessageActionsModel.DeleteQuestion.title,
+                        onClose: { session.answerDeleteQuestion(false) }, refocus: session.refocusChannel
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .id(question.id)
+                }
+            }
+        }
         .overlayPreferenceValue(PeekRowBounds.self) { anchor in
             GeometryReader { proxy in
                 if let channel = hover.channel, let anchor, !session.peekedThreads.isEmpty {
