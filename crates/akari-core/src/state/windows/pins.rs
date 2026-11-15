@@ -193,7 +193,10 @@ impl Windows {
         if !self.wants_pins(channel, load, last_pin) {
             return None;
         }
-        let list = self.pins.entry(channel).or_default();
+        let list = match load {
+            PinsLoad::First => self.pins.entry(channel).or_default(),
+            PinsLoad::More => self.pins.get_mut(&channel)?,
+        };
         let before = match load {
             PinsLoad::First => None,
             PinsLoad::More => Some(list.items.get(list.confirmed.checked_sub(1)?)?.pinned_at),

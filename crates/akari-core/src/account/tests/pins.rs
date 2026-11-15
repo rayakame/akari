@@ -651,3 +651,22 @@ async fn a_pin_answered_401_ends_the_session() {
         ConnectionState::Closed { .. }
     ));
 }
+
+#[tokio::test]
+async fn a_pins_page_answered_401_ends_the_session() {
+    let online = pinning().await;
+    online
+        .answer("GET", "/pins$", ResponseTemplate::new(401))
+        .await;
+
+    let failed = online.account.load_pins(general()).await;
+
+    assert!(
+        matches!(failed, Err(RequestError::Unauthorized)),
+        "{failed:?}"
+    );
+    assert!(matches!(
+        online.account.store().connection(),
+        ConnectionState::Closed { .. }
+    ));
+}
