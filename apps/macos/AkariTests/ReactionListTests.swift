@@ -498,15 +498,19 @@ struct ReactionListTests {
     }
 
     @Test
-    func aSystemLinesAddButtonOpensThePickerFromTheInlineButton() throws {
+    func aSystemLinesAddButtonOpensThePickerFromTheInlineButtonWithTheLineAsItIsNow() throws {
         let join = row(5, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin)
         list.show([row(1, by: ray, at: list.noon), join.reacting(reactions(pill("👋", 4)))])
         let shown = try #require((try list.cell(of: 5) as? NoticeCell)?.reactions)
+        let changed = reactions(pill("👋", 5, mine: true))
+        list.show([row(1, by: ray, at: list.noon), join.reacting(changed)])
+        #expect((try list.cell(of: 5) as? NoticeCell)?.reactions === shown, "changed in place")
         list.actions.calls = []
 
         shown.add.performClick(nil)
 
         #expect(list.actions.calls == ["picker for 5 from inlineButton"])
+        #expect(list.actions.handed["picker"]?.reactions == changed)
     }
 
     @Test
@@ -793,6 +797,12 @@ struct ReactionBarTests {
         #expect(custom.picture.fallbackText == ":party:")
         #expect(list.bar.quickButtons[1].picture.isHidden)
         #expect(!list.bar.quickButtons[1].glyph.isHidden)
+
+        let later = ImageCache(source: FakeImageSource.stalling())
+        state.images = ImageCacheRef(later)
+        list.controller.show(state)
+        #expect(list.bar.quickButtons[0] === custom)
+        #expect(custom.picture.images === later)
     }
 
     @Test
@@ -814,6 +824,13 @@ struct ReactionBarTests {
         #expect(!button.picture.animates, "reduced motion: only under the pointer")
 
         list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: button))
+        #expect(button.picture.animates)
+
+        state.focused = false
+        list.controller.show(state)
+        #expect(!button.picture.animates, "the window lost the focus")
+        state.focused = true
+        list.controller.show(state)
         #expect(button.picture.animates)
 
         try list.hover(1)
@@ -880,8 +897,8 @@ struct ReactionBarTests {
     @Test
     func theMenusEmojiStandBesideTheirShortNames() async throws {
         let files = TestImages()
-        let cache = ImageCache(
-            source: FakeImageSource.serving(try files.png("party", pixels: 64), pixels: 64))
+        let source = FakeImageSource.serving(try files.png("party", pixels: 64), pixels: 64)
+        let cache = ImageCache(source: source)
         let party = QuickReaction(emoji: customPill(7, "party").emoji, mine: false)
 
         let items = MessageMenu.reactions(quick + [party], images: cache) { _ in }
@@ -890,9 +907,35 @@ struct ReactionBarTests {
         #expect(items.prefix(3).allSatisfy { $0.image?.size == NSSize(width: 16, height: 16) })
         try await eventually { items[3].image != nil }
         #expect(items[3].image?.size == NSSize(width: 16, height: 16))
+        // Sharp on a Retina screen.
+        #expect(source.requests.withLock { $0.first }?.width == 32)
         let removals = MessageMenu.removals([pill("👍", 2)], images: cache) { _ in }
         #expect(removals.map(\.title) == [":thumbsup:  2"])
         #expect(removals[0].image?.size == NSSize(width: 16, height: 16))
+    }
+
+    @Test
+    func theMenusRemovalsTakeTheListsImages() async throws {
+        let files = TestImages()
+        let cache = ImageCache(
+            source: FakeImageSource.serving(try files.png("party", pixels: 64), pixels: 64))
+        list.actions.removable[2] = [customPill(7, "party")]
+        list.controller.actions = ReactionMenuActions(list.actions, groups: groups())
+        var state = MessageTableState(
+            rows: [
+                row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+                row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second")
+                    .reacting(reactions(customPill(7, "party"))),
+            ], reachedOldest: true)
+        state.images = ImageCacheRef(cache)
+        list.controller.show(state)
+        list.window.layoutIfNeeded()
+        let cell = try #require(try list.cell(of: 2) as? MessageCell)
+
+        let remove = try #require(cell.menuItems().first { $0.title == "Remove Reactions" }?.submenu)
+
+        #expect(remove.items.map { $0.title } == [":party:  1"])
+        try await eventually { remove.items.first?.image != nil }
     }
 
     // A face fills the item's box as it fills a pill's.

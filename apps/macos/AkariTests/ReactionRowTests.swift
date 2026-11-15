@@ -476,6 +476,25 @@ struct ReactionRowViewTests {
     }
 
     @Test
+    func theAddButtonOfAnOpenPickerLooksAsUnderThePointer() throws {
+        let row = view(reactions(pill("👍")))
+        row.appearance = NSAppearance(named: .darkAqua)
+        row.add.viewDidChangeEffectiveAppearance()
+
+        row.add.isSelected = true
+
+        #expect(near(parts(row.add.layer?.backgroundColor), parts(NSColor(hex: "#202024"), in: .darkAqua)))
+        #expect((row.add.layer?.borderColor?.alpha ?? 0) > 0)
+        #expect(row.add.contentTintColor == Palette.interactiveTextActive)
+
+        row.add.isSelected = false
+
+        #expect(near(parts(row.add.layer?.backgroundColor), parts(NSColor(hex: "#1a1a1e"), in: .darkAqua)))
+        #expect(row.add.layer?.borderColor?.alpha == 0)
+        #expect(row.add.contentTintColor == Palette.interactiveText)
+    }
+
+    @Test
     func myOwnPillDoesntChangeUnderThePointer() {
         let row = view(reactions(pill("🎉", mine: true)))
         let mine = row.pills[0]

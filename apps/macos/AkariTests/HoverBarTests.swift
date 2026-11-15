@@ -1663,8 +1663,13 @@ struct MessageBridgeTests {
     func theBridgeListsTheMenusEmojiAndOpensThePickerFromWhereTheClickWas() throws {
         let reacting = try Reacting()
         let bridge = reacting.bridge
+        reacting.account.formattedStore.recent.withLock { $0 = [pickerEmoji("🔥")] }
 
-        #expect(bridge.menuReactions(for: message).map(\.name) == [":100:", ":laughing:", ":sparkling_heart:"])
+        #expect(
+            bridge.menuReactions(for: message).map(\.name) == [":fire:", ":100:", ":laughing:", ":sparkling_heart:"])
+        #expect(
+            bridge.quickReactions(for: message, shift: false).map(\.name)
+                == [":100:", ":laughing:", ":sparkling_heart:"])
         let picker = try #require(bridge.emojiPicker(for: message, from: .inlineButton))
 
         #expect(picker.messageId == message.message.id)

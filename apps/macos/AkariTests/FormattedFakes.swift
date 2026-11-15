@@ -123,13 +123,17 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     /// and remove others'.
     let shownReactions = OSAllocatedUnfairLock<[Reaction]>(initialState: [])
     let reactable = OSAllocatedUnfairLock(initialState: false)
+    /// The reactions the user used lately.
+    let recent = OSAllocatedUnfairLock<[PickerEmoji]>(initialState: [])
 
     override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] {
         shownReactions.withLock { $0 }
     }
     override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
-    override func recentReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] { [] }
+    override func recentReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] {
+        recent.withLock { $0 }
+    }
     override func quickReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] {
         ["💯", "😆", "💖"].map(pickerEmoji)
     }
