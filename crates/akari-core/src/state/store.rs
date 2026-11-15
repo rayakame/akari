@@ -30,8 +30,8 @@ use super::types::{
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
-    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, Outgoing, StarterFetch,
-    WindowLimits,
+    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, Outgoing, PinsAsk, PinsLoad,
+    PinsPage, StarterFetch, WindowLimits,
 };
 use crate::backlog::Backlog;
 use crate::emoji::{EmojiVersion, Query};
@@ -548,6 +548,42 @@ impl Store {
         self.write("older threads", |inner, events| {
             inner.state.abandon_older_threads(parent, page, events);
         });
+    }
+
+    // Read first: a host asks each time its pins popout opens.
+    pub(crate) fn begin_pins(&self, channel: ChannelId, load: PinsLoad) -> Option<PinsAsk> {
+        if !self.read(|inner| inner.state.wants_pins(channel, load)) {
+            return None;
+        }
+        self.write("pins", |inner, events| {
+            inner.state.begin_pins(channel, load, events)
+        })
+    }
+
+    pub(crate) fn finish_pins(&self, ask: PinsAsk, page: model::MessagePins) {
+        self.write("pins", |inner, events| {
+            inner.state.finish_pins(ask, page, events);
+        });
+    }
+
+    pub(crate) fn fail_pins(&self, ask: PinsAsk) {
+        self.write("pins", |inner, events| inner.state.fail_pins(ask, events));
+    }
+
+    pub(crate) fn abandon_pins(&self, ask: PinsAsk) {
+        self.write("pins", |inner, events| {
+            inner.state.abandon_pins(ask, events);
+        });
+    }
+
+    // `false` when the dot doesn't show: nothing to ack.
+    pub(crate) fn ack_pins(&self, channel: ChannelId) -> bool {
+        if !self.pins_unread(channel) {
+            return false;
+        }
+        self.write("pins ack", |inner, events| {
+            inner.state.ack_pins(channel, events)
+        })
     }
 
     // The connection a search is asked in, for `keep_found_threads`.
@@ -1706,6 +1742,16 @@ impl Store {
     pub fn pins_unread(&self, channel: ChannelId) -> bool {
         let now = Timestamp::from_unix_millis(self.now_millis());
         self.read(|inner| inner.state.pins_unread(channel, now))
+    }
+
+    /// The channel's pinned messages as loaded in their own list, the newest pin first:
+    /// [`Account::load_pins`](crate::Account::load_pins) and
+    /// [`load_more_pins`](crate::Account::load_more_pins) fill it a page at a time, the gateway
+    /// keeps it current (edits, reactions, deletes, pins and unpins), and a new session leaves
+    /// it shown but `NotLoaded`. `PinsChanged` says to read it again. Only the 10 channels whose
+    /// pins were asked for last keep their list.
+    pub fn pins(&self, channel: ChannelId) -> PinsPage {
+        self.read(|inner| inner.state.pins(channel))
     }
 
     /// The message a reply answers, by the IDs [`Message::replied_to`] gives (the target's

@@ -213,6 +213,8 @@ fn copies() -> Vec<Copy> {
     held.windows.mark_stale(&mut Vec::new());
     apply(&mut held, "MESSAGE_CREATE", mine(ORIGIN, GENERAL));
     assert_eq!(held.windows.held(id(GENERAL)).len(), 1);
+    let mut pins = ready_state();
+    pinned_only(&mut pins, GENERAL, &[mine(10, GENERAL)]);
 
     let mut target = general();
     apply(&mut target, "MESSAGE_CREATE", reply_to_ten(11));
@@ -282,6 +284,13 @@ fn copies() -> Vec<Copy> {
                 ReplyTarget::Loaded(preview) => preview.content.to_string(),
                 other => panic!("expected a loaded target, got {other:?}"),
             },
+        },
+        Copy {
+            name: "pins list",
+            state: pins,
+            row: (GENERAL, 10),
+            message: (GENERAL, 10),
+            read: |state| state.pins(id(GENERAL)).items[0].message.content.to_string(),
         },
     ]
 }
@@ -353,6 +362,7 @@ fn each_copy_tells_what_shows_it_of_a_save() {
                 "reply target",
                 vec![updated(10), format!("ReplyTargetChanged({GENERAL}, 10)")]
             ),
+            ("pins list", vec![format!("PinsChanged({GENERAL})")]),
         ]
     );
 }
@@ -1144,6 +1154,7 @@ fn a_confirmed_delete_takes_the_message_from_every_copy_at_once() {
                 state.reply_target(id(GENERAL), id(10)),
                 ReplyTarget::Deleted
             ),
+            "pins list" => assert!(state.pins(id(GENERAL)).items.is_empty()),
             _ => unreachable!(),
         }
     }

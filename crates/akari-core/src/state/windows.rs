@@ -21,6 +21,11 @@ pub(crate) const DEFAULT_LIMITS: WindowLimits = WindowLimits {
     messages: 200,
 };
 
+mod pins;
+
+pub(crate) use pins::{PINS_PAGE, PinsAsk, PinsLoad};
+pub use pins::{PinnedMessage, PinsPage, PinsState};
+
 const RECENT_AUTHORS: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,6 +465,9 @@ pub(crate) struct Windows {
     targets: ReplyTargets,
     // The message each channel's pending reply answers: its target stays without the window.
     holds: HashMap<ChannelId, MessageId>,
+    pins: HashMap<ChannelId, pins::PinsList>,
+    // Tickets and uses of the pins lists.
+    pin_counter: u64,
 }
 
 // `Some(None)`: Discord sent it along as deleted.
@@ -495,6 +503,8 @@ impl Windows {
             starters: HashMap::new(),
             targets: ReplyTargets::default(),
             holds: HashMap::new(),
+            pins: HashMap::new(),
+            pin_counter: 0,
         }
     }
 
@@ -980,6 +990,7 @@ impl Windows {
             _ => None,
         });
         rows.chain(starters)
+            .chain(self.pinned_messages())
             .filter_map(|message| message.replied_to())
             .filter(|(named, _)| *named == channel)
             .map(|(_, id)| id)
@@ -1533,6 +1544,28 @@ impl Windows {
         window.release_or_drop_held(channel_id, limit, events);
     }
 
+    // The message as the window, a held message or a viewed thread's starter has it.
+    fn known_copy(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        let window = self.windows.get(&channel);
+        window
+            .and_then(|window| {
+                [&window.messages, &window.held]
+                    .into_iter()
+                    .find_map(|copies| copies.get(Window::position(copies, id).ok()?))
+            })
+            .cloned()
+            .or_else(|| {
+                self.starters.values().find_map(|starter| match starter {
+                    Starter::Found(message)
+                        if message.channel_id == channel && message.id == id =>
+                    {
+                        Some(message.clone())
+                    }
+                    _ => None,
+                })
+            })
+    }
+
     pub(crate) fn update(
         &mut self,
         update: MessageUpdate,
@@ -1546,7 +1579,9 @@ impl Windows {
         self.targets
             .update(&update, &mut |user| intern(user, users, recent), events);
         let (channel, id) = (update.channel_id, update.id);
+        let known = self.known_copy(channel, id);
         let starters = self.update_starters(&update, users);
+        self.update_pins(&update, known, users, events);
         let Some(window) = self.windows.get_mut(&channel) else {
             self.announce_starters(channel, id, starters, events);
             return;
@@ -1616,6 +1651,7 @@ impl Windows {
         events: &mut Vec<StoreEvent>,
     ) -> bool {
         let mut row = false;
+        self.react_pins(channel_id, id, changes, events);
         if let Some(window) = self.windows.get_mut(&channel_id) {
             for change in changes {
                 window.miss(Missed::Reacted(id, change.clone()));
@@ -1669,6 +1705,7 @@ impl Windows {
     ) {
         self.targets.delete(channel_id, id, events);
         self.starters_gone(channel_id, id, events);
+        self.delete_pin(channel_id, id, events);
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
@@ -1708,6 +1745,7 @@ impl Windows {
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
         self.drop_starter(channel);
+        self.drop_pins(channel);
         self.holds.remove(&channel);
         self.targets.drop_channel(channel);
         let generation = self.next_generation();
@@ -1756,6 +1794,7 @@ impl Windows {
                 events.push(StoreEvent::MessagesStale { channel_id });
             }
         }
+        self.stale_pins(events);
     }
 }
 

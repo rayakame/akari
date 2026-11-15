@@ -970,6 +970,7 @@ impl State {
                         Arc::make_mut(stored).last_pin_timestamp = update.last_pin_timestamp;
                     }
                 });
+                self.name_pin(update.channel_id, events);
             }
             E::ChannelPinsAck(ack) => {
                 self.changing_pins(ack.channel_id, events, |state| {
@@ -2334,6 +2335,7 @@ mod edits;
 mod forum;
 mod media;
 mod picker;
+mod pins;
 mod reactions;
 mod reading;
 

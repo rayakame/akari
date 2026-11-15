@@ -243,7 +243,9 @@ impl State {
             self.reread_boxes(update.channel_id, events);
         }
         self.update_first_message(&update, events);
+        let channel = update.channel_id;
         self.windows.update(update, &self.entities.users, events);
+        self.name_pin(channel, events);
     }
 
     pub(super) fn remove_messages(

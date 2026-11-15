@@ -198,6 +198,12 @@ impl State {
             .is_some_and(|reference| reference.kind == MessageReferenceType::Forward);
 
         let reply = self.takes_replies(channel, permissions, kind);
+        // The pins list is Discord's newer word than a copy loaded before the pin.
+        let pinned = message.pinned
+            || self
+                .windows
+                .pinned(message.channel_id, message.id)
+                .is_some();
         let pinnable = !system_dm
             && user_message
             && can(Permissions::PIN_MESSAGES | Permissions::READ_MESSAGE_HISTORY)
@@ -228,8 +234,8 @@ impl State {
                 && writable
                 && !UNDELETABLE.contains(&kind)
                 && (kind != AUTO_MODERATION_ACTION || moderator),
-            pin: pinnable && !message.pinned,
-            unpin: pinnable && message.pinned,
+            pin: pinnable && !pinned,
+            unpin: pinnable && pinned,
             react: reactions && can(Permissions::ADD_REACTIONS),
             toggle_reaction: reactions && !self.is_silenced(channel, now_millis),
             remove_reactions: moderator && writable,
@@ -249,6 +255,7 @@ impl State {
                     .into_iter()
                     .find(|message| message.id == id)
             })
+            .or_else(|| self.windows.pinned(channel, id))
     }
 
     fn is_system_dm(&self, channel: &Channel) -> bool {
