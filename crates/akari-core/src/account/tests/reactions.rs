@@ -1982,3 +1982,54 @@ async fn a_reaction_made_is_a_quick_reaction_after() {
         .collect();
     assert_eq!(quick, ["fire", "100", "laughing"]);
 }
+
+#[tokio::test]
+async fn taking_back_ones_own_kinds_of_a_nameless_custom_emoji_goes_by_the_servers_name() {
+    let mut online = reacting().await;
+    online
+        .dispatch(
+            "GUILD_EMOJIS_UPDATE",
+            json!({"guild_id": G1.to_string(), "emojis": [{"id": "7", "name": "wave"}]}),
+        )
+        .await;
+    for kind in [0, 1] {
+        online
+            .dispatch(
+                ADD,
+                json!({
+                    "channel_id": GENERAL.to_string(), "message_id": TARGET.to_string(),
+                    "user_id": ME_ID.to_string(), "emoji": {"id": "7", "name": null}, "type": kind,
+                }),
+            )
+            .await;
+    }
+    online.events().await;
+    online.answer(204).await;
+    let nameless = ReactionEmoji::custom(Snowflake::new(7), None, false);
+
+    online
+        .account
+        .remove_reaction(
+            general(),
+            target(),
+            &nameless,
+            ReactionKind::Burst,
+            Snowflake::new(ME_ID),
+        )
+        .await
+        .unwrap();
+    online
+        .account
+        .unreact(general(), target(), &nameless, INLINE)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        online.lines().await,
+        [
+            format!("DELETE {BASE}/wave:7/1/@me?location=Message&burst=true"),
+            format!("DELETE {BASE}/wave:7/0/@me?location=Message%20Inline%20Button&burst=false"),
+        ]
+    );
+    assert_eq!(online.shown(), []);
+}

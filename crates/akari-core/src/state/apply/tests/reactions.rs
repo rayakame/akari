@@ -2390,3 +2390,20 @@ fn adding_a_reaction_counts_its_emoji_as_used() {
         "a message the store doesn't have"
     );
 }
+
+// Its late echoes count nothing; once the PUT's is held back, reacting again is a use.
+#[test]
+fn a_reaction_made_again_while_its_echoes_are_late_counts_once_more() {
+    let mut state = on_ten();
+    settled(&mut state, true);
+    assert_eq!(used(&state), [(UP.to_owned(), 1)]);
+
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, UP),
+        NOTHING,
+        "the PUT's echo"
+    );
+    assert_eq!(used(&state), [(UP.to_owned(), 1)]);
+    assert!(click(&mut state, true).changed);
+    assert_eq!(used(&state), [(UP.to_owned(), 2)], "made again");
+}
