@@ -293,7 +293,8 @@ struct MessageEditorTests {
             x: 0, y: MessageEditorView.top, width: editor.bounds.width,
             height: editor.textView.frame.height)
         #expect(box.contains(counter.frame))
-        #expect(box.maxX - counter.frame.maxX == MessageEditorView.counterTrailing)
+        let textEnd = counter.frame.maxX - (cell - text) / 2
+        #expect(abs(box.maxX - textEnd - MessageEditorView.counterTrailing) <= 0.5, "the digits end 14 in")
         #expect(
             editor.textView.frame.maxX - ComposerTextView.insets.width <= counter.frame.minX,
             "the text wraps before the counter")

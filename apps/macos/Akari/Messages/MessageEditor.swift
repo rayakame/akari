@@ -207,8 +207,9 @@ final class MessageEditorView: NSView {
         let counterSize = self.counterSize
         // Its middle on the last line's, as the composer's counter.
         let lastLine = boxFrame.maxY - ComposerTextView.insets.height - ComposerTextView.lineHeight / 2
+        // A label's text ends 2 short of its frame: the digits end 14 in.
         counter.frame = NSRect(
-            x: boxFrame.maxX - Self.counterTrailing - counterSize.width,
+            x: boxFrame.maxX - Self.counterTrailing + 2 - counterSize.width,
             y: (lastLine - counterSize.height / 2).rounded(), width: counterSize.width,
             height: counterSize.height)
         var y = boxFrame.maxY
