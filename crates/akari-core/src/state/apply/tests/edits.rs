@@ -396,6 +396,32 @@ fn a_starter_row_is_told_when_only_the_parents_copy_changes() {
     assert_eq!(starter_text(&state), "elsewhere");
 }
 
+// As a page: a starter fetched again while a save of its message waits shows the saved text.
+#[test]
+fn a_starter_fetched_while_a_save_waits_shows_the_saved_text() {
+    let mut copy = copies().remove(3);
+    assert_eq!(copy.name, "fetched starter");
+    let state = &mut copy.state;
+    save(state, THREAD, STARTER_ROW, "saved");
+    asked(state, GENERAL, ORIGIN);
+    // The thread's list let go, and opened again: its starter is fetched anew.
+    for other in 0..10 {
+        state.view_channel(id(900 + other), &mut Vec::new());
+    }
+    state.view_channel(id(THREAD), &mut Vec::new());
+    apply(state, "MESSAGE_CREATE", starter_row(None));
+    assert!(state.starter_to_fetch(id(THREAD)).is_some());
+
+    let origin = wire(&mine(ORIGIN, GENERAL));
+    state.settle_starter(
+        id(THREAD),
+        StarterFetch::Found(Box::new(origin)),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(starter_text(state), "saved");
+}
+
 #[test]
 fn an_edit_from_the_gateway_reaches_a_fetched_starter_and_tells_its_row() {
     let mut copy = copies().remove(3);

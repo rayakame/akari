@@ -2203,10 +2203,11 @@ impl State {
     pub(crate) fn settle_starter(
         &mut self,
         thread: ChannelId,
-        fetch: StarterFetch,
+        mut fetch: StarterFetch,
         events: &mut Vec<StoreEvent>,
     ) {
-        if let StarterFetch::Found(original) = &fetch {
+        if let StarterFetch::Found(original) = &mut fetch {
+            self.show_saved_text(original);
             self.put_threads_of(std::slice::from_ref(original), events);
         }
         self.windows
