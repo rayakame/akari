@@ -92,6 +92,12 @@ public final class EditModel {
         public let problem: EditProblem?
         /// Counts the openings: each one puts `text` into the editor and gives it the focus.
         public let opening: Int
+
+        public init(messageId: MessageId, problem: EditProblem? = nil, opening: Int) {
+            self.messageId = messageId
+            self.problem = problem
+            self.opening = opening
+        }
     }
 
     public let channelId: ChannelId
