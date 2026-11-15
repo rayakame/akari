@@ -530,6 +530,8 @@ fn a_pinned_message_a_reply_names_answers_it_once_a_page_brings_it() {
 #[test]
 fn a_reload_after_a_new_session_takes_the_pages_counts() {
     let mut state = three_pins();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", pinned(3, GENERAL));
     react(&mut state, 3);
     apply(&mut state, "READY", ready_value());
 
@@ -885,4 +887,45 @@ fn a_page_answered_once_is_never_answered_again() {
     assert!(events.is_empty());
     assert_eq!(page(&state).state, PinsState::Loaded);
     assert_eq!(listed(&state), [3]);
+}
+
+// Each pin's CHANNEL_PINS_UPDATE follows its MESSAGE_UPDATE, in the order of the pins.
+#[test]
+fn the_channels_pin_times_name_the_gateways_pins_oldest_first() {
+    let mut state = three_pins();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    apply(&mut state, "MESSAGE_CREATE", message(11, GENERAL));
+    whole(&mut state, 10, true, "first");
+    whole(&mut state, 11, true, "second");
+
+    last_pin(&mut state, 9);
+    last_pin(&mut state, 10);
+
+    let times: Vec<i64> = page(&state)
+        .items
+        .iter()
+        .map(|item| item.pinned_at.unix_millis())
+        .collect();
+    assert_eq!(listed(&state), [11, 10, 3, 2, 1]);
+    assert_eq!(times[..2], [at(10), at(9)]);
+}
+
+// The window's copy counted every reaction since; a page built after one already has it.
+#[test]
+fn a_first_page_takes_the_counts_of_the_windows_current_copy() {
+    let mut state = ready_state();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", pinned(3, GENERAL));
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    react(&mut state, 3);
+    let mut counted = pin(3, 3);
+    counted["message"]["reactions"] = json!([{
+        "emoji": {"id": null, "name": "🔥"}, "count": 1,
+        "count_details": {"normal": 1, "burst": 0}, "me": false, "me_burst": false,
+    }]);
+
+    finish(&mut state, ask.unwrap(), &[counted], false);
+
+    assert_eq!(fires(&state, 3), 1);
 }

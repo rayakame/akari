@@ -95,7 +95,7 @@ pub(super) struct PinsList {
     previous: PinsState,
     // The newest pin time of the channel's that the list has placed.
     newest: Option<Timestamp>,
-    // The page asked last; an answer with another is from before a new session.
+    // The page asked last: an answer to an earlier one is dropped.
     ticket: u64,
     // Changes while a page loads, which it may predate.
     missed: Vec<Missed>,
@@ -335,7 +335,12 @@ impl Windows {
         let Some(time) = last_pin.filter(|time| newer(*time, list.newest)) else {
             return;
         };
-        if let Some(pin) = list.items.iter_mut().find(|pin| pin.live && !pin.named) {
+        if let Some(pin) = list
+            .items
+            .iter_mut()
+            .rev()
+            .find(|pin| pin.live && !pin.named)
+        {
             pin.pinned_at = time;
             pin.named = true;
             list.newest = Some(time);
@@ -377,8 +382,7 @@ impl Windows {
             // Pinned before and not listed: on a page not loaded yet.
             (None, Some(true)) => match known.filter(|known| !known.pinned || list.complete()) {
                 Some(known) => {
-                    let mut message = known.patch(update.clone(), &mut interned);
-                    message.pinned = true;
+                    let message = known.patch(update.clone(), &mut interned);
                     let now = Timestamp::from_unix_millis(wall_millis());
                     let front = list.items.first().map(|pin| pin.pinned_at);
                     list.items.insert(
@@ -453,7 +457,6 @@ impl Windows {
         let mut channels: Vec<ChannelId> = self.pins.keys().copied().collect();
         channels.sort_unstable();
         for channel in channels {
-            self.pin_counter += 1;
             let Some(list) = self.pins.get_mut(&channel) else {
                 continue;
             };
@@ -461,7 +464,6 @@ impl Windows {
             list.fresh = false;
             list.state = PinsState::NotLoaded;
             list.previous = PinsState::NotLoaded;
-            list.ticket = self.pin_counter;
             list.missed.clear();
             for pin in &mut list.items {
                 pin.live = false;
