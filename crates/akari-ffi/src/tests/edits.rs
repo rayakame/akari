@@ -126,6 +126,23 @@ async fn a_saved_edit_shows_pending_on_the_record_until_discord_answers() {
 }
 
 #[tokio::test]
+async fn an_edit_reaches_discord_as_typed() {
+    let editing = editing().await;
+    editing.answer("PATCH", edited("  new  ")).await;
+
+    editing
+        .account
+        .edit_message(GENERAL, MESSAGE, "  new  ".to_owned())
+        .await
+        .unwrap();
+
+    let requests = editing.server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["content"], "  new  ");
+    editing.account.close();
+}
+
+#[tokio::test]
 async fn a_refused_edit_keeps_its_text_and_reason_on_the_record_until_dismissed() {
     let editing = editing().await;
     editing
@@ -259,6 +276,14 @@ fn every_edit_error_crosses_with_what_the_ui_says() {
         ),
         (Core::Forbidden, EditError::Forbidden),
         (Core::Deleted, EditError::Deleted),
+        (
+            Core::RateLimited {
+                retry_after: Some(Duration::from_secs(5)),
+            },
+            EditError::RateLimited {
+                retry_after: Some(Duration::from_secs(5)),
+            },
+        ),
         (
             Core::RateLimited { retry_after: None },
             EditError::RateLimited { retry_after: None },

@@ -816,4 +816,82 @@ async fn a_closed_account_refuses_edits_and_deletes() {
     assert!(matches!(delete, Err(RequestError::Closed)), "{delete:?}");
     assert_eq!(online.text(), "hi");
     assert!(!online.deleting());
+    assert_eq!(online.edit(), "none", "nothing was shown or kept");
+}
+
+// Refused before anything shows: the closed account's store isn't written.
+#[tokio::test]
+async fn a_closed_account_shows_neither_a_save_nor_a_dimmed_delete() {
+    for delete in [false, true] {
+        let online = editing().await;
+        online.account.close();
+        let store = online.account.store();
+        let before = store.changes();
+
+        if delete {
+            assert!(online.delete().await.is_err());
+        } else {
+            assert!(online.edit_to("new").await.is_err());
+        }
+
+        assert_eq!(store.changes(), before, "delete {delete}");
+    }
+}
+
+#[tokio::test]
+async fn a_401_on_an_edit_or_a_delete_ends_the_session() {
+    for delete in [false, true] {
+        let mut online = editing().await;
+        online
+            .answer(
+                if delete { "DELETE" } else { "PATCH" },
+                ResponseTemplate::new(401),
+            )
+            .await;
+
+        let unauthorized = if delete {
+            matches!(online.delete().await, Err(RequestError::Unauthorized))
+        } else {
+            matches!(
+                online.edit_to("new").await,
+                Err(EditError::Request(RequestError::Unauthorized))
+            )
+        };
+
+        assert!(unauthorized, "delete {delete}");
+        assert_eq!(online.connection.client_close_code().await, Some(1000));
+        assert!(
+            matches!(
+                online.account.store().connection(),
+                ConnectionState::Closed { error: Some(error) }
+                    if matches!(*error, GatewayError::AuthenticationFailed)
+            ),
+            "delete {delete}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_edit_of_exactly_the_limit_is_asked() {
+    let online = editing().await;
+    let text = "a".repeat(2000);
+    online.answer("PATCH", edited(&text)).await;
+
+    online.edit_to(&text).await.unwrap();
+
+    assert_eq!(online.lines().await.len(), 1);
+    assert_eq!(online.text(), text);
+}
+
+// A save back to the old text before the worker asked: the worker finds nothing and answers Ok.
+#[tokio::test]
+async fn a_save_back_before_the_request_went_answers_both_callers_ok() {
+    let online = editing().await;
+
+    let (first, back) = tokio::join!(online.edit_to("first"), online.edit_to("hi"));
+
+    first.unwrap();
+    back.unwrap();
+    assert!(online.lines().await.is_empty(), "nothing asked");
+    assert_eq!(online.edit(), "none");
 }
