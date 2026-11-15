@@ -19,6 +19,7 @@ final class PinActionsTests {
             state.add(guild(1))
             state.list([channel(11, name: "general"), thread(31, in: 11, name: "plans")], in: 1)
             state.channels[id(20)] = dm(20, with: 2)
+            state.channels[id(22)] = group(22, name: "trio", with: [2, 3])
         }
     }
 
@@ -119,9 +120,9 @@ final class PinActionsTests {
         try await eventually { self.store.log.calls.contains(.pin(id(11), id(100))) }
     }
 
-    @Test
-    func aConversationsQuestionSpeaksOfTheCurrentChannel() throws {
-        model().perform(.pin, on: row(100, in: 20))
+    @Test(arguments: [20, 22] as [UInt64])
+    func aConversationsQuestionSpeaksOfTheCurrentChannel(conversation: UInt64) throws {
+        model().perform(.pin, on: row(100, in: conversation))
 
         #expect(
             try #require(questions.first).message
@@ -213,8 +214,9 @@ final class PinActionsTests {
 
         model().perform(.pin, on: row(100), shift: true)
         model().perform(.pin, on: row(101, in: 20), shift: true)
+        model().perform(.pin, on: row(102, in: 22), shift: true)
 
-        try await eventually { self.failures.count == 2 }
+        try await eventually { self.failures.count == 3 }
         #expect(Set(failures.map(\.title)) == ["The Pin Broke"])
         #expect(
             Set(failures.map(\.message)) == [
@@ -339,6 +341,39 @@ final class SessionPinQuestionTests {
         #expect(session.pinQuestion != nil, "an edit leaves it")
         store.update { $0.allow(allowed(unpin: true), message: 100, in: 11) }
         session.apply(EventBatch([.messageUpdated(channelId: id(11), messageId: id(100))]))
+
+        #expect(session.pinQuestion == nil)
+        session.close()
+    }
+
+    // A thread's starter row shows its parent's message, whose update and pins are the parent's.
+    @Test
+    func aStarterRowsQuestionClosesWhenItsParentsMessageIsPinnedElsewhere() throws {
+        let list = try list()
+        let starter = MessageListModel.Row(
+            id: id(31), message: message(31, in: 31, kind: .threadStarterMessage),
+            starter: .loaded(message(7, in: 11)))
+        store.update { $0.allow(allowed(pin: true), message: 31, in: 31) }
+        session.messageActions(for: list) { _ in }.perform(.pin, on: starter)
+        #expect(session.pinQuestion?.row.id == id(31))
+
+        store.update { $0.allow(allowed(unpin: true), message: 31, in: 31) }
+        session.apply(
+            EventBatch([
+                .messageUpdated(channelId: id(11), messageId: id(7)), .pinsChanged(channelId: id(11)),
+            ]))
+
+        #expect(session.pinQuestion == nil)
+        session.close()
+    }
+
+    @Test
+    func aQuestionThatANewSessionAnsweredCloses() throws {
+        let list = try list()
+        session.messageActions(for: list) { _ in }.perform(.pin, on: try #require(list.rows.first))
+
+        store.update { $0.allow(allowed(unpin: true), message: 100, in: 11) }
+        session.apply(EventBatch([.ready]))
 
         #expect(session.pinQuestion == nil)
         session.close()
