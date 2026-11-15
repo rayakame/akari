@@ -1077,6 +1077,23 @@ struct EmojiPickerListTests {
     }
 
     @Test
+    func theOpenPickerTakesTheListsNewMotionPolicy() throws {
+        show()
+        try list.hover(2)
+        try #require(list.bar.button(.addReaction)).performClick(nil)
+        let view = try #require(presenter.view)
+        var state = list.controller.state
+        state.motion = MotionPolicy(settings: displayDefaults(), reduceMotion: true)
+        #expect(view.motion != state.motion)
+
+        list.controller.show(state)
+
+        #expect(view.motion == state.motion)
+        #expect(view.grid.motion == state.motion)
+        presenter.close()
+    }
+
+    @Test
     func onlyTheButtonThatOpenedThePickerIsLit() throws {
         show(reactions(pill("👍")))
         try list.hover(2)

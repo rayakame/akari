@@ -338,6 +338,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             updateAvatarAnimation()
             updateMediaAnimation()
             updateQuickAnimation()
+            emojiPicker.view?.motion = state.motion
         }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
