@@ -1377,6 +1377,32 @@ struct MessageTableTests {
             calls.append("view reactions of \(row.message.id.rawValue)")
         }
 
+        /// The inline editor's text as the model holds it, and what is left of the limit.
+        var editing = ""
+        var left: Int?
+        var typed: [String] = []
+
+        func editText() -> String {
+            editing
+        }
+
+        func editChanged(_ text: String) {
+            editing = text
+            typed.append(text)
+        }
+
+        func editRemaining() -> Int? {
+            left
+        }
+
+        func saveEdit() {
+            calls.append("save edit")
+        }
+
+        func cancelEdit() {
+            calls.append("cancel edit")
+        }
+
         var popouts: [ExpressionTarget] = []
 
         func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? {
@@ -1500,7 +1526,7 @@ struct MessageTableTests {
         let text = try #require(messageText(in: try cell(of: 1))).attributedString()
         #expect(text.string == "message 1 (edited)")
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
-        #expect((marker[.font] as? NSFont)?.pointSize == 12)
+        #expect((marker[.font] as? NSFont)?.pointSize == 10, "the official 10")
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
         let extras = shownTexts(in: try cell(of: 2)).filter { $0.contains("(edited)") }
         #expect(extras.count == 1, "a message without text shows the marker on its own")

@@ -99,6 +99,10 @@ nonisolated enum TypeScale {
     static let newTag = TextStyle(10, .bold)
     static let detail = TextStyle(14)
     static let small = TextStyle(12)
+    /// "(edited)" after a message's text: the official 10 regular.
+    static let edited = TextStyle(10)
+    /// The inline editor's counter: the official 14 semibold.
+    static let editorCounter = TextStyle(14, .semibold)
     static let jumpBar = TextStyle(14, .medium)
     static let connectionBar = TextStyle(13, .medium)
     static let warning = TextStyle(13)

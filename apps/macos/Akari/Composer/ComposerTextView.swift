@@ -14,6 +14,10 @@ final class ComposerTextView: NSTextView {
     var onShiftPageUp: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
     var onWindow: () -> Void = {}
+    /// Whether it has the keyboard's focus, as it changes.
+    var onFocus: (Bool) -> Void = { _ in }
+    /// Off in a message's row: the list scrolls its caret into view once the row has its height.
+    var scrollsItself = true
     var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     static func scrollable() -> (NSScrollView, ComposerTextView) {
@@ -26,6 +30,26 @@ final class ComposerTextView: NSTextView {
         scrollView.autohidesScrollers = true
         scrollView.horizontalScrollElasticity = .none
         return (scrollView, textView)
+    }
+
+    /// A text view on TextKit 1, laid out as the editor's measure lays it out.
+    static func plain() -> ComposerTextView {
+        let storage = NSTextStorage()
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        layout.addTextContainer(container)
+        let textView = ComposerTextView(frame: .zero, textContainer: container)
+        textView.configure()
+        return textView
+    }
+
+    /// What its text is drawn with.
+    static var attributes: [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = lineHeight
+        paragraph.maximumLineHeight = lineHeight
+        return [.font: font, .foregroundColor: Palette.textDefault, .paragraphStyle: paragraph]
     }
 
     private func configure() {
@@ -46,12 +70,7 @@ final class ComposerTextView: NSTextView {
         autoresizingMask = [.width]
         minSize = NSSize(width: 0, height: 0)
         maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = Self.lineHeight
-        paragraph.maximumLineHeight = Self.lineHeight
-        typingAttributes = [
-            .font: Self.font, .foregroundColor: Palette.textDefault, .paragraphStyle: paragraph,
-        ]
+        typingAttributes = Self.attributes
         font = Self.font
         textColor = Palette.textDefault
         insertionPointColor = Palette.textDefault
@@ -76,8 +95,21 @@ final class ComposerTextView: NSTextView {
         let became = super.becomeFirstResponder()
         if became {
             LaunchLog.mark("composer focused")
+            onFocus(true)
         }
         return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            onFocus(false)
+        }
+        return resigned
+    }
+
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        scrollsItself ? super.scrollToVisible(rect) : true
     }
 
     /// Becomes first responder unless the user is selecting message text that's still shown.
@@ -123,7 +155,6 @@ final class ComposerTextView: NSTextView {
             insertNewlineIgnoringFieldEditor(nil)
             return true
         case #selector(NSResponder.moveUp(_:)) where string.isEmpty:
-            // Reserved for editing the last message.
             onEditLastMessage?()
             return true
         case #selector(NSResponder.cancelOperation(_:)):

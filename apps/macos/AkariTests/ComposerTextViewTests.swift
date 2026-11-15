@@ -78,7 +78,7 @@ final class ComposerTextViewTests {
     }
 
     @Test
-    func upArrowInAnEmptyComposerIsReserved() {
+    func upArrowInAnEmptyComposerEditsTheLastMessage() {
         textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
         #expect(editLast == 1)
 

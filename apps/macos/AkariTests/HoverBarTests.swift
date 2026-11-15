@@ -16,6 +16,8 @@ final class BarList {
     var shift = false
     var popped: [(titles: [String], view: NSView, point: NSPoint, moreSelected: Bool)] = []
     private(set) var rows: [MessageListModel.Row] = []
+    /// The message edited in its row, as the list's state says.
+    var editing: EditModel.Editing?
 
     static let plain: [MessageAction] = [.createThread, .more]
     static let shifted: [MessageAction] = [.copyLink, .markUnread, .createThread, .more]
@@ -62,7 +64,7 @@ final class BarList {
                 actions.bars[row.id.rawValue] = (Self.plain, Self.shifted)
             }
         }
-        controller.show(MessageTableState(rows: rows, reachedOldest: true))
+        controller.show(MessageTableState(rows: rows, reachedOldest: true, editing: editing))
         window.layoutIfNeeded()
     }
 

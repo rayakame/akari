@@ -24,6 +24,8 @@ struct MessageTableState: Equatable {
     var messageJump: MessageListModel.MessageJump?
     /// The message the pending reply answers: its row is tinted.
     var replyingTo: MessageId?
+    /// The message edited in its row.
+    var editing: EditModel.Editing?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
     /// Where the rows' images come from; `nil` shows placeholders only.
@@ -150,6 +152,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredReply: MessageCell?
     /// The hovered message's buttons: one bar for the list, over the rows.
     let hoverBar = MessageHoverBar()
+    /// The list's editor, in the edited row's text's place.
+    let editor = MessageEditorView()
+    private weak var hoveredEditorLink: EditorLink?
     private weak var hoveredBarButton: HoverBarButton?
     private weak var hoveredQuick: QuickReactionButton?
     private weak var hoveredPill: ReactionPillButton?
@@ -307,6 +312,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
         reload(revealedNow)
+        if previous.editing != state.editing {
+            editingChanged(from: previous.editing)
+        }
         if let item = pickerItem, !timeline.items.contains(where: { $0.id == item }) {
             emojiPicker.close()
         }
@@ -551,10 +559,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         altText?.close()
         altText = nil
         barStale = true
+        let typing = editorFocused
         keepingPlace {
             tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
             noteHeights(of: rows)
         }
+        refocusEditor(if: typing)
         // The reloaded rows' views are new: the hover goes to them.
         updatePointer()
     }
@@ -722,6 +732,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let y = clipView.bounds.minY
         let fills = placeholderPlaces()
+        let typing = editorFocused
+        defer { refocusEditor(if: typing) }
         ownChanges += 1
         defer { ownChanges -= 1 }
         CATransaction.begin()
@@ -1145,7 +1157,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
                 followsLine: followsLine, hasBox: hasBox, embeds: embeds(row),
-                hasReply: row.reply != nil, reactions: row.reactions, width: width)
+                hasReply: row.reply != nil, reactions: row.reactions,
+                editor: edits(row) ? editorHeight(cell: width) : nil, width: width)
         }
     }
 
@@ -1291,9 +1304,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
+                fullDate: fullDate,
+                editedDate: message.editedTimestamp.map {
+                    MessageFormat.fullDate($0, calendar: calendar, locale: locale)
+                },
+                threadBox: boxParts(row), media: mediaState(of: row.id),
                 embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused,
-                reactions: row.reactions)
+                reactions: row.reactions, editor: edits(row) ? editor : nil)
             cell.reactions?.add.isSelected = item.id == pickerAdd
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
@@ -1464,7 +1481,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Asked when the menu opens; a click reaches the actions and the row of that moment.
     private func menuItems(for row: MessageListModel.Row) -> [NSMenuItem] {
-        guard let actions else {
+        // The official client opens no message menu on the row being edited.
+        guard let actions, !edits(row) else {
             return []
         }
         let id = MessageTimeline.ItemId.message(row.id)
@@ -1654,6 +1672,126 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         selected = nil
         updatePointer()
+    }
+
+    private func edits(_ row: MessageListModel.Row) -> Bool {
+        state.editing?.messageId == row.message.id
+    }
+
+    private func editorHeight(cell width: CGFloat) -> CGFloat {
+        editor.columnWidth = MessageCell.textWidth(cell: width)
+        return editor.height(width: editor.columnWidth)
+    }
+
+    private var editedIndex: Int? {
+        guard let editing = state.editing else {
+            return nil
+        }
+        return timeline.items.firstIndex { item in
+            if case .message(let row, _) = item { row.message.id == editing.messageId } else { false }
+        }
+    }
+
+    private var editorFocused: Bool {
+        editor.window != nil && editor.window?.firstResponder === editor.textView
+    }
+
+    // Moving the editor to another cell takes its focus away.
+    private func refocusEditor(if typing: Bool) {
+        guard typing, !editorFocused, let window = editor.window else {
+            return
+        }
+        window.makeFirstResponder(editor.textView)
+    }
+
+    // A new opening takes the edited row's text and the focus, and scrolls the row into view; a
+    // new reason changes only the row's height.
+    private func editingChanged(from old: EditModel.Editing?) {
+        let new = state.editing
+        let opened = new != nil && (old?.messageId != new?.messageId || old?.opening != new?.opening)
+        if opened, let actions {
+            editor.load(actions.editText())
+        }
+        editor.show(problem: new?.problem?.text)
+        guard old?.messageId != new?.messageId || opened else {
+            editorResized()
+            return
+        }
+        let messages = Set([old?.messageId, new?.messageId].compactMap { $0 })
+        let rows = Set(
+            timeline.items.compactMap { item -> MessageId? in
+                if case .message(let row, _) = item, messages.contains(row.message.id) { row.id } else { nil }
+            })
+        reload(rows)
+        if opened, let index = editedIndex {
+            revealRow(index)
+            editor.window?.makeFirstResponder(editor.textView)
+        }
+    }
+
+    // The editor's text changed its height: the row follows, keeping the reader's place.
+    private func editorResized() {
+        guard let index = editedIndex, case .message(let row, let startsGroup) = timeline.items[index],
+            let width = tableView.tableColumns.first?.width, width > 0
+        else {
+            return
+        }
+        let id = timeline.items[index].id
+        let height = height(
+            of: .message(row, startsGroup: startsGroup), followsDay: followsDay(index),
+            followsLine: followsLine(index), width: width)
+        if rowHeights[id] != height {
+            rowHeights[id] = height
+            keepingPlace { noteHeights(of: [index]) }
+            tableView.layoutSubtreeIfNeeded()
+        }
+        revealCaret()
+    }
+
+    // The official client scrolls the edited row into view with 64 around it.
+    private func revealRow(_ index: Int) {
+        let rect = tableView.rect(ofRow: index)
+        let padding = MessageEditorView.revealPadding
+        let top = clipView.bounds.minY + state.startRoom
+        let shown = clipView.bounds.height - state.startRoom - scrollView.contentInsets.bottom
+        var y = clipView.bounds.minY
+        if rect.minY - padding < top {
+            y = rect.minY - padding - state.startRoom
+        } else if rect.maxY + padding > top + shown {
+            y = min(rect.maxY + padding - shown, rect.minY - padding) - state.startRoom
+        }
+        scrollClip(to: y)
+    }
+
+    // Typing or moving the caret past what shows brings its line back.
+    private func revealCaret() {
+        guard editorFocused else {
+            return
+        }
+        let caret = editor.convert(editor.caretRect, to: tableView)
+            .insetBy(dx: 0, dy: -MessageEditorView.caretMargin)
+        let top = clipView.bounds.minY + state.startRoom
+        let bottom = clipView.bounds.maxY - scrollView.contentInsets.bottom
+        if caret.minY < top {
+            scrollClip(to: clipView.bounds.minY - (top - caret.minY))
+        } else if caret.maxY > bottom {
+            scrollClip(to: clipView.bounds.minY + (caret.maxY - bottom))
+        }
+    }
+
+    private func scrollClip(to wanted: CGFloat) {
+        let range = clipView.originRange
+        let y = min(max(wanted, range.lowerBound), range.upperBound)
+        guard abs(y - clipView.bounds.minY) > 0.5 else {
+            return
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
+        scrollView.reflectScrolledClipView(clipView)
+        sticksToBottom = isPinnedToBottom
+        anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
+        askForMore()
     }
 
     // The box's newest message is built once per change, like the body; its time each time.
@@ -1893,6 +2031,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             perform(action, on: row, from: button)
         }
         emojiPicker.onClose = { [weak self] in self?.pickerClosed() }
+        editor.onText = { [weak self] text in
+            self?.actions?.editChanged(text)
+            self?.editorResized()
+        }
+        editor.onSave = { [weak self] in self?.actions?.saveEdit() }
+        editor.onCancel = { [weak self] in self?.actions?.cancelEdit() }
+        editor.onCaret = { [weak self] in self?.revealCaret() }
+        editor.remaining = { [weak self] in self?.actions?.editRemaining() }
+        editor.textView.onShiftEscape = { [weak self] in self?.actions?.markServerRead() }
+        editor.textView.onShiftPageUp = { [weak self] in self?.actions?.jumpToUnread() }
         hoverBar.onQuick = { [weak self] quick in
             guard let self, let id = barShown?.row, let row = row(id) else {
                 return
@@ -2154,6 +2302,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reply?.replyHovered = true
         hoveredReply = reply
+        let link = target?.view as? EditorLink
+        if hoveredEditorLink !== link {
+            hoveredEditorLink?.isHovered = false
+        }
+        link?.isHovered = true
+        hoveredEditorLink = link
         let barButton = target?.view as? HoverBarButton
         if hoveredBarButton !== barButton {
             hoveredBarButton?.isHovered = false
@@ -2303,6 +2457,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         while let current = view, current !== tableView {
             if let text = current as? MessageTextView {
                 return (text, text.cursor(at: text.convert(location, from: nil)))
+            }
+            if current === editor.textView {
+                return (current, .iBeam)
             }
             // A reaction that only shows: the official client's not-allowed cursor.
             if let pill = current as? ReactionPillButton, !pill.isEnabled {
@@ -2471,7 +2628,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         var view: NSView? = hit
         while let current = view, current !== tableView {
-            if current is NSButton || current === hoverBar {
+            if current is NSButton || current === hoverBar || current === editor {
                 return false
             }
             view = current.superview

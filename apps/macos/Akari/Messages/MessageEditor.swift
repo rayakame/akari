@@ -1,0 +1,362 @@
+import AkariKit
+import AppKit
+
+/// The editor in an edited message's row, in its text's place (the official client's edit
+/// mode): the composer's box with the text and the counter, a refused save's reason, and
+/// "escape to cancel • enter to save" with its two links. One per list, owned by its controller
+/// and hosted by the edited row's cell; its height comes from `height(width:)`, as the row's.
+final class MessageEditorView: NSView {
+    /// 8 below the header with the stack's 2, as the official text area's margin.
+    static let top: CGFloat = 6
+    static let radius: CGFloat = 8
+    static let lineGap: CGFloat = 7
+    // The counter's room at the box's right edge while it shows.
+    static let counterRoom: CGFloat = 32
+    static let counterTrailing: CGFloat = 14
+    /// Around the edited row as it scrolls into view, as the official list's 16 + 48.
+    static let revealPadding: CGFloat = 64
+    // Kept between the caret's line and the list's edge.
+    static let caretMargin: CGFloat = 8
+    static let cancelWords = ("escape to ", "cancel")
+    static let saveWords = (" • enter to ", "save")
+
+    let textView = ComposerTextView.plain()
+    private let box = EditorBox()
+    let counter = CellText.label()
+    let problem = CellText.label()
+    let hint = EditorHint()
+    private let undo = UndoManager()
+    /// The user typed: the model keeps the text, and the row its height.
+    var onText: (String) -> Void = { _ in }
+    var onSave: () -> Void = {} {
+        didSet { hint.save.onClick = onSave }
+    }
+    var onCancel: () -> Void = {} {
+        didSet { hint.cancel.onClick = onCancel }
+    }
+    /// The caret moved: the list keeps it in view.
+    var onCaret: () -> Void = {}
+    /// Characters left once few remain, as the model counts them.
+    var remaining: () -> Int? = { nil }
+    // Measures as the text view lays out: TextKit 1, the same attributes and padding.
+    private let measureStorage = NSTextStorage()
+    private let measureLayout = NSLayoutManager()
+    private let measureContainer = NSTextContainer()
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        measureStorage.addLayoutManager(measureLayout)
+        measureContainer.lineFragmentPadding = 0
+        measureLayout.addTextContainer(measureContainer)
+        textView.scrollsItself = false
+        textView.delegate = self
+        textView.onFocus = { [weak self] focused in self?.box.focused = focused }
+        textView.onEscape = { [weak self] in self?.onCancel() }
+        textView.onSubmit = { [weak self] in self?.onSave() }
+        textView.setAccessibilityLabel("Edit Message")
+        counter.font = .monospacedDigitSystemFont(
+            ofSize: TypeScale.editorCounter.size, weight: TypeScale.editorCounter.weight.appKit)
+        counter.alignment = .right
+        counter.isHidden = true
+        problem.font = TypeScale.small.nsFont
+        problem.textColor = Palette.danger
+        problem.lineBreakMode = .byWordWrapping
+        problem.maximumNumberOfLines = 0
+        problem.isHidden = true
+        for view in [box, textView, counter, problem, hint] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// An edit opened: its text, the caret at its end, nothing to undo.
+    func load(_ text: String) {
+        textView.string = text
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        undo.removeAllActions()
+        refreshCounter()
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    func show(problem text: String?) {
+        problem.stringValue = text ?? ""
+        problem.isHidden = text == nil
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    var problemText: String? { problem.isHidden ? nil : problem.stringValue }
+
+    /// The editor's height in a text column `width` wide, as the row counts it.
+    func height(width: CGFloat) -> CGFloat {
+        var height = Self.top + boxHeight(width: width)
+        if !problem.isHidden {
+            height += Self.lineGap + problemHeight(width: width)
+        }
+        return height + Self.lineGap + EditorHint.height + Self.lineGap
+    }
+
+    /// The text column's width, for the height asked before the editor is laid out.
+    var columnWidth: CGFloat = 0
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(
+            width: NSView.noIntrinsicMetric,
+            height: height(width: bounds.width > 0 ? bounds.width : columnWidth))
+    }
+
+    // The height depends on the width, which Auto Layout gives it only now.
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if changed {
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    // Its empty parts are the row's.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+
+    private func boxHeight(width: CGFloat) -> CGFloat {
+        let inset = ComposerTextView.insets
+        let textWidth = max(1, width - 2 * inset.width - (counter.isHidden ? 0 : Self.counterRoom))
+        let text = textView.string
+        measureStorage.setAttributedString(
+            NSAttributedString(string: text, attributes: ComposerTextView.attributes))
+        measureContainer.size = NSSize(width: textWidth, height: .greatestFiniteMagnitude)
+        measureLayout.ensureLayout(for: measureContainer)
+        let used = max(measureLayout.usedRect(for: measureContainer).height, ComposerTextView.lineHeight)
+        return ceil(used) + 2 * inset.height
+    }
+
+    private func problemHeight(width: CGFloat) -> CGFloat {
+        ceil(problem.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 0)
+    }
+
+    override func layout() {
+        super.layout()
+        let width = bounds.width
+        let boxFrame = NSRect(x: 0, y: Self.top, width: width, height: boxHeight(width: width))
+        box.frame = boxFrame
+        textView.frame = NSRect(
+            x: boxFrame.minX, y: boxFrame.minY,
+            width: boxFrame.width - (counter.isHidden ? 0 : Self.counterRoom), height: boxFrame.height)
+        let counterSize = counter.intrinsicContentSize
+        // Its middle on the last line's, as the composer's counter.
+        let lastLine = boxFrame.maxY - ComposerTextView.insets.height - ComposerTextView.lineHeight / 2
+        counter.frame = NSRect(
+            x: boxFrame.maxX - Self.counterTrailing - counterSize.width,
+            y: (lastLine - counterSize.height / 2).rounded(), width: counterSize.width,
+            height: counterSize.height)
+        var y = boxFrame.maxY
+        if !problem.isHidden {
+            let height = problemHeight(width: width)
+            problem.frame = NSRect(x: 0, y: y + Self.lineGap, width: width, height: height)
+            y += Self.lineGap + height
+        }
+        hint.frame = NSRect(x: 0, y: y + Self.lineGap, width: width, height: EditorHint.height)
+    }
+
+    /// The caret's line in the editor's coordinates.
+    var caretRect: NSRect {
+        guard let layout = textView.layoutManager, let container = textView.textContainer else {
+            return textView.frame
+        }
+        let index = min(textView.selectedRange().location, (textView.string as NSString).length)
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: index, length: 0), actualCharacterRange: nil)
+        var rect: NSRect
+        if index == (textView.string as NSString).length, layout.extraLineFragmentTextContainer != nil {
+            rect = layout.extraLineFragmentRect
+        } else {
+            rect = layout.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 0), in: container)
+        }
+        rect.size.height = max(rect.height, ComposerTextView.lineHeight)
+        rect.origin.x += textView.textContainerOrigin.x
+        rect.origin.y += textView.textContainerOrigin.y
+        return textView.convert(rect, to: self)
+    }
+
+    private func refreshCounter() {
+        let left = remaining()
+        let shows = left != nil
+        if counter.isHidden == shows {
+            counter.isHidden = !shows
+            needsLayout = true
+        }
+        guard let left else {
+            return
+        }
+        counter.stringValue = left.formatted()
+        counter.textColor = left < 0 ? Palette.danger : Palette.textDefault
+        counter.toolTip = Self.counterTip(left)
+    }
+
+    /// The official counter's tooltip.
+    static func counterTip(_ left: Int) -> String {
+        if left < 0 {
+            return "Message is too long"
+        }
+        return left == 0 ? "Message is at max length" : "\(left.formatted()) characters remaining"
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshCounter()
+    }
+}
+
+extension MessageEditorView: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        onText(textView.string)
+        refreshCounter()
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        onCaret()
+    }
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        undo
+    }
+}
+
+/// The composer's box: its color, a 1 border that is stronger while the text has the focus.
+final class EditorBox: NSView {
+    var focused = false {
+        didSet { needsDisplay = true }
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = MessageEditorView.radius
+        layer?.borderWidth = 1
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func updateLayer() {
+        layer?.backgroundColor = Palette.composer.cgColor
+        layer?.borderColor = (focused ? Palette.borderSubtle : Palette.borderMuted).cgColor
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+/// "escape to cancel • enter to save", the two words links.
+final class EditorHint: NSView {
+    static let height: CGFloat = 16
+
+    let cancel = EditorLink(MessageEditorView.cancelWords.1)
+    let save = EditorLink(MessageEditorView.saveWords.1)
+    private let before = EditorHint.words(MessageEditorView.cancelWords.0)
+    private let between = EditorHint.words(MessageEditorView.saveWords.0)
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        for view in [before, cancel, between, save] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// The line as it reads.
+    var text: String {
+        before.stringValue + cancel.word + between.stringValue + save.word
+    }
+
+    override func layout() {
+        super.layout()
+        var x: CGFloat = 0
+        for view in [before, cancel, between, save] as [NSView] {
+            let size = view.intrinsicContentSize
+            view.frame = NSRect(
+                x: x, y: ((Self.height - size.height) / 2).rounded(), width: ceil(size.width),
+                height: size.height)
+            x += ceil(size.width)
+        }
+    }
+
+    private static func words(_ text: String) -> NSTextField {
+        let label = CellText.label()
+        label.stringValue = text
+        label.font = TypeScale.small.nsFont
+        label.textColor = Palette.textDefault
+        return label
+    }
+}
+
+/// A word of the hint line that acts: the link color, underlined while the list says the
+/// pointer is on it.
+final class EditorLink: NSButton {
+    let word: String
+    var onClick: () -> Void = {}
+    var isHovered = false {
+        didSet {
+            if isHovered != oldValue {
+                update()
+            }
+        }
+    }
+
+    init(_ word: String) {
+        self.word = word
+        super.init(frame: .zero)
+        isBordered = false
+        refusesFirstResponder = true
+        target = self
+        action = #selector(clicked)
+        update()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    var underlined: Bool { isHovered }
+
+    @objc private func clicked() {
+        onClick()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        update()
+    }
+
+    private func update() {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: TypeScale.small.nsFont, .foregroundColor: Palette.textLink,
+        ]
+        if isHovered {
+            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        }
+        attributedTitle = NSAttributedString(string: word, attributes: attributes)
+    }
+}

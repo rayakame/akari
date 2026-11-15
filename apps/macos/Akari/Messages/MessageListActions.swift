@@ -85,6 +85,12 @@ protocol MessageListActions: AnyObject {
     // The post's bar: Follow or Following.
     func followPost(_ follows: Bool)
     func copyPostLink()
+    // The inline editor: the text an edit opens with, each change, the counter, Return and Escape.
+    func editText() -> String
+    func editChanged(_ text: String)
+    func editRemaining() -> Int?
+    func saveEdit()
+    func cancelEdit()
 }
 
 extension MessageListActions {
@@ -121,4 +127,9 @@ extension MessageListActions {
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws {}
     func followPost(_ follows: Bool) {}
     func copyPostLink() {}
+    func editText() -> String { "" }
+    func editChanged(_ text: String) {}
+    func editRemaining() -> Int? { nil }
+    func saveEdit() {}
+    func cancelEdit() {}
 }
