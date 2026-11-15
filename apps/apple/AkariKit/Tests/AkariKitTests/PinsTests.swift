@@ -466,6 +466,31 @@ final class PinsModelTests {
         session.close()
     }
 
+    // A message only the list has goes with `pinsChanged` alone, and so does an unpin elsewhere.
+    @Test
+    func anUnpinQuestionClosesOnceItsMessageIsntPinnedAnyMore() async throws {
+        store.update { state in
+            state.pins[id(11)] = self.pins([103, 102])
+            state.allow(allowed(unpin: true), message: 103, in: 11)
+        }
+        let session = session()
+        let pins = try await opened(session)
+        pins.unpin(try #require(pins.rows.first), shift: false)
+        #expect(session.pinQuestion?.row.message.id == id(103))
+
+        store.update { $0.pins[id(11)] = self.pins([104, 103, 102]) }
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        #expect(session.pinQuestion != nil, "still pinned")
+        store.update { state in
+            state.pins[id(11)] = self.pins([104, 102])
+            state.allow(nil, message: 103, in: 11)
+        }
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+
+        #expect(session.pinQuestion == nil)
+        session.close()
+    }
+
     @Test
     func anUnpinOnItsWayKeepsItsButtonBusy() async throws {
         store.update { state in

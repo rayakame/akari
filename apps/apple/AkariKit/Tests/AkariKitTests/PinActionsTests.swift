@@ -329,4 +329,18 @@ final class SessionPinQuestionTests {
         #expect(session.pinQuestion == nil)
         session.close()
     }
+
+    @Test
+    func aQuestionThatAPinFromElsewhereAnsweredCloses() throws {
+        let list = try list()
+        session.messageActions(for: list) { _ in }.perform(.pin, on: try #require(list.rows.first))
+
+        session.apply(EventBatch([.messageUpdated(channelId: id(11), messageId: id(100))]))
+        #expect(session.pinQuestion != nil, "an edit leaves it")
+        store.update { $0.allow(allowed(unpin: true), message: 100, in: 11) }
+        session.apply(EventBatch([.messageUpdated(channelId: id(11), messageId: id(100))]))
+
+        #expect(session.pinQuestion == nil)
+        session.close()
+    }
 }

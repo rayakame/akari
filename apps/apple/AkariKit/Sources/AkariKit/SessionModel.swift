@@ -151,8 +151,8 @@ public final class SessionModel {
     /// What Delete asks, with the message, until `answerDeleteQuestion(_:)` or the message's
     /// deletion.
     public private(set) var deleteQuestion: MessageActionsModel.DeleteQuestion?
-    /// What Pin and Unpin ask, with the message, until `answerPinQuestion(_:)` or the
-    /// message's deletion.
+    /// What Pin and Unpin ask, with the message, until `answerPinQuestion(_:)`, the message's
+    /// deletion, or a pin or unpin elsewhere that leaves nothing to ask.
     public private(set) var pinQuestion: MessageActionsModel.PinQuestion?
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
@@ -1515,7 +1515,7 @@ public final class SessionModel {
         if let asked = deleteQuestion?.row, deleted(asked, in: batch) {
             deleteQuestion = nil
         }
-        if let asked = pinQuestion?.row, deleted(asked, in: batch) {
+        if let asked = pinQuestion, deleted(asked.row, in: batch) || outlived(asked, in: batch) {
             pinQuestion = nil
         }
         if let peeked {
@@ -1536,6 +1536,20 @@ public final class SessionModel {
             return false
         }
         return store.starterMessage(threadId: own.channelId) == .unavailable
+    }
+
+    // Pinned or unpinned elsewhere, or gone where only the pins list had it: its yes would fail.
+    private func outlived(_ question: MessageActionsModel.PinQuestion, in batch: EventBatch) -> Bool {
+        let touched = [question.row.message, question.row.shown].contains { message in
+            batch.pinsChanged.contains(message.channelId)
+                || batch.updatedMessages[message.channelId]?.contains(message.id) == true
+        }
+        guard batch.everythingChanged || touched else {
+            return false
+        }
+        let own = question.row.message
+        let actions = store.messageActions(channelId: own.channelId, messageId: own.id)
+        return !(question.pins ? actions.pin : actions.unpin)
     }
 
     private func keepSplits(where keep: (ChannelId, AccountMemory.Split) -> Bool) {
