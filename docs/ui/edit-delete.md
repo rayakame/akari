@@ -20,6 +20,8 @@ the core does with Discord's answers are in
 - **One edit per channel.** A second edit in the same channel replaces the first, and its text
   goes without a question. A thread or a post has its own. The edit stays, with what was typed,
   while the user looks at other channels, and comes back with the channel.
+- Edit, Edit Message or Up arrow on the message already being edited keeps what was typed: the
+  row scrolls into view and the editor takes the focus, its caret where it was.
 - *Akari: the official client's E on a message with keyboard focus is left out with the other
   keys of a focused message ([message-actions.md](message-actions.md#the-hover-bar)).*
 

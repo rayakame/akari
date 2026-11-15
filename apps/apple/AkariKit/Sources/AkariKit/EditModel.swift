@@ -90,11 +90,15 @@ public final class EditModel {
         public let problem: EditProblem?
         /// Counts the openings: each one puts `text` into the editor and gives it the focus.
         public let opening: Int
+        /// Counts Edit on the message already being edited: the editor takes the focus, text and
+        /// caret as they are.
+        public let focus: Int
 
-        public init(messageId: MessageId, problem: EditProblem? = nil, opening: Int) {
+        public init(messageId: MessageId, problem: EditProblem? = nil, opening: Int, focus: Int = 0) {
             self.messageId = messageId
             self.problem = problem
             self.opening = opening
+            self.focus = focus
         }
     }
 
@@ -148,12 +152,19 @@ public final class EditModel {
         }
     }
 
-    /// Edit and Up arrow: the row's text, or a refused save's; replaces the channel's open edit.
+    /// Edit and Up arrow: the row's text, or a refused save's; replaces the channel's open edit,
+    /// and on the message already being edited only asks the editor's focus.
     public func start(_ row: MessageListModel.Row) {
         let own = row.message
         guard own.channelId == channelId,
             store.messageActions(channelId: own.channelId, messageId: own.id).edit
         else {
+            return
+        }
+        if let editing, editing.messageId == own.id {
+            self.editing = Editing(
+                messageId: own.id, problem: editing.problem, opening: editing.opening,
+                focus: editing.focus + 1)
             return
         }
         if let refused = refusal(of: row) {
@@ -309,7 +320,8 @@ public final class EditModel {
             return
         }
         drafts.edits[channelId]?.problem = problem
-        self.editing = Editing(messageId: editing.messageId, problem: problem, opening: editing.opening)
+        self.editing = Editing(
+            messageId: editing.messageId, problem: problem, opening: editing.opening, focus: editing.focus)
     }
 
     private func end(byUser: Bool = true) {

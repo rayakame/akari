@@ -85,6 +85,22 @@ struct MessageEditorTests {
     }
 
     @Test
+    func editOnTheRowBeingEditedGivesTheEditorTheFocusWithTheTextAndCaretAsTheyAre() {
+        threeMessages()
+        edit(1, text: "first")
+        type(" more")
+        editor.textView.setSelectedRange(NSRange(location: 2, length: 0))
+        list.window.makeFirstResponder(list.table)
+
+        list.editing = EditModel.Editing(messageId: MessageId(rawValue: 1), opening: 1, focus: 1)
+        list.show(list.rows)
+
+        #expect(list.window.firstResponder === editor.textView)
+        #expect(editor.textView.string == "first more")
+        #expect(editor.textView.selectedRange() == NSRange(location: 2, length: 0))
+    }
+
+    @Test
     func theEditorTakesTheFocusWhenItOpens() {
         threeMessages()
 

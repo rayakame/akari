@@ -89,6 +89,25 @@ final class EditModelTests {
     }
 
     @Test
+    func editOnTheMessageBeingEditedKeepsWhatWasTypedAndAsksTheEditorsFocus() throws {
+        let list = list()
+        list.editor.start(try row(103, in: list))
+        list.editor.text = "typed"
+        let first = try #require(list.editor.editing)
+
+        list.editor.start(try row(103, in: list))
+        #expect(list.editor.text == "typed")
+        #expect(list.editor.editing?.opening == first.opening, "nothing new to load")
+        #expect(list.editor.editing?.focus == first.focus + 1)
+
+        #expect(list.editNewest(), "Up arrow on the newest, already edited")
+        #expect(list.editor.text == "typed")
+        #expect(list.editor.editing?.opening == first.opening)
+        #expect(list.editor.editing?.focus == first.focus + 2)
+        #expect(self.list().editor.text == "typed", "kept for the channel")
+    }
+
+    @Test
     func anotherEditInTheChannelReplacesTheFirstAndItsText() throws {
         let list = list()
         list.editor.start(try row(101, in: list))

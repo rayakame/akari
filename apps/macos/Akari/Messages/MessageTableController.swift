@@ -1713,6 +1713,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             editor.load(actions.editText())
         }
         editor.show(problem: new?.problem?.text)
+        if !opened, let new, new.messageId == old?.messageId, new.focus != old?.focus, let index = editedIndex {
+            revealRow(index)
+            editor.takeFocus()
+            return
+        }
         guard old?.messageId != new?.messageId || opened else {
             editorResized()
             return
