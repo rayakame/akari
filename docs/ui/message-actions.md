@@ -54,6 +54,7 @@ offers nothing: the client gives it no bar and no menu. For every other message:
 | `mention_toggle` | `reply`, not the user's own message, not a private channel: the reply bar has the "@" switch. Webhooks and bots are no exception |
 | `edit` | not the system DM; the user's own; a user message other than type 68; not a sticker alone (a sticker with text is edited); not a voice message; not a forward; writable; Send Messages, which in a locked thread only a moderator has. A message of attachments or embeds alone is edited |
 | `delete` | the user's own, or Manage Messages; writable; not an undeletable type; an AutoMod action (24) only with Manage Messages. A locked thread that is still active doesn't stop it |
+| `edit`, `delete` while deleting | *Akari:* neither, while the user's delete of the message waits for Discord's answer (`Store::deleting`) |
 | `pin` / `unpin` | not the system DM; a user message; Pin Messages (bit 51) and Read Message History, both a private channel's; writable; not a voice or stage channel's chat; not a media channel's post. `pin` for a message that isn't pinned, `unpin` for one that is; never both. Manage Messages no longer pins |
 | `react` | a new emoji on the message: not the system DM; Add Reactions and Read Message History; writable; not a media channel's post. System messages take reactions like any other |
 | `toggle_reaction` | joining or leaving an emoji already on the message: not the system DM; Read Message History; writable; not a media channel's post; not silenced. Add Reactions isn't asked: "Members can still react using reactions already added to messages without this permission." |
@@ -123,7 +124,7 @@ official client's Reply does on this row wasn't read.*
 
 Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
 gives the channel and ID of the message a row shows: the original's for such a starter row,
-the row's own for every other; a reaction, a pin or a delete from the row goes there, and Copy
+the row's own for every other; a reaction, a pin, an edit or a delete from the row goes there, and Copy
 Message Link names them. Mark Unread alone takes the row's own:
 `Account::mark_unread(thread, row)`. While the row's message isn't resolved (loading, gone or
 failed), Copy Message Link names the row itself, in the thread: `Store::message_link` falls

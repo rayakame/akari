@@ -53,7 +53,9 @@ The official placeholder measured `#6c6d75` on the dark theme, darker than `text
 - **Return while an input method is composing** (Japanese, Chinese and other input sources)
   commits the composition; it never sends.
 - **Up arrow in an empty composer** edits the user's last message in the official client.
-  Akari reserves the key for that and does nothing yet.
+  Akari reserves the key for that and does nothing yet. The message it will edit is the core's
+  answer, `Store::newest_editable_message`: the newest loaded message whose actions allow
+  `edit`, wherever the list is ([messages.md](../protocol/messages.md#up-arrow)).
 - **Escape** cancels a pending reply first, see [shortcuts.md](shortcuts.md).
 
 Pasted text arrives as plain text. Smart quotes, smart dashes, text replacement and automatic
