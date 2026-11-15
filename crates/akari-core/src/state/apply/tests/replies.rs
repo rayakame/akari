@@ -762,6 +762,21 @@ fn a_held_replys_target_is_never_trimmed() {
 }
 
 #[test]
+fn a_pinned_replys_target_is_never_trimmed() {
+    let mut state = viewing(GENERAL);
+    let mut reply = reply_to(10, GENERAL, KEPT, Some(original(GENERAL, "kept")));
+    reply["pinned"] = true.into();
+    pinned_only(&mut state, GENERAL, &[reply]);
+    assert_eq!(target(&state, GENERAL, KEPT), "kept");
+
+    churn(&mut state);
+
+    assert_eq!(state.windows.targets_len(Snowflake::new(GENERAL)), 100);
+    assert_eq!(target(&state, GENERAL, KEPT), "kept");
+    assert_eq!(target(&state, GENERAL, 13_001), "not loaded");
+}
+
+#[test]
 fn an_unsent_replys_target_is_never_trimmed() {
     let mut state = viewing(GENERAL);
     let general = Snowflake::new(GENERAL);
