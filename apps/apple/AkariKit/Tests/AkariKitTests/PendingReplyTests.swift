@@ -837,6 +837,27 @@ final class ReplyEscapeTests {
         session.close()
     }
 
+    // Escape never throws away what the user typed in the pane they aren't in while their own
+    // has something to end.
+    @Test
+    func escapeEndsThePanesOwnReplyBeforeTheOtherPanesEdit() async throws {
+        store.update { $0.allow(allowed(edit: true), message: 2, in: 11) }
+        let session = session()
+        await session.openBeside(thread: id(31), from: id(11))
+        let main = try #require(session.messages)
+        main.editor.start(try #require(main.rows.last))
+        try reply(in: session.split)
+
+        #expect(!session.escape(from: id(31)))
+        #expect(session.split?.composer.reply == nil)
+        #expect(main.editor.editing != nil)
+
+        #expect(!session.escape(from: id(31)))
+        #expect(main.editor.editing == nil)
+        #expect(account.markedRead.current.isEmpty)
+        session.close()
+    }
+
     @Test
     func withoutAPaneTheOpenChannelsReplyGoesFirst() async throws {
         let session = session()

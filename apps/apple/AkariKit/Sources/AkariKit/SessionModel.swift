@@ -567,22 +567,23 @@ public final class SessionModel {
     /// is the view's part. With nothing to mark or load in either, it ends both lines and closes
     /// the split instead, as the official client does, also with a list scrolled up, and returns
     /// false: nothing to scroll. Before any of that it ends an open edit, else cancels a pending
-    /// reply, and does nothing else: the one of the pane Escape was pressed in (`pane`) first,
-    /// else the open channel's.
+    /// reply, and does nothing else: the pane Escape was pressed in (`pane`) first, else the
+    /// open channel.
     @discardableResult public func escape(from pane: ChannelId? = nil) -> Bool {
         if threadForm != nil {
             closeThreadForm()
             return false
         }
         let lists = [messages, split].compactMap { $0 }
-        let replying = lists.filter { $0.channelId == pane } + lists
-        if let editor = replying.lazy.map(\.editor).first(where: { $0.editing != nil }) {
-            editor.cancel()
-            return false
-        }
-        if let composer = replying.lazy.map(\.composer).first(where: { $0.reply != nil }) {
-            composer.cancelReply()
-            return false
+        for list in lists.filter({ $0.channelId == pane }) + lists {
+            if list.editor.editing != nil {
+                list.editor.cancel()
+                return false
+            }
+            if list.composer.reply != nil {
+                list.composer.cancelReply()
+                return false
+            }
         }
         if split != nil, !lists.contains(where: \.escapeHasWork) {
             for list in lists {
