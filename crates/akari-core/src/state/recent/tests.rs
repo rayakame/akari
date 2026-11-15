@@ -228,6 +228,24 @@ fn merging_adds_counts_and_keeps_the_latest_use() {
     assert_eq!(found("👍"), Some((1, NOW)));
 }
 
+// A use made while the cache was read is the newest: a full cached list makes room for it.
+#[test]
+fn a_full_cached_list_keeps_a_use_made_meanwhile() {
+    let all = smileys(43);
+    let mut cached = ReactionUses::default();
+    for emoji in &all[..42] {
+        note(&mut cached, emoji, 10, days_ago(2));
+    }
+    let mut live = ReactionUses::default();
+    note(&mut live, all[42], 1, NOW);
+
+    live.merge(&cached);
+
+    let kept = names(&live);
+    assert_eq!(kept.len(), RECENT_REACTIONS);
+    assert!(kept.iter().any(|name| name == all[42]), "{kept:?}");
+}
+
 #[test]
 fn uses_read_back_from_the_cache_are_kept_whole() {
     let read = ReactionUses::from_uses(vec![

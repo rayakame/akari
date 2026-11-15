@@ -76,10 +76,11 @@ impl ReactionUses {
         }
     }
 
-    // Uses noted while the cache wasn't read yet, added to the cache's.
+    // Uses noted while the cache wasn't read yet are newer: a full list makes room for them.
     pub(crate) fn merge(&mut self, cached: &Self) {
-        for used in &cached.0 {
-            self.add(used.clone());
+        let noted = std::mem::replace(self, cached.clone());
+        for used in noted.0 {
+            self.add(used);
         }
     }
 
