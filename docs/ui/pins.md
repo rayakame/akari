@@ -18,7 +18,8 @@ the core keeps and the ack are in [messages.md](../protocol/messages.md#pins) an
   (`Store::pins_unread`: never for a muted channel or a thread the user hasn't joined), an
   "unread" badge at the icon's bottom. Opening the popout takes it away, on this device at once
   and on the others through Discord.
-- **Behind the age gate** the button is disabled and ⌘P does nothing.
+- **Behind the age gate** the button is disabled and ⌘P does nothing. *Akari: dimmed as a
+  disabled control is (about half), without the hand.*
 
 *Akari: the pushpin is the SF Symbol `pin.fill` at 17 in a 32 box, as the Threads button; the dot
 is 8 across in `danger` with a 2 ring of the header's color, over the pushpin's bottom right
