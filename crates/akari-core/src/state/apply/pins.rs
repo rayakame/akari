@@ -29,9 +29,14 @@ impl State {
     pub(crate) fn finish_pins(
         &mut self,
         ask: PinsAsk,
-        page: model::MessagePins,
+        mut page: model::MessagePins,
         events: &mut Vec<StoreEvent>,
     ) {
+        if !self.edits.is_empty() {
+            for pin in &mut page.items {
+                self.show_saved_text(&mut pin.message);
+            }
+        }
         self.windows
             .finish_pins(ask, page, &self.entities.users, events);
     }
