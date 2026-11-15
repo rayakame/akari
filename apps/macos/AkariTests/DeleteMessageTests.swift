@@ -76,7 +76,11 @@ struct DeleteMessageTests {
         #expect(frame.height == height - 20)
         let text = try #require(descendants(of: box).compactMap { $0 as? MessageTextView }.first { !$0.isHidden })
         #expect(box.convert(text.bounds, from: text).minX == 72)
-        #expect(box.convert(text.bounds, from: text).maxY <= height - 10 + 0.5, "inside the room it counts")
+        let name = message.message.author.displayName
+        let header = try #require(descendants(of: box).compactMap { $0 as? NSTextField }.first { $0.stringValue == name })
+        #expect(
+            box.preview.bounds.insetBy(dx: -0.5, dy: -0.5).contains(box.preview.convert(header.bounds, from: header)),
+            "the header inside the row's room: no group's space above it")
     }
 
     @Test
