@@ -732,9 +732,8 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
-    // Pins as the core keeps them: a load shows `.loading` at once, then leaves `pinsAfterLoad`'s
-    // page (or `pinsAfterMore`'s for a later page), or `.failed` with what was shown; without
-    // either, the list as it was.
+    // As the core: `.loading` at once, then the page `pinsAfterLoad` (`pinsAfterMore`) held as the
+    // call began, else the list as it was; `.failed` with it after `pinLoadError`.
     let pinsAfterLoad = Locked<[ChannelId: PinsPage]>([:])
     let pinsAfterMore = Locked<[ChannelId: PinsPage]>([:])
     let pinLoadError = Locked<RequestError?>(nil)

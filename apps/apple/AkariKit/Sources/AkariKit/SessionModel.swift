@@ -915,9 +915,8 @@ public final class SessionModel {
         threadBrowser = nil
     }
 
-    /// The channel whose pins the header's pins button shows: the open message list's (a text
-    /// or announcement channel, a thread, a DM or a group DM), not the system DM's; `nil`
-    /// elsewhere, where the button doesn't show.
+    /// The channel whose pins the header's button shows: the open message list's, not the system
+    /// DM's; `nil` where the button doesn't show.
     public var pinsChannel: ChannelId? {
         guard let open = messages?.channelId else {
             return nil

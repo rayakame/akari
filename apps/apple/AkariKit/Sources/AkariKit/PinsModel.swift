@@ -72,9 +72,7 @@ public final class PinsModel {
     // The view reports the end on every update: after a page that moved no row, only the button asks.
     @ObservationIgnored private var endSpent = false
 
-    /// `jump` jumps to a message of the channel and closes the popout unless Shift (its second
-    /// argument) is held; `ask` asks before an unpin, `confirm` offers to try a failed one again
-    /// and `failed` tells of a refusal.
+    // `jump`'s second argument is Shift, which keeps the popout open.
     init(
         channelId: ChannelId, store: Store, account: Account,
         jump: @escaping (MessageId, Bool) -> Void,
