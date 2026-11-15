@@ -161,14 +161,14 @@ impl Limits {
             self.hashes
                 .insert((route.method, route.route), hash.clone());
         }
+        // A published message's edits are limited per message, not per route.
+        let per_message = limits.code == Some(super::PUBLISHED_EDITS);
         let key = self.bucket_key(route);
-        if limits.remaining.is_some() || limits.reset_after.is_some() {
+        if (limits.remaining.is_some() || limits.reset_after.is_some()) && !per_message {
             let bucket = self.buckets.entry(key).or_default();
             bucket.remaining = limits.remaining;
             bucket.reset_at = limits.reset_after.map(|after| now + after);
         }
-        // A published message's edits are limited per message, not per route.
-        let per_message = limits.code == Some(super::PUBLISHED_EDITS);
         if let Some(after) = limits
             .retry_after
             .filter(|_| limits.limited && !per_message)

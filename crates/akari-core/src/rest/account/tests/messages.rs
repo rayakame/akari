@@ -100,10 +100,15 @@ async fn a_delete_deletes_the_messages_path_without_a_body() {
 async fn a_published_messages_edit_limit_answers_at_once_and_holds_back_no_other_edit() {
     let server = MockServer::start().await;
     Mock::given(path_regex(format!("{MESSAGE}$")))
-        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
-            "message": "This message cannot be edited due to announcement rate limits.",
-            "code": 20022, "retry_after": 1200.5, "global": false,
-        })))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "1200.5")
+                .set_body_json(json!({
+                    "message": "This message cannot be edited due to announcement rate limits.",
+                    "code": 20022, "retry_after": 1200.5, "global": false,
+                })),
+        )
         .mount(&server)
         .await;
     Mock::given(path_regex("/messages/400000000000000004$"))

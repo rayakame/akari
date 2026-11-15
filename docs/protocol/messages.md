@@ -483,8 +483,8 @@ Akari shows the saved text at once and keeps it when Discord refuses.
 | anything else | nothing shown | `Request(RequestError)` |
 
 20022 holds back no other request: Discord's alert speaks of published messages being edited
-three times an hour, so the limit is taken to be per message, and the route key isn't paused
-for the hour (not observed).
+three times an hour, so the limit is taken to be per message, and neither the route key nor its
+bucket is held for the hour, whatever the answer's rate limit headers say (not observed).
 
 ### A delete on its way
 
