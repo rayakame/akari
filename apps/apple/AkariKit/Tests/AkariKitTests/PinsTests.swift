@@ -200,6 +200,19 @@ final class PinsModelTests {
         #expect(!pins.offersMore)
     }
 
+    // A page whose pins were all left out (another channel's) still says Discord has more.
+    @Test
+    func anEmptyPageWithMoreAsksForTheNext() async throws {
+        store.update { $0.pins[id(11)] = self.pins([], more: true) }
+        let pins = try await opened(session())
+        #expect(pins.phase == .list)
+        #expect(pins.offersMore)
+
+        await pins.loadMore()
+
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+    }
+
     @Test
     func theButtonForMoreShowsOnlyWhileNothingLoads() async throws {
         store.update { $0.pins[id(11)] = self.pins([125], more: true) }
@@ -298,9 +311,24 @@ final class PinsModelTests {
         session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
 
         #expect(store.log.calls.filter { $0 == .ackPins(id(11)) }.count == 2)
+        session.apply(EventBatch([.ready]))
+        #expect(store.log.calls.filter { $0 == .ackPins(id(11)) }.count == 3, "a new session's dot")
         session.togglePins()
         session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
-        #expect(store.log.calls.filter { $0 == .ackPins(id(11)) }.count == 2, "not once it closed")
+        #expect(store.log.calls.filter { $0 == .ackPins(id(11)) }.count == 3, "not once it closed")
+        session.close()
+    }
+
+    // The view opens it as it shows.
+    @Test
+    func aPopoutNotShownYetAcksNothing() {
+        let session = session()
+        session.togglePins()
+
+        session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
+
+        #expect(!store.log.calls.contains(.ackPins(id(11))))
+        #expect(!store.log.calls.contains(.loadPins(id(11))))
         session.close()
     }
 
@@ -312,9 +340,17 @@ final class PinsModelTests {
             state.pins[id(11)] = self.pins([103, 102])
             state.allow(allowed(unpin: true), message: 103, in: 11)
         }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
 
         #expect(pins.rows.map(pins.canUnpin) == [true, false])
+        pins.unpin(pins.rows[1], shift: true)
+        pins.unpin(pins.rows[1], shift: false)
+        pins.unpin(pins.rows[0], shift: true)
+        try await eventually { self.store.log.calls.contains(.unpin(id(11), id(103))) }
+        #expect(!store.log.calls.contains(.unpin(id(11), id(102))))
+        #expect(session.pinQuestion == nil)
+        session.close()
     }
 
     @Test
@@ -477,6 +513,16 @@ final class PinsButtonTests {
     }
 
     @Test
+    func aNewSessionRereadsTheDot() {
+        store.update { $0.unreadPins = [id(11)] }
+
+        session.apply(EventBatch([.ready]))
+
+        #expect(session.pinsUnread)
+        session.close()
+    }
+
+    @Test
     func openingThePopoutTakesTheDot() async throws {
         store.update { $0.unreadPins = [id(11)] }
         session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
@@ -541,6 +587,10 @@ final class PinsButtonTests {
         session.togglePins(of: id(31))
         #expect(session.openChannelId == id(31))
         #expect(session.pins?.channelId == id(31))
+        session.togglePins()
+        // Not known yet: it's fetched before it opens, and the open channel's pins stay closed.
+        session.togglePins(of: id(99))
+        #expect(session.pins == nil)
         session.close()
     }
 }

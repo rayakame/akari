@@ -109,7 +109,7 @@ public final class PinsModel {
 
     /// "Load more messages".
     public func loadMore() async {
-        guard hasMore, state != .loading, !rows.isEmpty else {
+        guard hasMore, state != .loading else {
             return
         }
         state = .loading

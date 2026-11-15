@@ -84,6 +84,8 @@ final class PinActionsTests {
         let failed = row(101, allowed(pin: true, markUnread: false, copyLink: false), delivery: .failed)
         #expect(menu(failed) == [[.copyText, .retry]])
         #expect(bar(failed, shift: true) == [.retry])
+        let failedPinned = row(104, allowed(unpin: true, markUnread: false, copyLink: false), delivery: .failed)
+        #expect(menu(failedPinned) == [[.copyText, .retry]])
 
         model().perform(.pin, on: row(102, allowed()))
         model().perform(.unpin, on: row(103, allowed(pin: true)))
