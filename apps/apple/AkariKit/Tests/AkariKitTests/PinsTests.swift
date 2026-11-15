@@ -121,7 +121,7 @@ final class PinsModelTests {
 
         #expect(pins.phase == .empty)
         #expect(pins.emptyText == "This channel doesn't have any\npinned messages... yet.")
-        #expect(pins.protip == "Users with the 'Pin Messages' permission can pin a message from its context menu.")
+        #expect(pins.protip == "Users with the ‘Pin Messages’ permission can pin a message from its context menu.")
         #expect(PinsModel.protipLabel == "Protip:")
     }
 

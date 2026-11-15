@@ -117,7 +117,7 @@ public final class MessageActionsModel {
                 title = "Pin It. Pin It Good."
                 let place = channelName.map { "#\($0)" } ?? "the current channel"
                 message =
-                    "Hey, just double checking that you want to pin this message to \(place) for "
+                    "Hey, just double-checking that you want to pin this message to \(place) for "
                     + "posterity and greatness?"
                 tip = nil
                 confirm = "Oh yeah. Pin it"

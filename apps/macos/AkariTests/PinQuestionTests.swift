@@ -37,7 +37,7 @@ struct PinQuestionTests {
         #expect(view.title.stringValue == "Pin It. Pin It Good.")
         #expect(
             view.message.stringValue
-                == "Hey, just double checking that you want to pin this message to #new for "
+                == "Hey, just double-checking that you want to pin this message to #new for "
                 + "posterity and greatness?")
         #expect(view.tip.isHidden)
         #expect([view.cancel.title, view.confirm.title] == ["Cancel", "Oh yeah. Pin it"])

@@ -107,7 +107,7 @@ final class PinActionsTests {
         #expect(question.title == "Pin It. Pin It Good.")
         #expect(
             question.message
-                == "Hey, just double checking that you want to pin this message to #general for "
+                == "Hey, just double-checking that you want to pin this message to #general for "
                 + "posterity and greatness?")
         #expect(question.tip == nil)
         #expect(question.confirm == "Oh yeah. Pin it")
@@ -125,7 +125,7 @@ final class PinActionsTests {
 
         #expect(
             try #require(questions.first).message
-                == "Hey, just double checking that you want to pin this message to the current "
+                == "Hey, just double-checking that you want to pin this message to the current "
                 + "channel for posterity and greatness?")
     }
 

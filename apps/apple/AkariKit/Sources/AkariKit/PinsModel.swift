@@ -56,7 +56,7 @@ public final class PinsModel {
     public var protip: String {
         isPrivate
             ? "You can pin a message from its context menu."
-            : "Users with the 'Pin Messages' permission can pin a message from its context menu."
+            : "Users with the ‘Pin Messages’ permission can pin a message from its context menu."
     }
 
     @ObservationIgnored private let store: Store
