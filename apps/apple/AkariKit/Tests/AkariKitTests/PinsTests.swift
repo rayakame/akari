@@ -269,6 +269,24 @@ final class PinsModelTests {
         session.close()
     }
 
+    // A pin the gateway couldn't place (no copy of its message): the dot says so, and the core
+    // asks again where Discord named a newer pin than the list has.
+    @Test
+    func aNewPinWhileOpenAsksTheCoreForTheList() async throws {
+        store.update { $0.pins[id(11)] = self.pins([103]) }
+        let session = session()
+        let pins = try await opened(session)
+        account.pinsAfterLoad.withLock { $0[id(11)] = self.pins([104, 103]) }
+
+        store.update { $0.unreadPins = [id(11)] }
+        session.apply(EventBatch([.pinsUnreadChanged(channelId: id(11))]))
+
+        try await eventually { self.shown(pins) == [104, 103] }
+        #expect(store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2)
+        #expect(store.log.calls.filter { $0 == .ackPins(id(11)) }.count == 2)
+        session.close()
+    }
+
     // A new session leaves the list shown but not loaded.
     @Test
     func aListThatIsntLoadedAnyMoreIsAskedForAgain() async throws {

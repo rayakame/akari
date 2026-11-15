@@ -383,7 +383,7 @@ and its `ReactionsModel` and the reactions window follow it too. The session rer
 dot of the header's channel (`pinsUnread`) when the batch names it, a mute or a join, and the
 open popout's `PinsModel` rereads its list on `pinsChanged` (also its pinned replies' lines on
 `replyTargetsChanged`), asks for a list a new session left unloaded, and acks again on
-`pinsUnreadChanged`.
+`pinsUnreadChanged`, asking the core for the list then too (a pin the gateway couldn't place).
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.

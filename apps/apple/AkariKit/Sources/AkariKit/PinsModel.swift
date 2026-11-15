@@ -160,11 +160,13 @@ public final class PinsModel {
         guard opened else {
             return
         }
-        if batch.everythingChanged || batch.pinsUnreadChanged.contains(channelId) {
+        // A new pin: the core asks for the list when the gateway couldn't place it. A new session
+        // leaves the list shown but not loaded.
+        let pinned = batch.everythingChanged || batch.pinsUnreadChanged.contains(channelId)
+        if pinned {
             account.ackPins(channelId: channelId)
         }
-        // A new session leaves the list shown but not loaded.
-        if state == .notLoaded {
+        if pinned || state == .notLoaded {
             Task { await load() }
         }
     }
