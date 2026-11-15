@@ -92,6 +92,13 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                if let question = session.pinQuestion {
+                    ask(question, in: proxy.size, answer: session.answerPinQuestion)
+                }
+            }
+        }
         .overlayPreferenceValue(PeekRowBounds.self) { anchor in
             GeometryReader { proxy in
                 if let channel = hover.channel, let anchor, !session.peekedThreads.isEmpty {
