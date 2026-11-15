@@ -251,6 +251,7 @@ struct MessageEditorTests {
 
         list.window.displayIfNeeded()
         let layer = try #require(hint.layer)
+        layer.displayIfNeeded()
         try #require(!layer.needsDisplay())
         hint.save.isHovered = true
         #expect(layer.needsDisplay())
@@ -563,6 +564,20 @@ struct MessageEditorTests {
         #expect(try cell(2).editor === editor)
         #expect(editor.textView.string == "second")
         #expect(list.window.firstResponder === editor.textView)
+    }
+
+    @Test
+    func aRowThatStartsOrStopsBeingEditedIsRedrawn() throws {
+        threeMessages()
+        let cell = try cell(1)
+        list.window.displayIfNeeded()
+        let layer = try #require(cell.layer)
+        layer.displayIfNeeded()
+        try #require(!layer.needsDisplay())
+
+        cell.isEditing = true
+
+        #expect(layer.needsDisplay())
     }
 
     @Test
