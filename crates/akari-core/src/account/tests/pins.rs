@@ -508,6 +508,31 @@ async fn an_archived_thread_is_opened_before_a_pin_or_an_unpin() {
 }
 
 #[tokio::test]
+async fn an_archived_thread_that_couldnt_be_opened_is_neither_pinned_nor_unpinned() {
+    let mut online = pinning().await;
+    online
+        .answer(
+            "PATCH",
+            &format!("/channels/{THREAD}$"),
+            refusal(403, 50013, "Missing Permissions"),
+        )
+        .await;
+    online
+        .answer("PUT", "/pins/", ResponseTemplate::new(204))
+        .await;
+    archived_thread(&mut online).await;
+    let (thread, id) = (Snowflake::new(THREAD), Snowflake::new(TARGET + 1));
+
+    let refused = online.account.pin(thread, id).await;
+
+    assert!(matches!(refused, Err(PinError::Forbidden)), "{refused:?}");
+    assert_eq!(
+        online.lines().await,
+        [format!("PATCH /api/v9/channels/{THREAD}")]
+    );
+}
+
+#[tokio::test]
 async fn a_starter_rows_pin_goes_to_the_message_it_shows() {
     let mut online = pinning().await;
     online
@@ -666,6 +691,118 @@ async fn a_rate_limited_pins_ack_is_asked_again_after_its_wait() {
     online.account.ack_pins(general());
 
     assert_eq!(ack_requests(&online, 2).await.len(), 2);
+}
+
+// Answers in turn, the last one again for every later request, and keeps when each arrived.
+struct Timed {
+    answers: Vec<ResponseTemplate>,
+    arrived: Arc<std::sync::Mutex<Vec<std::time::Instant>>>,
+}
+
+impl Respond for Timed {
+    fn respond(&self, _: &Received) -> ResponseTemplate {
+        let mut arrived = self.arrived.lock().unwrap();
+        arrived.push(std::time::Instant::now());
+        self.answers[(arrived.len() - 1).min(self.answers.len() - 1)].clone()
+    }
+}
+
+async fn acked_after(answers: Vec<ResponseTemplate>, count: usize) -> Vec<Duration> {
+    let mut online = pinning().await;
+    let arrived = Arc::new(std::sync::Mutex::new(Vec::new()));
+    Mock::given(method("POST"))
+        .and(path_regex("/pins/ack$"))
+        .respond_with(Timed {
+            answers,
+            arrived: Arc::clone(&arrived),
+        })
+        .mount(&online.server)
+        .await;
+    unread_pins(&mut online).await;
+
+    online.account.ack_pins(general());
+
+    ack_requests(&online, count).await;
+    let arrived = arrived.lock().unwrap();
+    arrived.windows(2).map(|pair| pair[1] - pair[0]).collect()
+}
+
+// The rate limit's wait is the try's own: no try goes to the route the limiter holds meanwhile.
+#[tokio::test]
+async fn a_rate_limited_pins_ack_waits_its_retry_after() {
+    let limited = ResponseTemplate::new(429).set_body_json(
+        json!({"message": "You are being rate limited.", "retry_after": 0.3, "global": false}),
+    );
+    let failed = ResponseTemplate::new(502);
+
+    let gaps = acked_after(vec![limited, failed, ResponseTemplate::new(204)], 3).await;
+
+    assert!(gaps[0] >= Duration::from_millis(290), "{gaps:?}");
+}
+
+#[tokio::test]
+async fn a_pins_ack_held_by_the_limiter_waits_until_its_route_is_free() {
+    let exhausted = ResponseTemplate::new(502)
+        .insert_header("x-ratelimit-remaining", "0")
+        .insert_header("x-ratelimit-reset-after", "0.3");
+
+    let gaps = acked_after(vec![exhausted, ResponseTemplate::new(204)], 2).await;
+
+    assert!(gaps[0] >= Duration::from_millis(290), "{gaps:?}");
+}
+
+#[tokio::test]
+async fn a_failed_pins_acks_tries_wait_at_least_the_step_and_then_twice_it() {
+    let failed = ResponseTemplate::new(502);
+
+    let gaps = acked_after(vec![failed.clone(), failed, ResponseTemplate::new(204)], 3).await;
+
+    assert!(gaps[0] >= ACK_RETRY, "{gaps:?}");
+    assert!(gaps[1] >= 2 * ACK_RETRY, "{gaps:?}");
+}
+
+#[tokio::test]
+async fn a_pins_ack_answered_401_ends_the_session() {
+    let mut online = pinning().await;
+    online
+        .answer("POST", "/pins/ack$", ResponseTemplate::new(401))
+        .await;
+    unread_pins(&mut online).await;
+
+    online.account.ack_pins(general());
+
+    timeout(WAIT, async {
+        while !matches!(
+            online.account.store().connection(),
+            ConnectionState::Closed { .. }
+        ) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the session didn't end");
+}
+
+#[tokio::test]
+async fn a_closed_account_asks_for_no_pins_and_changes_none() {
+    let online = pinning().await;
+    online.account.close();
+
+    let first = online.account.load_pins(general()).await;
+    let more = online.account.load_more_pins(general()).await;
+    let pinned = online.account.pin(general(), target()).await;
+    let unpinned = online.account.unpin(general(), target()).await;
+
+    assert!(matches!(first, Err(RequestError::Closed)), "{first:?}");
+    assert!(matches!(more, Err(RequestError::Closed)), "{more:?}");
+    for refused in [pinned, unpinned] {
+        assert!(
+            matches!(refused, Err(PinError::Request(RequestError::Closed))),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(online.state(), PinsState::NotLoaded);
+    assert!(online.lines().await.is_empty());
 }
 
 #[tokio::test]
