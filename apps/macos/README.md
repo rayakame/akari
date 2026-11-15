@@ -139,13 +139,14 @@ Voice, notifications and settings come later.
   list, owned by the table's controller and hosted by the edited row's cell, a `ComposerTextView`
   on TextKit 1 in the composer's box, the counter, a refusal's reason and the hint line
   (`EditorHint`, its links `EditorLink`). The row's height comes from the editor's own measure
-  (`height(width:)`), noted on every change of the text while the reader's place is kept; the
-  controller scrolls the row into view on opening, keeps the caret's line in sight and puts the
-  focus back after the row's updates. A saved edit is dimmed until Discord takes it, a delete
-  until it answers. "(edited)" carries the edit's date as its tooltip after the text, under a
+  (`height(width:)`), noted on every change of the text (after the counter came or went) while
+  the reader's place is kept; the controller scrolls the row into view on opening, keeps the
+  caret's line in sight, puts the focus back after the row's updates and tells the model whether
+  the editor has it (`EditModel.editorFocused`). A saved edit is dimmed until Discord takes it, a
+  delete until it answers. "(edited)" carries the edit's date as its tooltip after the text, under a
   code block and after the accessories. Delete in the Shift-held bar and the menu asks
-  `DeleteMessageView` (a key panel over the dimmed window, `DeleteMessage.swift`) unless Shift is
-  held; its message is a `MessagePreviewBox`, the non-interactive `MessagePreviewView` in the
+  `DeleteMessageView` (a key panel over the dimmed window, `DeleteMessage.swift`, which stays while
+  another app is active) unless Shift is held; its message is a `MessagePreviewBox`, the non-interactive `MessagePreviewView` in the
   official box, which the thread form shows selectable.
 - **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale
   changes.

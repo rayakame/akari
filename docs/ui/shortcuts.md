@@ -12,7 +12,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | New line | Shift+Return | Done; Option+Return too |
 | Edit the last message | Up arrow in an empty composer | Done: the newest loaded message the user may edit ([edit-delete.md](edit-delete.md#starting-an-edit)) |
 | Save an edit, a new line in it, cancel it | Return, Shift+Return, Escape in the editor | Done; Option+Return adds a line too ([edit-delete.md](edit-delete.md#keys)) |
-| Mark the channel read, or cancel an edit or reply | Escape | Done: ends an open edit first, then a pending reply; else marks the channel read and jumps to the present (below) |
+| Mark the channel read, or cancel an edit or reply | Escape | Done: ends an open edit first, then a pending reply, the pane's own before the other pane's; else marks the channel read and jumps to the present (below) |
 | Mark the server read | Shift+Escape | Done |
 | Mark unread from a message | Alt+click on it | Done: Option-click anywhere in the message's box but on its buttons ([message-actions.md](message-actions.md#mark-unread)) |
 | The longer hover bar | Shift held over a message | Done: Copy Link and Mark Unread come first; the bar changes while the pointer rests |
@@ -43,10 +43,10 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
 - **Escape.** In Discord, Escape marks the open channel as read and cancels an edit or a
   reply in progress; it also jumps to the present from a list scrolled up, and with nothing
   unread it sends nothing. With an edit open, Escape from the composer or the list ends it and
-  does nothing else, the pane's own first in the split view; in the editor itself Escape cancels
-  it. With a reply pending, Escape cancels it and does nothing else: nothing is marked read, nothing scrolls and what was typed stays; in the
-  split view the reply of the pane the key was pressed in goes first, then the other pane's
-  ([replies.md](replies.md#escape)). Otherwise Escape marks the channel read
+  does nothing else; in the editor itself Escape cancels it. With a reply pending, Escape cancels
+  it and does nothing else: nothing is marked read, nothing scrolls and what was typed stays. In
+  the split view the pane the key was pressed in goes first, whole: its edit, its reply, then the
+  other pane's edit and reply ([replies.md](replies.md#escape)). Otherwise Escape marks the channel read
   and jumps to the present: it loads the newest messages if the list shows older ones, and
   scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
   ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this

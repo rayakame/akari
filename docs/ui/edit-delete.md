@@ -68,8 +68,9 @@ attachments, embeds, stickers, reactions and the thread's box. The text gives wa
   read, as from the composer.
 - The arrows move the caret; Up in an empty editor does nothing.
 - Escape from the composer or the list ends an open edit first, before a pending reply and before
-  marking anything read; in the split view the pane's own edit goes first
-  ([shortcuts.md](shortcuts.md)).
+  marking anything read. In the split view each pane is done whole before the other: the pane's
+  own edit, its own reply, then the other pane's edit and reply, so Escape never throws away
+  what was typed in the pane the user isn't in ([shortcuts.md](shortcuts.md)).
 
 ## Saving
 
@@ -95,10 +96,13 @@ The text is trimmed of spaces and line breaks at both ends, then:
   this community. The message may also be viewed by the community owners."), the announcement
   limit in the official words ("To keep announcements speedy, published messages can only be
   edited 3 times per hour. Please try again in N minutes."), or Akari's words for a missing
-  permission, a deleted message, a rate limit, a lost connection or a server problem. The
-  official client loses the text on every refusal but AutoMod's, and shows nothing.*
+  permission, a rate limit, a lost connection or a server problem. The official client loses
+  the text on every refusal but AutoMod's, and shows nothing.*
+- *A refusal because the message was deleted opens nothing: there is nothing left to save to,
+  and the row goes with the gateway's delete.*
 - *A refusal waits while another edit is open in the channel and opens once that one ends; one
-  that comes while the channel isn't shown opens when it is.*
+  that comes while the channel isn't shown opens when it is. That holds too for a refusal
+  before asking (no connection), of which the core keeps no record.*
 - *The official client's AutoMod notice under the message ("(reverted)", "Learn more") is left
   out: the editor's line says it.*
 - *A published announcement's "Are you sure?" before an edit is left out.*
@@ -106,7 +110,11 @@ The text is trimmed of spaces and line breaks at both ends, then:
 ## What ends an edit
 
 Escape, "cancel", a save, another edit in the channel, and the message's deletion, also in a bulk
-delete. *Akari: the official client misses bulk deletes.*
+delete and in a channel that isn't open; a thread's starter row's edit ends when the message it
+shows goes. A delete nothing told of (the channel's messages were let go meanwhile, or it came
+while offline) ends the edit once the channel's loaded messages would show it and don't. The
+composer takes the focus back after Escape, "cancel" and a save; after a deletion only when the
+editor had it. *Akari: the official client misses bulk deletes.*
 
 ## "(edited)"
 
@@ -146,7 +154,9 @@ A modal over the dimmed window:
   bypass this confirmation entirely.";
 - **Cancel** and **Delete**.
 
-Delete and Return delete; Cancel, Escape and a press outside don't.
+Delete and Return delete; Cancel, Escape and a press outside don't. The question stays when
+Akari stops being the active app, as the official modal does; it closes when its message is
+deleted meanwhile (for a thread's starter row, the message it shows).
 
 *Akari: the modal is Akari's (the reactions window's surface, ring and radius, 440 wide, 24 in,
 the official modal's buttons: Cancel gray, Delete red, 40 high); its words and the message's box
