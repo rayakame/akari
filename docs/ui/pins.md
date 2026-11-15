@@ -22,8 +22,8 @@ the core keeps and the ack are in [messages.md](../protocol/messages.md#pins) an
 
 *Akari: the pushpin is the SF Symbol `pin.fill` at 17 in a 32 box, as the Threads button; the dot
 is 8 across in `danger` with a 2 ring of the header's color, over the pushpin's bottom right
-corner (its middle 3 in from the 20 icon box's corner, the ring 1 past it). The official badge's
-size wasn't read.*
+corner (its middle 3 in from the 20 icon box's corner, so the dot reaches 1 past the corner and
+its ring 3). The official badge's size wasn't read.*
 
 ## Opening and closing
 
@@ -36,6 +36,9 @@ size wasn't read.*
   and the pins popout take each other's place.
 - Opening the popout asks for the channel's first page of pins where the list needs one, and
   acks the channel's pins while the dot shows; a pin that arrives while it is open is acked too.
+  *Akari: such a pin also asks the core for the list again, which asks Discord when the gateway
+  couldn't place the pin (no copy of its message was loaded); the official client shows it after
+  the next opening.*
 
 *Akari:*
 
@@ -67,7 +70,8 @@ size wasn't read.*
   unpin question unless Shift is held.
 - **Paging:** 25 a page. Within 250 of the list's end the next page loads, with a spinner 32 above
   and below; while Discord has more, "Load more messages" (a full-width small secondary button,
-  8 above and 16 around) asks for it too.
+  8 above and 16 around) asks for it too. *Akari: the button is centered under the cards, 24 from
+  the popout's left as in the stylesheet and 20 from its right where it gives 16.*
 - **First page:** a spinner, 100 above and 120 below.
 - **Empty:** "This channel doesn't have any\npinned messages... yet." (a DM or a group DM: "This
   direct message doesn't have\nany pinned messages... yet."), 16 medium in `textDefault`,
@@ -112,8 +116,7 @@ size wasn't read.*
 - **The unpin question:** "Unpin Message", "You sure you want to remove this pinned message?",
   the message in its box, "Protip: You can hold down shift when clicking **unpin message** to
   bypass this confirmation entirely." ("Protip:" in `statusPositive` and semibold, the rest at 14
-  in `textMuted`), Cancel and "Remove it
-  please!" in red. From every place, the bar included.
+  in `textMuted`), Cancel and "Remove it please!" in red. From every place, the bar included.
 - **Nothing changes before the gateway says so:** the menu's and the bar's words flip, the
   popout's list changes and the pin's system line arrives with Discord's updates.
 - **A refused pin** shows the official alert:

@@ -165,7 +165,8 @@ Voice, notifications and settings come later.
   VoiceOver actions; Shift at the click is read through `clickModifiers`. `ScrollEnd` asks for
   the next page near the list's end. Pin and Unpin come from the bar and the menu through the
   list's `MessageActionsModel`; their question is a `MessageQuestionView` over the popout, and
-  `ChildWindows` gives the key back to the popout when it goes (`keyPanelAbove`).
+  `ChildWindows` gives the key back to the popout when it goes (`keyPanelAbove`). `PinsRenders`
+  draws the popout, the questions, the button and the bar at 2x with `TEST_RUNNER_AKARI_RENDERS=1`.
 - **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale
   changes.
 - **Formatting** (`docs/ui/markdown.md`): `MessageText` builds a message's attributed string

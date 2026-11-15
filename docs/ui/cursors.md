@@ -16,12 +16,13 @@ tracking event comes first.
 | The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, a reply's line (its text and its spine), Retry and Delete, Try again, the hover bar; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (the hover bar's buttons, the arrow on the bar beside them; a reaction and the add button after them, the not-allowed sign over a reaction that only shows; custom and Unicode emoji, stickers, images and videos and a spoiler's cover, a sensitive cover's eye, ALT buttons, Download on files and videos, a file's name, an embed's links, images, video pill and covered card, the unread bar, the jump bar's button too), arrow elsewhere (also over media waiting for a scan or under a sensitive cover) | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
 | The composer | I-beam | AppKit (NSTextView's own) |
 | A message's editor in its row: the text, "cancel" and "save" | I-beam over the text, pointing hand over the links | The message list's authority |
-| The delete question (key): Cancel, Delete | Pointing hand | Each button's own tracking area; the message in its box takes no pointer |
+| The delete, pin and unpin questions (key): Cancel and the yes | Pointing hand | Each button's own tracking area; the message in its box takes no pointer |
 | The reply bar over the composer's text: the band, its switch and ✕ | Pointing hand | `CursorArea` |
-| The channel header: the "# parent ›" link, the Threads button, the thread's "…" | Pointing hand | `CursorArea` |
+| The channel header: the "# parent ›" link, the Threads button, the pins button (the arrow while it is disabled), the thread's "…" | Pointing hand | `CursorArea` |
 | The split's header: its title, "…", the X | Pointing hand | `CursorArea` |
 | The split's gap and the sidebar's edge | Resize left and right, held through a drag | `ResizeCursor`: one push on hover or a drag's start, one pop at the end or when the view goes |
 | The Threads browser's panel (key): cards, the modal's X, the field's clear button | Pointing hand | `CursorArea` |
+| The pins popout (key): a card's Jump and ✕ (the arrow while the ✕ is busy), Load more, Try Again; the arrow over the cards' messages, which take no pointer | Pointing hand | `CursorArea` |
 | The browser's search field | I-beam | AppKit (the field is AppKit's own, in the key panel) |
 | The browser's Create and the empty state's Create Thread | Pointing hand | `CursorArea` |
 | The New Thread form: the X, the private checkbox and its label | Pointing hand (the arrow over the disabled checkbox) | `CursorArea` |
