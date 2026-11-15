@@ -757,6 +757,32 @@ final class SessionMessageActionsTests {
         session.close()
     }
 
+    // The channel's list was made again meanwhile: the refusal reaches the new one's editor.
+    @Test
+    func aRefusalBeforeAskingThatComesAfterAChannelSwitchOpensInTheChannelsNewList() async throws {
+        store.update { $0.list([channel(11), channel(12)], in: 1) }
+        let list = try ownMessages()
+        list.editor.start(try #require(list.rows.last))
+        list.editor.text = "changed"
+        account.editRefusedEarly.withLock { $0 = .Request(error: .Closed) }
+        account.holdEdits.withLock { $0 = true }
+        list.editor.save()
+        let saving = list.editor.saving
+        await account.editReplies.pulled(1)
+        weak var first = list
+        session.open(channel: id(12))
+        session.open(channel: id(11))
+        try #require(session.messages !== first)
+        #expect(session.messages?.editor.editing == nil)
+
+        account.editReplies.send(())
+        await finished(saving)
+
+        #expect(session.messages?.editor.editing?.messageId == id(101))
+        #expect(session.messages?.editor.text == "changed")
+        session.close()
+    }
+
     @Test
     func aDeleteDiscordRefusesAlerts() async throws {
         let list = try ownMessages()

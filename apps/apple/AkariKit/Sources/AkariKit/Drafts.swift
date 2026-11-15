@@ -13,6 +13,8 @@ final class Drafts {
     var saves = 0
     // Refused before asking, so the core keeps no record: they wait for the editor here.
     var thrownRefusals: [MessageId: (text: String, error: EditError)] = [:]
+    // The channel's list now, which a switch may have made since the save.
+    var refusalWaits: ((ChannelId) -> Void)?
     // Refusals the editor took; a row read before the core forgot them still shows them.
     var takenRefusals: Set<MessageId> = []
     var editOpenings = 0

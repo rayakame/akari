@@ -259,6 +259,11 @@ public final class SessionModel {
         servers = ServerListModel(store: store, account: userId, memory: memory)
         directMessages = DirectMessageListModel(store: store)
         collapsed = memory.collapsedCategories()
+        drafts.refusalWaits = { [weak self] channel in
+            for list in [self?.messages, self?.split].compactMap({ $0 }) where list.channelId == channel {
+                list.editor.reopenRefused()
+            }
+        }
     }
 
     deinit {

@@ -726,6 +726,27 @@ final class EditModelTests {
         #expect(list.editor.editing == nil)
     }
 
+    // The parent's message went while the thread was closed: its starter row stays, unavailable.
+    @Test
+    func aKeptEditOfAStarterRowWhoseMessageWentMeanwhileIsGone() throws {
+        store.update { state in
+            state.channels[id(31)] = thread(31, in: 10)
+            state.show(message(31, in: 31, kind: .threadStarterMessage))
+            state.windows[id(31)] = window([31], oldest: true)
+            state.starters[id(31)] = .loaded(message: message(7, in: 10, content: "the start"))
+            state.allow(editing(), message: 31, in: 31)
+        }
+        let first = list(31)
+        first.editor.start(try row(31, in: first))
+        first.editor.text = "half typed"
+        store.update { $0.starters[id(31)] = .unavailable }
+
+        let back = list(31)
+
+        #expect(back.editor.editing == nil)
+        #expect(back.composer.focusRequests == 0)
+    }
+
     @Test
     func aRefusalBeforeAskingWaitsWhileAnotherEditIsOpenAndOpensWhenItEnds() async throws {
         let list = list()

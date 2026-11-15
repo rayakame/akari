@@ -215,7 +215,7 @@ public final class EditModel {
         drafts.unansweredSaves[own.id] = token
         drafts.takenRefusals.remove(own.id)
         drafts.thrownRefusals[own.id] = nil
-        saving = Task { [weak self, account, drafts] in
+        saving = Task { [weak self, account, drafts, channelId] in
             do {
                 try await account.editMessage(
                     channelId: own.channelId, messageId: own.id, content: content)
@@ -231,7 +231,11 @@ public final class EditModel {
                 let refused = error as? EditError ?? .Request(error: .UnexpectedResponse)
                 if !Self.deleted(refused) {
                     drafts.thrownRefusals[own.id] = (content, refused)
-                    self?.reopenRefused()
+                    if let waits = drafts.refusalWaits {
+                        waits(channelId)
+                    } else {
+                        self?.reopenRefused()
+                    }
                 }
             }
         }
@@ -253,7 +257,7 @@ public final class EditModel {
 
     // A delete while the channel was closed, or before the list loaded, said nothing to it.
     func opened() {
-        if let editing, lost(editing.messageId) {
+        if let editing, lost(editing.messageId) || row(editing.messageId)?.starter == .unavailable {
             end(byUser: false)
         } else {
             reopenRefused()
