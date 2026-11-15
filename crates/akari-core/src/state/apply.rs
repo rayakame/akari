@@ -412,6 +412,8 @@ pub(crate) struct State {
     latest: HashMap<ChannelId, Arc<Message>>,
     // The user's own reactions whose requests are on their way.
     reacting: Vec<reactions::OwnReaction>,
+    // The user's edits and deletes on their way, and the edits Discord refused.
+    edits: super::edits::Edits,
     // Threads messages brought before their guild was known.
     unplaced_threads: HashMap<ChannelId, model::Channel>,
     // Unjoined threads kept across the last READY that neither the gateway nor a request has
@@ -469,6 +471,7 @@ impl State {
             fetched_threads: HashSet::new(),
             latest: HashMap::new(),
             reacting: Vec::new(),
+            edits: super::edits::Edits::default(),
             unplaced_threads: HashMap::new(),
             unconfirmed: HashSet::new(),
             older: HashMap::new(),
@@ -889,33 +892,14 @@ impl State {
                 if let Some(thread) = update.thread.as_deref() {
                     self.put_thread(thread.clone(), events);
                 }
-                if self.update_latest(&update) {
-                    self.reread_boxes(update.channel_id, events);
-                }
-                self.update_first_message(&update, events);
-                self.windows.update(*update, &self.entities.users, events);
+                let update = self.edits.heard(*update);
+                self.update_message(update, events);
             }
             E::MessageDelete(delete) => {
-                if self.count_deleted(delete.channel_id, &[delete.id])
-                    | self.delete_latest(delete.channel_id, delete.id)
-                {
-                    self.reread_boxes(delete.channel_id, events);
-                }
-                self.delete_first_message(delete.channel_id, delete.id, events);
-                self.windows.delete(delete.channel_id, delete.id, events);
+                self.remove_messages(delete.channel_id, &[delete.id], true, events);
             }
             E::MessageDeleteBulk(delete) => {
-                let mut changed = self.count_deleted(delete.channel_id, &delete.ids);
-                for id in &delete.ids {
-                    changed |= self.delete_latest(delete.channel_id, *id);
-                }
-                if changed {
-                    self.reread_boxes(delete.channel_id, events);
-                }
-                for id in delete.ids {
-                    self.delete_first_message(delete.channel_id, id, events);
-                    self.windows.delete(delete.channel_id, id, events);
-                }
+                self.remove_messages(delete.channel_id, &delete.ids, true, events);
             }
             E::UserGuildSettingsUpdate(settings) => {
                 let guild_id = settings.guild_id;
@@ -1753,11 +1737,18 @@ impl State {
         per_window: usize,
     ) -> (Entities, Vec<(ChannelId, CachedWindow)>) {
         // Before a session nothing confirms a window is still current.
-        let windows = if self.ready {
+        let mut windows = if self.ready {
             self.windows.cache_windows(per_window)
         } else {
             Vec::new()
         };
+        if !self.edits.is_empty() {
+            for (_, window) in &mut windows {
+                for message in &mut window.messages {
+                    *message = self.with_discord_text(message);
+                }
+            }
+        }
         let mut entities = self.entities.clone();
         // An unjoined thread is kept only for its own cached window or a cached message's box; the
         // rest come again with the next subscription's sync and pages.
@@ -2331,6 +2322,7 @@ mod actions;
 mod boxes;
 mod browser;
 mod creating;
+mod edits;
 mod forum;
 mod media;
 mod picker;
@@ -2338,6 +2330,7 @@ mod reactions;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
+pub(crate) use edits::{DeleteStart, EditAsk, WantedEdit};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
 pub(crate) use reactions::{OwnChange, ReactionAsk, Wanted};
 pub(crate) use reading::{Unread, UnreadNeeds};

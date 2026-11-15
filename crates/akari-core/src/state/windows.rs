@@ -1545,22 +1545,66 @@ impl Windows {
             .map_or(&[][..], |window| window.messages.as_slice());
         self.targets
             .update(&update, &mut |user| intern(user, users, recent), events);
-        let Some(window) = self.windows.get_mut(&update.channel_id) else {
+        let (channel, id) = (update.channel_id, update.id);
+        let starters = self.update_starters(&update, users);
+        let Some(window) = self.windows.get_mut(&channel) else {
+            self.announce_starters(channel, id, starters, events);
             return;
         };
         window.miss(Missed::Updated(Box::new(update.clone())));
-        if let Ok(index) = Window::position(&window.messages, update.id) {
+        let mut row = false;
+        if let Ok(index) = Window::position(&window.messages, id) {
             let known = window.messages[index].clone();
             let next =
                 Arc::new(known.patch(update, &mut |user| intern(user, users, &window.messages)));
             if next != known {
                 window.messages[index] = next.clone();
                 events.push(StoreEvent::MessageUpdated(next));
+                row = true;
             }
-        } else if let Ok(index) = Window::position(&window.held, update.id) {
+        } else if let Ok(index) = Window::position(&window.held, id) {
             let next =
                 window.held[index].patch(update, &mut |user| Arc::new(User::from_wire(user)));
             window.held[index] = Arc::new(next);
+        }
+        self.announce_starters(channel, id, starters | row, events);
+    }
+
+    // `true` when a viewed thread's starter changed.
+    fn update_starters(
+        &mut self,
+        update: &MessageUpdate,
+        users: &HashMap<UserId, Arc<User>>,
+    ) -> bool {
+        let mut changed = false;
+        for starter in self.starters.values_mut() {
+            if let Starter::Found(message) = starter
+                && message.channel_id == update.channel_id
+                && message.id == update.id
+            {
+                let next = message.patch(update.clone(), &mut |user| intern(user, users, &[]));
+                if next != **message {
+                    *message = Arc::new(next);
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    fn announce_starters(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+        changed: bool,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if changed {
+            events.extend(
+                self.starter_rows_showing(channel, id)
+                    .into_iter()
+                    .map(StoreEvent::MessageUpdated),
+            );
         }
     }
 
@@ -1624,6 +1668,7 @@ impl Windows {
         events: &mut Vec<StoreEvent>,
     ) {
         self.targets.delete(channel_id, id, events);
+        self.starters_gone(channel_id, id, events);
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
@@ -1640,6 +1685,24 @@ impl Windows {
         } else if let Ok(index) = Window::position(&window.held, id) {
             window.held.remove(index);
             window.held_deleted = window.held_deleted.max(Some(id));
+        }
+    }
+
+    fn starters_gone(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
+        let mut threads = Vec::new();
+        for (thread, starter) in &mut self.starters {
+            if let Starter::Found(message) = starter
+                && message.channel_id == channel
+                && message.id == id
+            {
+                *starter = Starter::Gone;
+                threads.push(*thread);
+            }
+        }
+        for thread in threads {
+            if let Some(row) = self.starter_row(thread) {
+                events.push(StoreEvent::MessageUpdated(row.clone()));
+            }
         }
     }
 
