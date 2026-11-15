@@ -597,7 +597,8 @@ kind of channel (`PIN_LIMIT`).
   being an older pin edited on a page not loaded yet, or a message the store has no copy of.
   *Akari:* the official client puts every pinned update it lacks at the front, an edit of an old
   pin too. Its time is this device's clock, never before the newest pin, until the channel's
-  newest pin time names it: CHANNEL_PINS_UPDATE before or after the update.
+  newest pin time names it: CHANNEL_PINS_UPDATE before or after the update, a newer time naming
+  the oldest such pin first, as the pins came.
 - **Changes while a page loads** are put over it, like a history page's: an update unless the
   page has a newer edit, a delete, an unpin, a reaction (a copy that was current, the list's or a
   window's, gives its counts; else the reaction is applied once). A pin placed by the gateway
