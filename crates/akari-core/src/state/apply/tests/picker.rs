@@ -3,6 +3,7 @@ use crate::emoji::EmojiVersion;
 use crate::model::EmojiId;
 use crate::state::picker::{EmojiAccess, EmojiSection, PickerEmoji};
 use crate::state::reactions::ReactionEmoji;
+use crate::state::settings::FolderEntry;
 
 const WAVE: u64 = 700_000_000_000_000_001;
 const DANCE: u64 = 700_000_000_000_000_002;
@@ -21,12 +22,16 @@ fn emoji(id: u64, name: &str) -> Value {
     json!({"id": id.to_string(), "name": name})
 }
 
+fn picker_state(nitro: bool) -> State {
+    picker_state_with_premium(if nitro { 2 } else { 0 })
+}
+
 // G1 (where the user is an administrator) has a plain, an animated, an unavailable, a
 // role-locked, an integration's and a role's emoji the user has; G3 a plain and an
 // integration's.
-fn picker_state(nitro: bool) -> State {
+fn picker_state_with_premium(premium_type: u8) -> State {
     let mut ready = ready_value();
-    ready["user"]["premium_type"] = json!(if nitro { 2 } else { 0 });
+    ready["user"]["premium_type"] = json!(premium_type);
     ready["guilds"][0]["emojis"] = json!([
         emoji(WAVE, "wave"),
         {"id": DANCE.to_string(), "name": "dance", "animated": true},
@@ -109,6 +114,74 @@ fn nitro_unlocks_animated_and_other_servers_emoji() {
         Some(EmojiAccess::Unavailable)
     );
     assert_eq!(access(&state, GENERAL, SUBS), Some(EmojiAccess::RoleLocked));
+}
+
+// Nitro Classic and Nitro Basic count as Nitro does.
+#[test]
+fn every_nitro_tier_unlocks_emoji() {
+    for tier in [1, 2, 3] {
+        let state = picker_state_with_premium(tier);
+
+        assert_eq!(
+            access(&state, GENERAL, DANCE),
+            Some(EmojiAccess::Usable),
+            "{tier}"
+        );
+        assert_eq!(
+            access(&state, GENERAL, POG),
+            Some(EmojiAccess::Usable),
+            "{tier}"
+        );
+    }
+}
+
+#[test]
+fn one_of_the_users_roles_is_enough_for_a_role_locked_emoji() {
+    let mut state = picker_state(false);
+    apply(
+        &mut state,
+        "GUILD_MEMBER_UPDATE",
+        json!({
+            "guild_id": G1.to_string(),
+            "user": {"id": ME.to_string(), "username": "akari_tester"},
+            "roles": [ADMIN_ROLE, "500000000000000003"],
+        }),
+    );
+
+    assert_eq!(access(&state, GENERAL, MINE), Some(EmojiAccess::Usable));
+    assert_eq!(access(&state, GENERAL, SUBS), Some(EmojiAccess::RoleLocked));
+}
+
+// Roles the store doesn't know lock rather than unlock.
+#[test]
+fn without_the_users_member_a_role_locked_emoji_stays_locked() {
+    let mut state = state_from(&ready_value());
+    let mut garden = guild_create(G3);
+    garden["members"] = json!([]);
+    garden["emojis"] = json!([{"id": POG.to_string(), "name": "pog", "roles": [OTHER_ROLE]}]);
+    apply(&mut state, "GUILD_CREATE", garden);
+
+    assert_eq!(access(&state, GARDEN, POG), Some(EmojiAccess::RoleLocked));
+}
+
+// The picker hides an emoji for other roles; that it's unavailable too doesn't show it.
+#[test]
+fn an_unavailable_emoji_for_other_roles_stays_hidden() {
+    let mut state = picker_state(false);
+    apply(
+        &mut state,
+        "GUILD_EMOJIS_UPDATE",
+        json!({"guild_id": G1.to_string(), "emojis": [
+            emoji(WAVE, "wave"),
+            {"id": SUBS.to_string(), "name": "subs", "available": false, "roles": [OTHER_ROLE]},
+        ]}),
+    );
+
+    assert_eq!(access(&state, GENERAL, SUBS), Some(EmojiAccess::RoleLocked));
+    assert_eq!(
+        sections(&state, GENERAL)[0],
+        (G1, vec![(WAVE, EmojiAccess::Usable)])
+    );
 }
 
 // G3's @everyone lacks Use External Emojis: other servers' emoji are out there, with Nitro too,
@@ -248,32 +321,60 @@ fn in_a_thread_the_parents_overwrites_decide() {
     assert_eq!(order, [G3, G1], "the thread's own server first");
 }
 
+// One entry per `(folder ID, servers)`; `None` places the servers outside a folder.
+fn in_folders(state: &mut State, entries: &[(Option<i64>, &[u64])]) {
+    let entries: Vec<FolderEntry> = entries
+        .iter()
+        .map(|(id, guilds)| FolderEntry {
+            id: *id,
+            name: None,
+            color: None,
+            guilds: guilds.iter().copied().map(GuildId::new).collect(),
+        })
+        .collect();
+    state.entities.settings.folders = Some(entries.into());
+}
+
+fn section_order(state: &State, channel: u64) -> Vec<u64> {
+    sections(state, channel)
+        .iter()
+        .map(|(guild, _)| *guild)
+        .collect()
+}
+
 // Outside a server the rail's order alone.
 #[test]
 fn in_a_dm_sections_follow_the_rail() {
-    let state = picker_state(true);
-    let rail: Vec<u64> = state
-        .server_list()
-        .into_iter()
-        .flat_map(|item| match item {
-            ServerListItem::Guild(id) => vec![id],
-            ServerListItem::Folder(folder) => folder.guilds.to_vec(),
-        })
-        .filter(|id| {
-            state
-                .guild(*id)
-                .is_some_and(|guild| !guild.emojis.is_empty())
-        })
-        .map(|id| id.get())
-        .collect();
-    assert_eq!(rail.len(), 2);
+    let mut state = picker_state(true);
+    assert_eq!(
+        section_order(&state, DM),
+        [G3, G1],
+        "the server joined last first"
+    );
 
-    let order: Vec<u64> = sections(&state, DM)
-        .iter()
-        .map(|(guild, _)| *guild)
-        .collect();
+    in_folders(&mut state, &[(None, &[G1]), (Some(7), &[G3])]);
 
-    assert_eq!(order, rail);
+    assert_eq!(section_order(&state, DM), [G1, G3]);
+}
+
+#[test]
+fn a_folders_servers_are_in_the_picker() {
+    let mut state = picker_state(true);
+    in_folders(&mut state, &[(Some(7), &[G3])]);
+
+    assert_eq!(section_order(&state, GENERAL), [G1, G3]);
+    assert_eq!(
+        sections(&state, GENERAL)[1],
+        (
+            G3,
+            vec![
+                (POG, EmojiAccess::Usable),
+                (GARDEN_TWITCH, EmojiAccess::Usable)
+            ]
+        )
+    );
+    assert_eq!(section_order(&state, DM), [G1, G3]);
+    assert_eq!(search(&state, GENERAL, "pog"), ["pog"]);
 }
 
 const NOW: i64 = 1_800_000_000_000;
@@ -381,7 +482,11 @@ fn quick_reactions_skip_emoji_newer_than_the_host_draws() {
         quick(&state, GENERAL, EmojiVersion::new(15, 1)),
         ["100", "laughing", "sparkling_heart"]
     );
-    assert_eq!(quick(&state, GENERAL, ALL)[0], "face_with_bags_under_eyes");
+    assert_eq!(
+        quick(&state, GENERAL, EmojiVersion::new(16, 0))[0],
+        "face_with_bags_under_eyes",
+        "the host's own version"
+    );
 }
 
 // The picker's Frequently Used: best first, locked ones too (dimmed), but nothing the picker
@@ -466,6 +571,11 @@ fn search_reads_other_short_codes_and_unicodes_names() {
     assert_eq!(search(&state, GENERAL, "thumbs up")[0], "thumbsup");
     assert_eq!(search(&state, GENERAL, "grinning squinting")[0], "laughing");
     assert_eq!(search(&state, GENERAL, "flag: germany")[0], "flag_de");
+    assert_eq!(
+        search(&state, GENERAL, "smiling face with heart eyes")[0],
+        "heart_eyes",
+        "a hyphen in Unicode's name"
+    );
 }
 
 #[test]
@@ -474,8 +584,10 @@ fn search_ignores_case_colons_and_spaces_around() {
 
     assert_eq!(search(&state, GENERAL, " :Smile: ")[0], "smile");
     assert_eq!(search(&state, GENERAL, "THUMBSUP")[0], "thumbsup");
+    assert_eq!(search(&state, GENERAL, ":+1:")[0], "thumbsup");
     assert!(search(&state, GENERAL, "").is_empty());
     assert!(search(&state, GENERAL, " :: ").is_empty());
+    assert!(search(&state, GENERAL, "?").is_empty(), "no letters");
 }
 
 // Within a rank: the channel's own server, then Unicode, then the other servers.
@@ -550,6 +662,18 @@ fn search_leaves_out_what_the_picker_hides_and_what_the_host_cant_draw() {
     assert_eq!(
         search(&state, GENERAL, "face_with_bags"),
         ["face_with_bags_under_eyes"]
+    );
+    let own = state.search_emoji(
+        ChannelId::new(GENERAL),
+        "face_with_bags",
+        EmojiVersion::new(16, 0),
+        10,
+        NOW,
+    );
+    assert_eq!(
+        shown(own),
+        ["face_with_bags_under_eyes"],
+        "the host's own version"
     );
 }
 
