@@ -7,7 +7,7 @@ use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
 use crate::errors::{
-    CreateThreadError, EditError, GatewayError, ImageError, ReactionError, RequestError,
+    CreateThreadError, EditError, GatewayError, ImageError, PinError, ReactionError, RequestError,
 };
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::{
@@ -685,6 +685,65 @@ impl Account {
     /// user gave it up. Nothing for an edit on its way.
     pub fn dismiss_edit(&self, channel_id: ChannelId, message_id: MessageId) {
         self.core.dismiss_edit(channel_id, message_id);
+    }
+
+    /// Asks for the first page of the channel's pins (`Store::pins`, 25 a page) when its list
+    /// isn't loaded in this connection, its first page failed, or Discord named a pin newer than
+    /// the list has; otherwise nothing. Call it whenever the pins show and read `NotLoaded`: on
+    /// opening, and after a new session. A failure leaves the list `Failed` and is returned.
+    pub async fn load_pins(&self, channel_id: ChannelId) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(
+            self.runtime,
+            async move { core.load_pins(channel_id).await },
+        )
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Asks for the page after the loaded pins while `PinsPage.has_more` says so, also after a
+    /// failed one; nothing otherwise.
+    pub async fn load_more_pins(&self, channel_id: ChannelId) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.load_more_pins(channel_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Pins the message the row shows (a thread's starter row pins the parent's message),
+    /// opening an archived thread first. Nothing changes until the gateway's update.
+    /// `Request { InvalidRequest }` before asking where `MessageActions.pin` says no.
+    pub async fn pin(&self, channel_id: ChannelId, message_id: MessageId) -> Result<(), PinError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.pin(channel_id, message_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Unpins the message, also one only the pins list has; one that is gone counts as unpinned.
+    /// Needs `MessageActions.unpin`.
+    pub async fn unpin(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+    ) -> Result<(), PinError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.unpin(channel_id, message_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// The user sees the channel's pins: while `Store::pins_unread` says so, the dot goes at once
+    /// and Discord is told (tried up to three times); nothing otherwise. Call it when the pins
+    /// show, and again on `PinsUnreadChanged` while they do.
+    pub fn ack_pins(&self, channel_id: ChannelId) {
+        self.core.ack_pins(channel_id);
     }
 }
 

@@ -1595,8 +1595,10 @@ impl Store {
     /// What the user may do with the message, by the official client's rules: the message's
     /// type, flags and delivery, the user's permissions in its channel (a DM or group DM asks
     /// none, its system DM allows next to nothing), their timeout, and a thread's archived and
-    /// locked state. Nothing for a message the store doesn't have. Read again when the message,
-    /// its channel or the user's permissions change. A viewed thread's starter row (the
+    /// locked state. Nothing for a message the store doesn't have; a message only the pins list
+    /// has answers there, and one the list has is pinned whatever an older copy says. Read
+    /// again when the message, its channel or the user's permissions change. A viewed thread's
+    /// starter row (the
     /// thread's ID and the row's) answers for the message it shows, in that message's channel:
     /// requests take the IDs of [`Store::shown_message`]. It allows no reply: one sent in the
     /// thread can't name a message of the parent channel. Its `mark_unread` is the
@@ -1627,7 +1629,7 @@ impl Store {
     }
 
     /// [`Store::message_actions`] for a message the caller holds, which the store may have let
-    /// go of: a pinned message of the pins list, a reply's target, a row a jump trimmed away.
+    /// go of: a reply's target, a row a jump trimmed away.
     pub fn message_actions_of(&self, message: &Message) -> MessageActions {
         let now = self.now_millis();
         self.read(|inner| inner.state.message_actions_of(message, now))
@@ -1720,7 +1722,8 @@ impl Store {
     /// The message's reactions, in Discord's order, new emoji at the end; empty when it has
     /// none or isn't loaded. Read again on `MessageReactionsChanged`, and with the message
     /// itself on `MessageUpdated`. A viewed thread's starter row answers for the message it
-    /// shows, a forum post's ID in both places for its first message.
+    /// shows, a forum post's ID in both places for its first message, and a message only the
+    /// pins list has as there (`PinsChanged`).
     pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
         self.read(|inner| inner.state.reactions(channel, message))
     }
