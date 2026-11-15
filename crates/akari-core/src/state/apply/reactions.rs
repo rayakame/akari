@@ -9,6 +9,9 @@ use crate::state::reactions::{self, Reaction, ReactionChange, ReactionEmoji};
 
 static NONE: LazyLock<Arc<[Reaction]>> = LazyLock::new(|| Arc::new([]));
 
+// Reactions that wait for late echoes once their requests are over; past it the oldest's show.
+pub(super) const SETTLED_KEPT: usize = 16;
+
 // What Discord has of the user's reactions with one emoji.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Mine {
@@ -28,13 +31,52 @@ impl Mine {
             self.normal = mine;
         }
     }
+
+    fn any(self) -> bool {
+        self.normal || self.burst
+    }
 }
 
+// What the user does to their own reaction with an emoji.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Want {
-    // In either kind.
-    Mine,
-    Without { burst: bool },
+pub(crate) enum OwnChange {
+    React,
+    // The kind the store shows as theirs, the plain one first.
+    Unreact,
+    Remove { burst: bool },
+}
+
+impl OwnChange {
+    // The kind taken back; `None` for a reaction.
+    fn taken(self, shown: Mine) -> Option<bool> {
+        match self {
+            Self::React => None,
+            Self::Unreact => Some(!shown.normal && shown.burst),
+            Self::Remove { burst } => Some(burst),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Want {
+    // A click added it and none took the plain one back since: met by either kind.
+    mine: bool,
+    // Every kind taken back since the requests began, wanted gone unless `mine`.
+    taken: Mine,
+}
+
+impl Want {
+    fn change(&mut self, taken: Option<bool>, changed: bool) {
+        match taken {
+            None => self.mine |= changed,
+            Some(burst) => {
+                self.taken.set(burst, true);
+                if !burst {
+                    self.mine = false;
+                }
+            }
+        }
+    }
 }
 
 // A request for the user's own reaction.
@@ -44,14 +86,15 @@ pub(crate) struct ReactionAsk {
     pub(crate) burst: bool,
 }
 
-// A reaction of the user's own while requests for it run: the store shows the user's wish,
-// and the gateway's word about it is kept here until they are over.
+// The user's reaction while requests for it run (the store shows their wish, the gateway's word
+// is kept here), and after them while echoes of requests answered before them are due.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OwnReaction {
     channel: ChannelId,
     message: MessageId,
     emoji: ReactionEmoji,
-    want: Want,
+    // `None` once the requests are over.
+    want: Option<Want>,
     discord: Mine,
     // The request on its way, and whether the gateway told of it already.
     asked: Option<(ReactionAsk, bool)>,
@@ -64,17 +107,26 @@ impl OwnReaction {
         self.channel == channel && self.message == message && self.emoji.same(emoji)
     }
 
+    // `had` is what the store shows, which is what Discord has once the requests are over.
+    fn click(&mut self, taken: Option<bool>, changed: bool, had: Mine) {
+        if self.want.is_none() {
+            self.discord = had;
+        }
+        self.want.get_or_insert_default().change(taken, changed);
+    }
+
     fn next(&self) -> Option<ReactionAsk> {
-        let (add, burst) = match self.want {
-            Want::Mine => (true, false),
-            Want::Without { burst } => (false, burst),
-        };
-        let satisfied = if add {
-            self.discord.normal || self.discord.burst
-        } else {
-            !self.discord.has(burst)
-        };
-        (!satisfied).then_some(ReactionAsk { add, burst })
+        let want = self.want?;
+        if want.mine {
+            return (!self.discord.any()).then_some(ReactionAsk {
+                add: true,
+                burst: false,
+            });
+        }
+        [false, true]
+            .into_iter()
+            .find(|&burst| want.taken.has(burst) && self.discord.has(burst))
+            .map(|burst| ReactionAsk { add: false, burst })
     }
 
     // Whether the change is the user's own reaction with the emoji, which the store leaves out.
@@ -89,22 +141,22 @@ impl OwnReaction {
                 if self.emoji.name.is_none() {
                     self.emoji.name.clone_from(&emoji.name);
                 }
-                self.told(ReactionAsk {
+                let owed = self.told(ReactionAsk {
                     add: true,
                     burst: *burst,
                 });
-                true
+                owed || self.want.is_some()
             }
             ReactionChange::Remove {
                 emoji,
                 burst,
                 mine: true,
             } if self.emoji.same(emoji) => {
-                self.told(ReactionAsk {
+                let owed = self.told(ReactionAsk {
                     add: false,
                     burst: *burst,
                 });
-                true
+                owed || self.want.is_some()
             }
             ReactionChange::RemoveEmoji(emoji) if self.emoji.same(emoji) => {
                 self.cleared();
@@ -118,22 +170,34 @@ impl OwnReaction {
         }
     }
 
-    fn told(&mut self, said: ReactionAsk) {
-        if self.owed.front() == Some(&said) {
-            self.owed.pop_front();
-            return;
+    // Whether it is the echo owed next for its kind, which says nothing new.
+    fn told(&mut self, said: ReactionAsk) -> bool {
+        let owed = self.owed.iter().position(|owed| owed.burst == said.burst);
+        if let Some(index) = owed
+            && self.owed[index] == said
+        {
+            self.owed.remove(index);
+            return true;
         }
-        self.owed.clear();
+        self.owed.retain(|owed| owed.burst != said.burst);
         self.discord.set(said.burst, said.add);
         if let Some((asked, echoed)) = &mut self.asked
             && *asked == said
         {
             *echoed = true;
         }
+        false
     }
 
     fn cleared(&mut self) {
-        self.owed.clear();
+        // Echoes still owed are of requests Discord made after the sweep: a kind they leave added
+        // has to show them.
+        for burst in [false, true] {
+            let last = self.owed.iter().rev().find(|owed| owed.burst == burst);
+            if last.is_some_and(|owed| owed.add) {
+                self.owed.retain(|owed| owed.burst != burst);
+            }
+        }
         self.discord = Mine::default();
         if let Some((asked, echoed)) = &mut self.asked
             && !asked.add
@@ -197,14 +261,14 @@ impl State {
 }
 
 impl State {
-    // The user reacts (`want`) or takes their reaction back: every copy has it at once, as
-    // their own dispatch would leave it. `None` where the message's actions don't offer it.
+    // The user reacts or takes their reaction back: every copy has it at once, as their own
+    // dispatch would leave it. `None` where the message's actions don't offer it.
     pub(crate) fn want_reaction(
         &mut self,
         channel: ChannelId,
         row: MessageId,
         asked: &ReactionEmoji,
-        want: bool,
+        change: OwnChange,
         now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Wanted> {
@@ -226,48 +290,46 @@ impl State {
             normal: known.me,
             burst: known.me_burst,
         });
-        let burst = had.burst && !had.normal;
         let mut emoji = known.map_or(asked, |known| &known.emoji).clone();
         if emoji.name.is_none() {
             emoji.name.clone_from(&asked.name);
         }
-        let changed = (had.normal || had.burst) != want;
-        let wish = if want {
-            Want::Mine
-        } else {
-            Want::Without { burst }
-        };
+        let taken = change.taken(had);
+        let changed = taken.map_or(!had.any(), |burst| had.has(burst));
         let open = self
             .reacting
             .iter_mut()
             .find(|own| own.is(shown, message, &emoji));
         match open {
-            Some(own) => own.want = wish,
-            None if changed => self.reacting.push(OwnReaction {
-                channel: shown,
-                message,
-                emoji: emoji.clone(),
-                want: wish,
-                discord: had,
-                asked: None,
-                owed: VecDeque::new(),
-            }),
-            None => {}
+            Some(own) if own.want.is_some() || changed => own.click(taken, changed, had),
+            None if changed => {
+                let mut own = OwnReaction {
+                    channel: shown,
+                    message,
+                    emoji: emoji.clone(),
+                    want: None,
+                    discord: had,
+                    asked: None,
+                    owed: VecDeque::new(),
+                };
+                own.click(taken, changed, had);
+                self.reacting.push(own);
+            }
+            _ => {}
         }
         if changed {
-            let change = if want {
-                ReactionChange::Add {
+            let change = match taken {
+                None => ReactionChange::Add {
                     emoji: emoji.clone(),
                     burst: false,
                     mine: true,
                     only_once: false,
-                }
-            } else {
-                ReactionChange::Remove {
+                },
+                Some(burst) => ReactionChange::Remove {
                     emoji: emoji.clone(),
                     burst,
                     mine: true,
-                }
+                },
             };
             self.apply_reactions(shown, message, &[change], events);
         }
@@ -325,7 +387,9 @@ impl State {
         else {
             return;
         };
-        let own = self.reacting.swap_remove(index);
+        let mut own = self.reacting.remove(index);
+        own.want = None;
+        own.asked = None;
         let change = |burst: bool| {
             if own.discord.has(burst) {
                 ReactionChange::Add {
@@ -345,7 +409,24 @@ impl State {
         // What is added goes first: an emoji that keeps a count keeps its place in the row.
         let mut changes = [change(false), change(true)];
         changes.sort_by_key(|change| matches!(change, ReactionChange::Remove { .. }));
+        if !own.owed.is_empty() {
+            self.reacting.push(own);
+            let settled = self.reacting.iter().filter(|own| own.want.is_none());
+            if settled.count() > SETTLED_KEPT
+                && let Some(oldest) = self.reacting.iter().position(|own| own.want.is_none())
+            {
+                self.reacting.remove(oldest);
+            }
+        }
         self.apply_reactions(channel, message, &changes, events);
+    }
+
+    // A new session never brings the last one's echoes.
+    pub(super) fn forget_echoes(&mut self) {
+        self.reacting.retain(|own| own.want.is_some());
+        for own in &mut self.reacting {
+            own.owed.clear();
+        }
     }
 
     fn reaction_change(&self, reaction: MessageReaction, add: bool) -> Option<ReactionChange> {
@@ -433,6 +514,8 @@ impl State {
                 }
             })
             .collect();
+        self.reacting
+            .retain(|own| own.want.is_some() || !own.owed.is_empty());
         self.apply_reactions(channel, id, &shown, events);
     }
 

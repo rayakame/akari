@@ -1391,7 +1391,11 @@ fn clicked(state: &mut State, emoji: &str, want: bool) -> bool {
             Snowflake::new(GENERAL),
             Snowflake::new(M),
             &crate::state::ReactionEmoji::unicode(emoji),
-            want,
+            if want {
+                crate::state::apply::OwnChange::React
+            } else {
+                crate::state::apply::OwnChange::Unreact
+            },
             now,
             &mut Vec::new(),
         )

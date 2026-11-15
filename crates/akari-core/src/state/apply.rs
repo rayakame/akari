@@ -633,6 +633,7 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.forget_post_counts();
+        self.forget_echoes();
         self.follow_ready();
         self.follow_ready_threads();
         self.place_waiting_threads(events);
@@ -2303,7 +2304,7 @@ mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
-pub(crate) use reactions::{ReactionAsk, Wanted};
+pub(crate) use reactions::{OwnChange, ReactionAsk, Wanted};
 pub(crate) use reading::{Unread, UnreadNeeds};
 
 #[cfg(test)]

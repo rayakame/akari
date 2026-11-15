@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use super::{Account, Shared};
 use crate::RequestError;
 use crate::model::{ChannelId, MessageId, UserId};
-use crate::state::apply::ReactionAsk;
+use crate::state::apply::{OwnChange, ReactionAsk};
 use crate::state::{ReactionEmoji, User};
 
 const TOO_MANY_REACTIONS: u32 = 30010;
@@ -130,7 +130,7 @@ impl Shared {
         channel: ChannelId,
         row: MessageId,
         emoji: &ReactionEmoji,
-        want: bool,
+        change: OwnChange,
         location: ReactionLocation,
     ) -> Result<(), ReactionError> {
         self.rest.usable()?;
@@ -139,7 +139,7 @@ impl Shared {
             let mut wishes = self.wishes.0.lock().unwrap_or_else(PoisonError::into_inner);
             let wanted = self
                 .store
-                .want_reaction(channel, row, emoji, want)
+                .want_reaction(channel, row, emoji, change)
                 .ok_or(RequestError::InvalidRequest)?;
             let known = wishes
                 .iter_mut()
@@ -272,7 +272,7 @@ impl Account {
         location: ReactionLocation,
     ) -> Result<(), ReactionError> {
         self.shared
-            .wish(channel, message, emoji, true, location)
+            .wish(channel, message, emoji, OwnChange::React, location)
             .await
     }
 
@@ -286,7 +286,7 @@ impl Account {
         location: ReactionLocation,
     ) -> Result<(), ReactionError> {
         self.shared
-            .wish(channel, message, emoji, false, location)
+            .wish(channel, message, emoji, OwnChange::Unreact, location)
             .await
     }
 }
@@ -346,10 +346,10 @@ impl Shared {
 }
 
 impl Account {
-    /// Removes `user`'s reaction with `emoji`, from the reactions window. The store changes
-    /// when the gateway says so. The user's own goes as [`Account::unreact`] does; anyone
-    /// else's needs [`MessageActions::remove_reactions`](crate::state::MessageActions), else
-    /// `InvalidRequest` without a request.
+    /// Removes `user`'s reaction of `kind` with `emoji`, from the reactions window. The user's
+    /// own goes as [`Account::unreact`] does, that kind only. Anyone else's needs
+    /// [`MessageActions::remove_reactions`](crate::state::MessageActions), else `InvalidRequest`
+    /// without a request, and the store changes when the gateway says so.
     pub async fn remove_reaction(
         &self,
         channel: ChannelId,
@@ -359,9 +359,12 @@ impl Account {
         user: UserId,
     ) -> Result<(), ReactionError> {
         if self.shared.store.current_user().map(|me| me.user.id) == Some(user) {
+            let change = OwnChange::Remove {
+                burst: kind == ReactionKind::Burst,
+            };
             return self
                 .shared
-                .wish(channel, message, emoji, false, ReactionLocation::Message)
+                .wish(channel, message, emoji, change, ReactionLocation::Message)
                 .await;
         }
         self.shared

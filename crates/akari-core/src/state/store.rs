@@ -6,8 +6,8 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{
-    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReactionAsk, ReadyDiff, State,
-    Unread, UnreadNeeds, Wanted,
+    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, OwnChange, PageKey, ReactionAsk,
+    ReadyDiff, State, Unread, UnreadNeeds, Wanted,
 };
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
@@ -742,13 +742,13 @@ impl Store {
         channel: ChannelId,
         row: MessageId,
         emoji: &ReactionEmoji,
-        want: bool,
+        change: OwnChange,
     ) -> Option<Wanted> {
         let now = self.now_millis();
         self.write("reaction", |inner, events| {
             inner
                 .state
-                .want_reaction(channel, row, emoji, want, now, events)
+                .want_reaction(channel, row, emoji, change, now, events)
         })
     }
 

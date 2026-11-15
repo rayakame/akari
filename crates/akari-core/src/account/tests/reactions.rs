@@ -1263,10 +1263,9 @@ fn shown_by(account: &Account) -> Shown {
 // The call with its change in the store, waiting for Discord.
 async fn begun<T>(call: impl Future<Output = T>) -> std::pin::Pin<Box<impl Future<Output = T>>> {
     let mut call = Box::pin(call);
-    assert!(
-        timeout(Duration::from_millis(1), &mut call).await.is_err(),
-        "answered before Discord"
-    );
+    let first =
+        std::future::poll_fn(|context| std::task::Poll::Ready(call.as_mut().poll(context))).await;
+    assert!(first.is_pending(), "answered before Discord");
     call
 }
 
@@ -1471,6 +1470,195 @@ async fn an_answer_never_brings_back_what_a_moderator_removed_after_the_echo() {
             "{removal}: nothing left to take back"
         );
     }
+}
+
+// Both answers come before either echo, which then says nothing the store doesn't show.
+#[tokio::test]
+async fn echoes_later_than_both_answers_never_show_a_reaction_taken_back() {
+    let mut online = reacting().await;
+    let (put, answer_put) = online.hold(204).await;
+    online.answer(204).await;
+    let (account, _, mut wire) = online.wire();
+    let emoji = heart();
+
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    arrival(&put).await;
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    answer_put.send(()).unwrap();
+    added.await.unwrap();
+    taken.await.unwrap();
+    assert_eq!(changes(&wire.events().await), 2, "the two clicks");
+
+    assert_eq!(
+        wire.own(ADD, 0).await,
+        [] as [&str; 0],
+        "the reaction's echo"
+    );
+    assert_eq!(shown_by(account), []);
+    assert_eq!(
+        wire.own(REMOVE, 0).await,
+        [] as [&str; 0],
+        "the removal's echo"
+    );
+    assert_eq!(shown_by(account), []);
+    assert_eq!(changes(&wire.own(ADD, 0).await), 1, "made again elsewhere");
+    assert_eq!(shown_by(account), one(HEART, 1, true));
+}
+
+#[tokio::test]
+async fn echoes_later_than_both_answers_never_hide_a_reaction_made_again() {
+    let mut online = reacting().await;
+    online.added_by(MIRA, HEART).await;
+    online.added_by(ME_ID, HEART).await;
+    let (delete, answer_delete) = online.hold(204).await;
+    online.answer(204).await;
+    let (account, _, mut wire) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    answer_delete.send(()).unwrap();
+    taken.await.unwrap();
+    added.await.unwrap();
+    assert_eq!(changes(&wire.events().await), 2, "the two clicks");
+
+    assert_eq!(
+        wire.own(REMOVE, 0).await,
+        [] as [&str; 0],
+        "the removal's echo"
+    );
+    assert_eq!(shown_by(account), one(HEART, 2, true));
+    assert_eq!(
+        wire.own(ADD, 0).await,
+        [] as [&str; 0],
+        "the reaction's echo"
+    );
+    assert_eq!(shown_by(account), one(HEART, 2, true));
+}
+
+#[tokio::test]
+async fn echoes_of_a_quick_toggle_that_come_after_it_say_nothing() {
+    let mut online = reacting().await;
+    online.answer(204).await;
+    online.react().await.unwrap();
+    online.unreact().await.unwrap();
+    online.events().await;
+
+    online.reaction(ADD, ME_ID, HEART, 0).await;
+    assert_eq!(online.events().await, [] as [&str; 0]);
+    online.reaction(REMOVE, ME_ID, HEART, 0).await;
+    assert_eq!(online.events().await, [] as [&str; 0]);
+    assert_eq!(online.shown(), []);
+}
+
+// A super reaction made on another device shows as it comes, between late echoes that don't.
+#[tokio::test]
+async fn the_other_kind_shows_at_once_between_late_echoes() {
+    let mut online = reacting().await;
+    online.answer(204).await;
+    online.react().await.unwrap();
+    online.unreact().await.unwrap();
+    online.events().await;
+
+    online.reaction(ADD, ME_ID, HEART, 1).await;
+    assert_eq!(changes(&online.events().await), 1, "the super reaction");
+    online.reaction(ADD, ME_ID, HEART, 0).await;
+    online.reaction(REMOVE, ME_ID, HEART, 0).await;
+    assert_eq!(online.events().await, [] as [&str; 0], "the echoes");
+    assert_eq!(online.shown(), [(HEART.to_owned(), 0, 1, false, true)]);
+}
+
+// The first click took the super reaction back; the last takes back the reaction the store
+// shows then, and Discord still has the super reaction.
+#[tokio::test]
+async fn a_super_reaction_taken_back_again_after_a_click_meanwhile_reports_the_refusal() {
+    let mut online = reacting().await;
+    online.reaction(ADD, ME_ID, HEART, 1).await;
+    online.events().await;
+    let (delete, answer_delete) = online.hold(403).await;
+    online.answer(204).await;
+    let (account, server, _) = online.wire();
+    let emoji = heart();
+
+    let taken = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    arrival(&delete).await;
+    let added = begun(account.react(general(), target(), &emoji, INLINE)).await;
+    let again = begun(account.unreact(general(), target(), &emoji, INLINE)).await;
+    assert_eq!(shown_by(account), [], "the last click, at once");
+    answer_delete.send(()).unwrap();
+
+    taken.await.unwrap();
+    added.await.unwrap();
+    let outcome = again.await;
+    assert!(
+        matches!(outcome, Err(ReactionError::Forbidden)),
+        "{outcome:?}"
+    );
+    assert_eq!(requests(server).await, ["DELETE"], "refused already");
+    assert_eq!(
+        shown_by(account),
+        [(HEART.to_owned(), 0, 1, false, true)],
+        "as Discord has it"
+    );
+}
+
+#[tokio::test]
+async fn removing_one_kind_of_ones_own_reaction_in_the_window_leaves_the_other() {
+    let cases = [
+        (
+            ReactionKind::Burst,
+            "1/@me?location=Message&burst=true",
+            (HEART.to_owned(), 1, 0, true, false),
+        ),
+        (
+            ReactionKind::Normal,
+            "0/@me?location=Message&burst=false",
+            (HEART.to_owned(), 0, 1, false, true),
+        ),
+    ];
+    for (kind, path, left) in cases {
+        let mut online = reacting().await;
+        online.added_by(ME_ID, HEART).await;
+        online.reaction(ADD, ME_ID, HEART, 1).await;
+        online.events().await;
+        online.answer(204).await;
+
+        online
+            .account
+            .remove_reaction(general(), target(), &heart(), kind, Snowflake::new(ME_ID))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            online.lines().await,
+            [format!("DELETE {BASE}/{HEART_PATH}/{path}")],
+            "{kind:?}"
+        );
+        assert_eq!(online.shown(), [left], "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn removing_a_kind_of_ones_own_reaction_that_isnt_there_asks_nothing() {
+    let mut online = reacting().await;
+    online.added_by(ME_ID, HEART).await;
+    online.answer(204).await;
+
+    online
+        .account
+        .remove_reaction(
+            general(),
+            target(),
+            &heart(),
+            ReactionKind::Burst,
+            Snowflake::new(ME_ID),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(online.lines().await, [] as [&str; 0]);
+    assert_eq!(online.shown(), one(HEART, 1, true));
 }
 
 #[tokio::test]

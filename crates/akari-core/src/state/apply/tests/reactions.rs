@@ -1,6 +1,6 @@
 use super::*;
 use crate::state::StarterMessage;
-use crate::state::apply::{ReactionAsk, Wanted};
+use crate::state::apply::{OwnChange, ReactionAsk, Wanted};
 use crate::state::reactions::ReactionEmoji;
 use crate::state::windows::StarterFetch;
 
@@ -993,11 +993,16 @@ fn want(
 ) -> (Option<Wanted>, Vec<String>) {
     let mut events = Vec::new();
     let now = state.now_millis();
+    let change = if wanted {
+        OwnChange::React
+    } else {
+        OwnChange::Unreact
+    };
     let wanted = state.want_reaction(
         Snowflake::new(channel),
         Snowflake::new(row),
         &emoji(name),
-        wanted,
+        change,
         now,
         &mut events,
     );
@@ -1196,7 +1201,8 @@ fn a_settled_click_without_a_refusal_changes_nothing() {
 
     assert_eq!(events, [] as [&str; 0]);
     assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
-    assert!(state.reacting.is_empty(), "nothing kept once it is over");
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING, "its echo");
+    assert!(state.reacting.is_empty(), "nothing kept once its echo came");
 }
 
 // What the gateway said while the request ran is newer than what Discord had before it.
@@ -1420,7 +1426,12 @@ fn each_message_and_emoji_has_its_own_wish() {
     }
     assert_eq!(reactions(&state, GENERAL, 10), []);
     assert_eq!(reactions(&state, GENERAL, 11), []);
-    assert!(state.reacting.is_empty(), "nothing kept once all are over");
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, FIRE), NOTHING);
+    assert_eq!(remove(&mut state, GENERAL, 11, ME, UP), NOTHING);
+    assert!(
+        state.reacting.is_empty(),
+        "nothing kept once all are over and echoed"
+    );
 }
 
 // Kept apart: Discord has the plain one still, and the super reaction too.
@@ -1529,7 +1540,7 @@ fn a_custom_emoji_is_sent_under_the_name_the_message_has() {
             Snowflake::new(GENERAL),
             Snowflake::new(10),
             &nameless,
-            true,
+            OwnChange::React,
             now,
             &mut Vec::new(),
         )
@@ -1542,7 +1553,7 @@ fn a_custom_emoji_is_sent_under_the_name_the_message_has() {
             Snowflake::new(GENERAL),
             Snowflake::new(10),
             &empty,
-            true,
+            OwnChange::React,
             now,
             &mut Vec::new(),
         ),
@@ -1840,7 +1851,10 @@ fn a_refused_removal_puts_back_the_kind_it_took() {
     assert_eq!(reactions(&state, GENERAL, 10), []);
     assert_eq!(plain, burst, "one emoji, one request at a time");
     let asked = ask(&mut state, &burst).unwrap();
-    assert!(!asked.add && asked.burst, "the latest wish");
+    assert!(
+        !asked.add && !asked.burst,
+        "both wanted gone, the plain one first"
+    );
     answered(&mut state, &burst, false);
     settle(&mut state, &burst);
     assert_eq!(
@@ -1924,7 +1938,7 @@ fn the_echo_names_a_custom_emoji_the_click_had_no_name_for() {
             Snowflake::new(GENERAL),
             Snowflake::new(10),
             &nameless,
-            true,
+            OwnChange::React,
             now,
             &mut Vec::new(),
         )
@@ -1951,7 +1965,7 @@ fn the_echo_names_a_custom_emoji_the_click_had_no_name_for() {
             Snowflake::new(GENERAL),
             Snowflake::new(10),
             &nameless,
-            false,
+            OwnChange::Unreact,
             now,
             &mut Vec::new(),
         )
@@ -1976,14 +1990,14 @@ fn a_reaction_put_back_has_the_name_its_echo_brought() {
             )
             .unwrap()
     };
-    let wish = click(&mut state, true);
+    let wish = click(&mut state, OwnChange::React);
     ask(&mut state, &wish);
     apply(
         &mut state,
         "MESSAGE_REACTION_ADD",
         custom(GENERAL, 10, ME, 7, json!("wave")),
     );
-    click(&mut state, false);
+    click(&mut state, OwnChange::Unreact);
     assert_eq!(reactions(&state, GENERAL, 10), []);
     answered(&mut state, &wish, true);
     ask(&mut state, &wish);
@@ -2013,7 +2027,7 @@ fn a_click_names_an_emoji_the_message_has_without_a_name() {
             Snowflake::new(GENERAL),
             Snowflake::new(10),
             &named,
-            true,
+            OwnChange::React,
             now,
             &mut Vec::new(),
         )
@@ -2060,4 +2074,278 @@ fn a_refusal_ends_the_requests_unless_the_wish_is_another() {
     assert!(!answered(&mut state, &wish, true));
     settle(&mut state, &wish);
     assert!(!answered(&mut state, &wish, false), "no request runs");
+}
+
+const BURST_DELETE: ReactionAsk = ReactionAsk {
+    add: false,
+    burst: true,
+};
+
+#[test]
+fn every_kind_taken_back_is_asked_to_go() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+
+    let wish = click(&mut state, false);
+    click(&mut state, false);
+
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(BURST_DELETE));
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), None);
+    assert_eq!(settle(&mut state, &wish), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+// The super reaction the first click took back is still wanted gone once the plain one a click
+// between showed is taken back too.
+#[test]
+fn a_kind_taken_back_stays_wanted_gone_after_a_click_between() {
+    let mut state = on_ten();
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+
+    let wish = click(&mut state, false);
+    assert_eq!(ask(&mut state, &wish), Some(BURST_DELETE));
+    click(&mut state, true);
+    assert!(!answered(&mut state, &wish, false), "a reaction it is");
+    assert_eq!(ask(&mut state, &wish), None);
+
+    click(&mut state, false);
+    assert_eq!(ask(&mut state, &wish), Some(BURST_DELETE));
+    assert!(answered(&mut state, &wish, false), "refused as it stands");
+}
+
+#[test]
+fn late_echoes_after_the_requests_say_nothing_and_are_then_forgotten() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    click(&mut state, false);
+    answered(&mut state, &wish, true);
+    ask(&mut state, &wish);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), None);
+    assert_eq!(settle(&mut state, &wish), NOTHING);
+
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert!(state.reacting.is_empty());
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "made again elsewhere"
+    );
+}
+
+// Reacted, and taken back if `toggled`: every request answered before any echo.
+fn settled(state: &mut State, toggled: bool) {
+    let wish = click(state, true);
+    ask(state, &wish);
+    if toggled {
+        click(state, false);
+        answered(state, &wish, true);
+        ask(state, &wish);
+    }
+    answered(state, &wish, true);
+    assert_eq!(ask(state, &wish), None);
+    settle(state, &wish);
+}
+
+// A sweep's dispatch comes before the echoes still owed: Discord did those requests after it.
+#[test]
+fn a_sweep_before_late_echoes_leaves_the_reaction_as_they_end() {
+    let sweep = |state: &mut State| {
+        apply(
+            state,
+            "MESSAGE_REACTION_REMOVE_ALL",
+            json!({"channel_id": GENERAL.to_string(), "message_id": "10"}),
+        )
+    };
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    settled(&mut state, true);
+    assert_eq!(sweep(&mut state), [changed(GENERAL, 10)]);
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING, "taken back");
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+
+    let mut state = on_ten();
+    settled(&mut state, false);
+    assert_eq!(sweep(&mut state), [changed(GENERAL, 10)]);
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "made after the sweep"
+    );
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, true));
+}
+
+#[test]
+fn only_the_latest_settled_reactions_wait_for_their_echoes() {
+    use crate::state::apply::reactions::SETTLED_KEPT;
+    let mut state = on_ten();
+    let names: Vec<String> = (0..=SETTLED_KEPT).map(|n| format!("e{n}")).collect();
+    for name in &names {
+        let wish = want(&mut state, GENERAL, 10, name, true).0.unwrap();
+        ask(&mut state, &wish);
+        want(&mut state, GENERAL, 10, name, false);
+        answered(&mut state, &wish, true);
+        ask(&mut state, &wish);
+        answered(&mut state, &wish, true);
+        settle(&mut state, &wish);
+    }
+
+    assert_eq!(state.reacting.len(), SETTLED_KEPT);
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, &names[0]),
+        [changed(GENERAL, 10)],
+        "the oldest's echo shows"
+    );
+    assert_eq!(add(&mut state, GENERAL, 10, ME, &names[1]), NOTHING);
+}
+
+// The request on its way when the connection broke is echoed in the new session, and the old
+// one's echoes never come.
+#[test]
+fn a_new_session_never_waits_for_the_last_ones_echoes() {
+    let mut state = on_ten();
+    let wish = click(&mut state, true);
+    ask(&mut state, &wish);
+    click(&mut state, false);
+    answered(&mut state, &wish, true);
+    ask(&mut state, &wish);
+    click(&mut state, true);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(PUT));
+    apply(&mut state, "READY", ready_value());
+
+    add(&mut state, GENERAL, 10, ME, UP);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), None);
+    settle(&mut state, &wish);
+    assert_eq!(
+        remove(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "taken back elsewhere"
+    );
+
+    let mut state = on_ten();
+    settled(&mut state, true);
+    apply(&mut state, "READY", ready_value());
+    assert!(state.reacting.is_empty());
+}
+
+// A page newer than the requests says what Discord has when the user clicks again.
+#[test]
+fn a_click_after_the_requests_starts_from_what_the_store_shows() {
+    let mut state = viewing(GENERAL);
+    load_page(&mut state, GENERAL, LoadKind::Latest, &[10], true);
+    let wish = click(&mut state, true);
+    grant(&mut state, &wish);
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    state.finish_load(ticket, page(&[message(10, GENERAL)]), true, &mut events);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+
+    let again = click(&mut state, true);
+
+    assert_eq!(ask(&mut state, &again), Some(PUT));
+}
+
+fn take_kind(state: &mut State, burst: bool) -> Wanted {
+    let now = state.now_millis();
+    state
+        .want_reaction(
+            Snowflake::new(GENERAL),
+            Snowflake::new(10),
+            &emoji(UP),
+            OwnChange::Remove { burst },
+            now,
+            &mut Vec::new(),
+        )
+        .unwrap()
+}
+
+// The super reaction still shows the reaction as the user's, so reacting changes nothing.
+#[test]
+fn reacting_on_what_shows_as_the_users_leaves_a_kind_taken_back_wanted_gone() {
+    let mut state = on_ten();
+    add(&mut state, GENERAL, 10, ME, UP);
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+
+    let wish = click(&mut state, false);
+    assert!(!click(&mut state, true).changed);
+
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+}
+
+// The window's ✕ on the super reaction again, after a click made the reaction once more.
+#[test]
+fn taking_the_super_reaction_back_again_leaves_the_reaction_made_since() {
+    let mut state = on_ten();
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    let wish = take_kind(&mut state, true);
+    assert_eq!(ask(&mut state, &wish), Some(BURST_DELETE));
+    click(&mut state, true);
+
+    assert!(!take_kind(&mut state, true).changed);
+    answered(&mut state, &wish, true);
+
+    assert_eq!(ask(&mut state, &wish), Some(PUT), "the reaction made since");
+}
+
+// The super reaction's removal is never echoed (Discord had none); the plain echoes after it
+// are still told apart.
+#[test]
+fn an_echo_is_told_apart_from_the_other_kinds_owed_before_it() {
+    let mut state = on_ten();
+    apply(&mut state, "MESSAGE_REACTION_ADD", burst_reaction(ME));
+    let wish = click(&mut state, false);
+    assert_eq!(ask(&mut state, &wish), Some(BURST_DELETE));
+    click(&mut state, true);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(PUT));
+    click(&mut state, false);
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), Some(DELETE));
+    answered(&mut state, &wish, true);
+    assert_eq!(ask(&mut state, &wish), None);
+    settle(&mut state, &wish);
+
+    assert_eq!(add(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(reactions(&state, GENERAL, 10), []);
+}
+
+// The reaction's echo never comes (Discord had it already) but the removal's does: what follows
+// is newer.
+#[test]
+fn a_change_after_an_echo_that_never_came_shows() {
+    let mut state = on_ten();
+    settled(&mut state, true);
+
+    assert_eq!(remove(&mut state, GENERAL, 10, ME, UP), NOTHING);
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "made again elsewhere"
+    );
+}
+
+#[test]
+fn a_click_that_changes_nothing_after_the_requests_holds_nothing_back() {
+    let mut state = on_ten();
+    settled(&mut state, false);
+
+    assert!(!click(&mut state, true).changed);
+
+    assert_eq!(
+        remove(&mut state, GENERAL, 10, ME, UP),
+        [changed(GENERAL, 10)],
+        "taken back elsewhere"
+    );
 }
