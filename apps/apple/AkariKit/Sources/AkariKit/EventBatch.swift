@@ -44,6 +44,8 @@ struct EventBatch {
     var replyTargetsChanged: [ChannelId: Set<MessageId>] = [:]
     // Channels whose pins dot changed.
     var pinsUnreadChanged: Set<ChannelId> = []
+    // Channels whose pins list changed.
+    var pinsChanged: Set<ChannelId> = []
 
     // Read everything again: a new session, or the disk cache's state before the first one.
     var everythingChanged: Bool { ready || restored }
@@ -124,6 +126,8 @@ struct EventBatch {
                 replyTargetsChanged[channel, default: []].insert(target)
             case .pinsUnreadChanged(let channel):
                 pinsUnreadChanged.insert(channel)
+            case .pinsChanged(let channel):
+                pinsChanged.insert(channel)
             }
         }
     }

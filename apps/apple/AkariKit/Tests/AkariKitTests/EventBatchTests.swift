@@ -135,17 +135,20 @@ struct EventBatchTests {
             .replyTargetChanged(channelId: id(22), targetId: id(91)),
             .pinsUnreadChanged(channelId: id(20)),
             .pinsUnreadChanged(channelId: id(23)),
+            .pinsChanged(channelId: id(24)),
+            .pinsChanged(channelId: id(24)),
         ])
 
         #expect(batch.reactionsChanged == [id(20): [id(100), id(101)], id(21): [id(102)]])
         #expect(batch.replyTargetsChanged == [id(20): [id(90)], id(22): [id(91)]])
         #expect(batch.pinsUnreadChanged == [id(20), id(23)])
+        #expect(batch.pinsChanged == [id(24)])
         #expect(batch.windowsChanged.isEmpty)
         #expect(batch.updatedMessages.isEmpty)
         #expect(batch.channelsChanged.isEmpty && batch.badgesChanged.isEmpty)
         let empty = EventBatch([.messageUpdated(channelId: id(20), messageId: id(100))])
         #expect(empty.reactionsChanged.isEmpty && empty.replyTargetsChanged.isEmpty)
-        #expect(empty.pinsUnreadChanged.isEmpty)
+        #expect(empty.pinsUnreadChanged.isEmpty && empty.pinsChanged.isEmpty)
     }
 
     @Test
