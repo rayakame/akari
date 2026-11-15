@@ -2357,6 +2357,62 @@ fn a_ready_before_the_restore_adds_the_cached_reaction_uses() {
     assert_eq!(quick_names(&store), ["fire", "thumbsup", "joy"]);
 }
 
+const OTHER: u64 = 100_000_000_000_000_009;
+
+// `user`'s cache: an agreement for G1 and 🔥 reacted with.
+fn cache_of(user: u64, now: i64) -> Entities {
+    let mut cache = Entities::from_ready(ready_where(|data| {
+        nsfw_general(data);
+        data["user"]["id"] = user.to_string().into();
+    }));
+    Arc::make_mut(&mut cache.settings.age_agreements).insert(Snowflake::new(G1));
+    Arc::make_mut(&mut cache.settings.reaction_uses).note(&ReactionEmoji::unicode("🔥"), now);
+    cache
+}
+
+fn lent_nothing(store: &Store) {
+    assert!(matches!(store.age_gate(general()), AgeGate::Ask { .. }));
+    assert_eq!(quick_names(store), ["100", "laughing", "sparkling_heart"]);
+}
+
+// The host may name another account than READY's (`DiscordClient::account`): that account's
+// agreements and reactions stay its own, whichever comes first.
+#[test]
+fn another_accounts_restored_cache_lends_readys_account_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    assert!(store.restore(cache_of(OTHER, store.now_millis())));
+
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+
+    lent_nothing(&store);
+}
+
+#[test]
+fn another_accounts_cache_after_ready_lends_it_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+
+    assert!(!store.restore(cache_of(OTHER, store.now_millis())));
+
+    lent_nothing(&store);
+}
+
+#[test]
+fn a_cache_read_while_ready_is_prepared_adds_only_to_its_own_account() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let prepared = store.prepare_ready(ready_where(nsfw_general));
+    assert!(!store.restore(cache_of(OTHER, store.now_millis())));
+    store.replace(prepared);
+    lent_nothing(&store);
+
+    let store = Store::new(DEFAULT_LIMITS);
+    let prepared = store.prepare_ready(ready_where(nsfw_general));
+    assert!(!store.restore(cache_of(ME, store.now_millis())));
+    store.replace(prepared);
+    assert_eq!(store.age_gate(general()), AgeGate::Open);
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+}
+
 #[test]
 fn search_finds_the_users_custom_emoji_and_unicodes() {
     let store = Store::new(DEFAULT_LIMITS);

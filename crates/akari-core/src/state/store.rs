@@ -371,12 +371,12 @@ impl Store {
     }
 
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
-        self.prepare(self.begin_ready(), ready)
+        self.prepare(self.begin_ready(ready.user.user.id), ready)
     }
 
     // From here until the swap, local acks also go into READY's journal.
-    pub(crate) fn begin_ready(&self) -> Preparing {
-        self.write("READY", |inner, _| inner.state.begin_journal());
+    pub(crate) fn begin_ready(&self, user: UserId) -> Preparing {
+        self.write("READY", |inner, _| inner.state.begin_journal(user));
         Preparing {
             store: self.clone(),
             swapped: false,
