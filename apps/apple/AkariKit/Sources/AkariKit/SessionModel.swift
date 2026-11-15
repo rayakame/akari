@@ -1405,9 +1405,8 @@ public final class SessionModel {
                 reactors = nil
             }
         }
-        if let asked = deleteQuestion?.row.message,
-            batch.deletedMessages[asked.channelId]?.contains(asked.id) == true
-        {
+        drafts.forget(batch.deletedMessages)
+        if let asked = deleteQuestion?.row, deleted(asked, in: batch) {
             deleteQuestion = nil
         }
         if let peeked {
@@ -1416,6 +1415,18 @@ public final class SessionModel {
                 peekedThreads = threads
             }
         }
+    }
+
+    private func deleted(_ row: MessageListModel.Row, in batch: EventBatch) -> Bool {
+        let own = row.message
+        if batch.deletedMessages[own.channelId]?.contains(own.id) == true {
+            return true
+        }
+        // A thread's starter row stays when the message it shows goes.
+        guard row.starter != nil, batch.updatedMessages[own.channelId]?.contains(own.id) == true else {
+            return false
+        }
+        return store.starterMessage(threadId: own.channelId) == .unavailable
     }
 
     private func keepSplits(where keep: (ChannelId, AccountMemory.Split) -> Bool) {

@@ -125,9 +125,14 @@ screen, so views render from them without calling into Rust.
   and goes to `Account.editMessage`. A refusal opens the editor again with the saved text and
   `.refused(error)`, from the message's `edit` (`.failed`) or the thrown error, whichever comes
   first, then `dismissEdit`; one waits while another edit is open and opens when that ends or
-  the channel opens again. The edit ends when its message is deleted (bulk deletes too), and an
-  end gives the composer the focus (`focusRequests`). `MessageListModel.escape()` and
-  `SessionModel.escape(from:)` end an edit before a pending reply.
+  the channel opens again, also one refused before asking, which the core keeps no record of
+  (the session's drafts keep it). `.Deleted` opens nothing. The edit ends when its message is
+  deleted (bulk deletes too), in a channel that isn't open too (the session's batch), or when
+  the list's loaded rows would show it and don't (a delete nothing told of, seen as the channel
+  opens or loads), and a thread's starter row's edit when the message it shows goes. An end
+  the user made gives the composer the focus (`focusRequests`); any other only while the
+  host's editor has it (`editorFocused`). `MessageListModel.escape()` and
+  `SessionModel.escape(from:)` end an edit before a pending reply, per pane.
 - `ViewerModel` is the media viewer's (`docs/ui/viewer.md`): `attachments(of:from:shows:)` and
   `embed(_:from:)` pick the items a click opens (a message's shown images and videos, an embed's
   gallery, its image or GIFV alone), and `messages.viewer(_:at:of:)` makes the model with the
@@ -265,8 +270,9 @@ newest messages). When the jump left the present, `replyReturn` names the reply 
 jump ends it. `shownJump` is the last jump a view
 scrolled to, so a view made later doesn't repeat it. `replyingTo` is the message the pending
 reply answers. `SessionModel.escape(from:)` takes the pane the key was pressed in: an open
-New Thread form closes first, then a pending reply is cancelled (that pane's before the other's)
-and nothing else happens; `MessageListModel.escape()` cancels its own reply the same way.
+New Thread form closes first, then that pane's edit, then its pending reply, then the other
+pane's edit and reply, and nothing else happens; `MessageListModel.escape()` ends its own edit
+and reply the same way.
 The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
 channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
 every way a list goes says so: a channel marked unread stays unread until its list goes, whatever

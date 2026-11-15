@@ -359,7 +359,7 @@ final class FakeAccount: Account, @unchecked Sendable {
     // Edits as the core does them: the saved text shows at once, pending; Discord's answer ends
     // that, a refusal puts the old text back and keeps the saved one with the reason.
     let editError = Locked<EditError?>(nil)
-    // Refused before asking: nothing changes.
+    // Refused before asking: nothing changes (held too while `holdEdits`).
     let editRefusedEarly = Locked<EditError?>(nil)
     // While set, each edit and delete waits for a reply before Discord's answer.
     let holdEdits = Locked(false)
@@ -371,6 +371,9 @@ final class FakeAccount: Account, @unchecked Sendable {
     override func editMessage(channelId: ChannelId, messageId: MessageId, content: String) async throws {
         log.append(.edit(channelId, messageId, content))
         if let error = editRefusedEarly.current {
+            if holdEdits.current {
+                _ = await editReplies.next()
+            }
             throw error
         }
         var before = ""

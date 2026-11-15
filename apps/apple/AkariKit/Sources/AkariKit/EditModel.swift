@@ -81,9 +81,7 @@ public enum EditProblem: Equatable, Sendable {
 }
 
 /// The user's edit of one of their messages in a channel, in the row's place: one per channel,
-/// kept for the session (a channel switch keeps it with its text), ended by Escape, a save,
-/// another edit in the channel and the message's deletion (bulk deletes too). A save closes the
-/// editor at once; a refusal opens it again with the saved text and why (D162).
+/// kept for the session; a save closes it at once, and a refusal opens it again with why (D162).
 @MainActor @Observable
 public final class EditModel {
     public struct Editing: Equatable, Sendable {
@@ -120,16 +118,18 @@ public final class EditModel {
         return left <= lengthLimit / 10 ? left : nil
     }
 
+    /// Whether the host's editor has the keyboard focus: an edit the user didn't end hands it
+    /// to the composer only then.
+    @ObservationIgnored public var editorFocused = false
+
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let drafts: Drafts
-    // The list's row for a message, as it shows now.
     @ObservationIgnored var row: (MessageId) -> MessageListModel.Row? = { _ in nil }
-    // The list's rows, newest last.
     @ObservationIgnored var rows: () -> [MessageListModel.Row] = { [] }
-    // An emptied message without media asks to be deleted instead.
+    // Where the list's loaded rows would show the message, but don't.
+    @ObservationIgnored var lost: (MessageId) -> Bool = { _ in false }
     @ObservationIgnored var askDelete: (MessageListModel.Row) -> Void = { _ in }
-    // The composer takes the focus back.
     @ObservationIgnored var ended: () -> Void = {}
     @ObservationIgnored private(set) var saving: Task<Void, Never>?
 
@@ -148,9 +148,7 @@ public final class EditModel {
         }
     }
 
-    /// Edit in a message's bar or menu, and Up arrow: the editor takes the row's text, or the
-    /// text of a save Discord refused; nothing where the core doesn't allow the edit. Replaces
-    /// the channel's open edit and its text, as in the official client.
+    /// Edit and Up arrow: the row's text, or a refused save's; replaces the channel's open edit.
     public func start(_ row: MessageListModel.Row) {
         let own = row.message
         guard own.channelId == channelId,
@@ -158,8 +156,8 @@ public final class EditModel {
         else {
             return
         }
-        if case .failed(let content, let error) = row.shown.edit, !drafts.takenRefusals.contains(own.id) {
-            reopen(row, text: content, error: error)
+        if let refused = refusal(of: row) {
+            reopen(row, text: refused.text, error: refused.error)
         } else {
             open(own.id, text: row.shown.content, problem: nil)
         }
@@ -173,10 +171,8 @@ public final class EditModel {
         end()
     }
 
-    /// Return and "save". Text the message shows already sends nothing; emptied text on a
-    /// message without attachments or stickers asks to delete it; text past the limit stays in
-    /// the editor with the reason. Otherwise the editor closes and the core saves (the row shows
-    /// the text at once, dimmed until Discord takes it).
+    /// Return and "save": unchanged text sends nothing, emptied text asks to delete the message,
+    /// and text past the limit stays with the reason.
     public func save() {
         guard let editing else {
             return
@@ -203,22 +199,29 @@ public final class EditModel {
         }
         end()
         let own = row.message
-        drafts.unansweredSaves.insert(own.id)
+        drafts.saves += 1
+        let token = drafts.saves
+        drafts.unansweredSaves[own.id] = token
         drafts.takenRefusals.remove(own.id)
+        drafts.thrownRefusals[own.id] = nil
         saving = Task { [weak self, account, drafts] in
             do {
                 try await account.editMessage(
                     channelId: own.channelId, messageId: own.id, content: content)
-                drafts.unansweredSaves.remove(own.id)
+                if drafts.unansweredSaves[own.id] == token {
+                    drafts.unansweredSaves[own.id] = nil
+                }
             } catch {
                 // The message's refusal may have opened the editor first.
-                guard drafts.unansweredSaves.remove(own.id) != nil, let self, self.editing == nil
-                else {
+                guard drafts.unansweredSaves[own.id] == token else {
                     return
                 }
-                let refusal = error as? EditError ?? .Request(error: .UnexpectedResponse)
-                open(own.id, text: content, problem: .refused(refusal))
-                account.dismissEdit(channelId: shown.channelId, messageId: shown.id)
+                drafts.unansweredSaves[own.id] = nil
+                let refused = error as? EditError ?? .Request(error: .UnexpectedResponse)
+                if !Self.deleted(refused) {
+                    drafts.thrownRefusals[own.id] = (content, refused)
+                    self?.reopenRefused()
+                }
             }
         }
     }
@@ -227,32 +230,68 @@ public final class EditModel {
         if batch.everythingChanged || batch.currentUserChanged {
             lengthLimit = Int(store.messageLengthLimit())
         }
-        if let editing, batch.deletedMessages[channelId]?.contains(editing.messageId) == true {
-            end()
+        let updated = batch.updatedMessages[channelId] ?? []
+        if let editing, gone(editing.messageId, in: batch, updated: updated) {
+            end(byUser: false)
             return
         }
-        let updated = batch.updatedMessages[channelId] ?? []
         if editing == nil, batch.everythingChanged || !updated.isEmpty || batch.windowsChanged.contains(channelId) {
             reopenRefused()
         }
     }
 
-    /// Opens the editor again for the newest row whose save Discord refused, unless an edit is
-    /// open; the core forgets the refusal once the editor holds its text.
+    // A delete while the channel was closed, or before the list loaded, said nothing to it.
+    func opened() {
+        if let editing, lost(editing.messageId) {
+            end(byUser: false)
+        } else {
+            reopenRefused()
+        }
+    }
+
     func reopenRefused() {
         guard editing == nil else {
             return
         }
-        for row in rows().reversed() where !drafts.takenRefusals.contains(row.message.id) {
-            if case .failed(let content, let error) = row.shown.edit {
-                reopen(row, text: content, error: error)
+        for row in rows().reversed() {
+            if let refused = refusal(of: row) {
+                reopen(row, text: refused.text, error: refused.error)
                 return
             }
         }
     }
 
+    private func gone(_ message: MessageId, in batch: EventBatch, updated: Set<MessageId>) -> Bool {
+        if batch.deletedMessages[channelId]?.contains(message) == true {
+            return true
+        }
+        let reloaded = batch.everythingChanged || batch.windowsChanged.contains(channelId)
+        if reloaded, lost(message) {
+            return true
+        }
+        // A thread's starter row stays when the message it shows goes.
+        return (reloaded || updated.contains(message)) && row(message)?.starter == .unavailable
+    }
+
+    // A refused save that is still to open: the core's, or one it kept no record of.
+    private func refusal(of row: MessageListModel.Row) -> (text: String, error: EditError)? {
+        let id = row.message.id
+        if case .failed(let content, let error) = row.shown.edit, !drafts.takenRefusals.contains(id),
+            !Self.deleted(error)
+        {
+            return (content, error)
+        }
+        return drafts.thrownRefusals[id]
+    }
+
+    // Nothing is left to save to; the row's own deletion says the rest.
+    private static func deleted(_ error: EditError) -> Bool {
+        if case .Deleted = error { true } else { false }
+    }
+
     private func reopen(_ row: MessageListModel.Row, text content: String, error: EditError) {
-        drafts.unansweredSaves.remove(row.message.id)
+        drafts.unansweredSaves[row.message.id] = nil
+        drafts.thrownRefusals[row.message.id] = nil
         drafts.takenRefusals.insert(row.message.id)
         open(row.message.id, text: content, problem: .refused(error))
         account.dismissEdit(channelId: row.shown.channelId, messageId: row.shown.id)
@@ -273,11 +312,14 @@ public final class EditModel {
         self.editing = Editing(messageId: editing.messageId, problem: problem, opening: editing.opening)
     }
 
-    private func end() {
+    private func end(byUser: Bool = true) {
         editing = nil
         drafts.edits[channelId] = nil
         text = ""
-        ended()
+        if byUser || editorFocused {
+            ended()
+        }
+        editorFocused = false
         reopenRefused()
     }
 

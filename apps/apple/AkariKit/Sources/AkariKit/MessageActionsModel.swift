@@ -329,8 +329,7 @@ public final class MessageActionsModel {
         }
     }
 
-    /// The question before `row`'s message is deleted; its `run` holds what it needs, not the
-    /// model, which a host may have let go when it is answered.
+    // Its `run` holds what it needs, not the model, which a host may have let go by the answer.
     static func deleteQuestion(
         _ row: MessageListModel.Row, showsTip: Bool, account: Account,
         failed: @escaping (Failure) -> Void

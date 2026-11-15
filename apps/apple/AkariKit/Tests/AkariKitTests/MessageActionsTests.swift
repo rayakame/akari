@@ -688,6 +688,46 @@ final class SessionMessageActionsTests {
     }
 
     @Test
+    func aStarterRowsQuestionClosesWhenTheMessageItShowsGoes() throws {
+        store.update { state in
+            state.channels[id(31)] = thread(31, in: 11)
+            state.show(message(31, in: 31, kind: .threadStarterMessage))
+            state.windows[id(31)] = window([31], oldest: true)
+            state.starters[id(31)] = .loaded(message: message(7, in: 11, content: "the start"))
+            state.allow(allowed(edit: true, delete: true), message: 31, in: 31)
+        }
+        session.open(channel: id(31))
+        let list = try #require(session.messages)
+        session.messageActions(for: list) { _ in }.perform(.delete, on: try #require(list.rows.first))
+        #expect(session.deleteQuestion != nil)
+
+        store.update { $0.starters[id(31)] = .unavailable }
+        session.apply(EventBatch([.messageUpdated(channelId: id(31), messageId: id(31))]))
+
+        #expect(session.deleteQuestion == nil)
+        session.close()
+    }
+
+    @Test
+    func aDeleteInAChannelThatIsntOpenEndsItsKeptEdit() throws {
+        store.update { $0.list([channel(11), channel(12)], in: 1) }
+        let list = try ownMessages()
+        list.editor.start(try #require(list.rows.first))
+        list.editor.text = "half typed"
+        session.open(channel: id(12))
+
+        store.update { state in
+            state.messages[id(100)] = nil
+            state.windows[id(11)] = window([101])
+        }
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(100))]))
+        session.open(channel: id(11))
+
+        #expect(session.messages?.editor.editing == nil)
+        session.close()
+    }
+
+    @Test
     func aDeleteDiscordRefusesAlerts() async throws {
         let list = try ownMessages()
         account.deleteError.withLock { $0 = .Network(kind: .connect) }

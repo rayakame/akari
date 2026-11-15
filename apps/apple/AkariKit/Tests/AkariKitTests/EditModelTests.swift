@@ -428,6 +428,183 @@ final class EditModelTests {
         #expect(list.editor.editing?.messageId == id(101))
     }
 
+    @Test(arguments: [EditError.Deleted, .Request(error: .Network(kind: .timeout))])
+    func aSaveAnsweredAfterItsMessageWentOpensNothing(error: EditError) async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "new"
+        account.editError.withLock { $0 = error }
+        account.holdEdits.withLock { $0 = true }
+        list.editor.save()
+        try await eventually { !self.edits.isEmpty }
+
+        store.update { state in
+            state.messages[id(101)] = nil
+            state.windows[id(10)] = window([100, 102, 103])
+        }
+        list.apply(EventBatch([.messageDeleted(channelId: here, messageId: id(101))]))
+        account.editReplies.send(())
+        await finished(list.editor.saving)
+
+        #expect(list.editor.editing == nil)
+    }
+
+    // Nothing is left to save to; the row's own deletion says the rest.
+    @Test
+    func aRefusalForADeletedMessageOpensNothingWhileItsRowStillShows() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "new"
+        account.editError.withLock { $0 = .Deleted }
+
+        list.editor.save()
+        await finished(list.editor.saving)
+        list.apply(updated(101))
+
+        #expect(list.editor.editing == nil)
+        list.editor.start(try row(101, in: list))
+        #expect(list.editor.text == "my first")
+        #expect(list.editor.editing?.problem == nil)
+    }
+
+    @Test
+    func aKeptEditWhoseMessageWentWhileTheChannelWasClosedIsGone() throws {
+        let first = list()
+        first.editor.start(try row(101, in: first))
+        first.editor.text = "half typed"
+        store.update { state in
+            state.messages[id(101)] = nil
+            state.windows[id(10)] = window([100, 102, 103])
+        }
+
+        let back = list()
+
+        #expect(back.editor.editing == nil)
+        #expect(back.composer.focusRequests == 0)
+        #expect(self.list().editor.editing == nil, "gone for the channel")
+    }
+
+    @Test
+    func aKeptEditOfTheNewestMessageThatWentIsGoneToo() throws {
+        let first = list()
+        first.editor.start(try row(103, in: first))
+        store.update { state in
+            state.messages[id(103)] = nil
+            state.windows[id(10)] = window([100, 101, 102])
+        }
+
+        #expect(list().editor.editing == nil)
+    }
+
+    @Test
+    func aKeptEditOfAMessageBeyondTheLoadedRowsStays() throws {
+        let first = list()
+        first.editor.start(try row(101, in: first))
+        first.editor.text = "half typed"
+        store.update { $0.windows[id(10)] = window([102, 103], latest: false) }
+
+        let back = list()
+
+        #expect(back.editor.editing?.messageId == id(101))
+        #expect(back.editor.text == "half typed")
+    }
+
+    @Test
+    func aKeptEditWhoseChannelLoadsWithoutItsMessageEnds() throws {
+        let first = list()
+        first.editor.start(try row(101, in: first))
+        store.update { $0.windows[id(10)] = nil }
+        let back = list()
+        #expect(back.editor.editing?.messageId == id(101), "nothing to tell yet")
+
+        store.update { state in
+            state.messages[id(101)] = nil
+            state.windows[id(10)] = window([100, 102, 103])
+        }
+        back.apply(EventBatch([.messagesLoaded(channelId: here, first: id(100), last: id(103))]))
+
+        #expect(back.editor.editing == nil)
+        #expect(back.composer.focusRequests == 0)
+    }
+
+    @Test
+    func anEditItsMessagesDeletionEndsAsksTheFocusOnlyWhenTheEditorHadIt() throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+
+        list.apply(EventBatch([.messageDeleted(channelId: here, messageId: id(101))]))
+        #expect(list.editor.editing == nil)
+        #expect(list.composer.focusRequests == 0, "the user may be typing elsewhere")
+
+        list.editor.start(try row(102, in: list))
+        list.editor.editorFocused = true
+        list.apply(EventBatch([.messageDeleted(channelId: here, messageId: id(102))]))
+        #expect(list.composer.focusRequests == 1)
+    }
+
+    @Test
+    func aStarterRowsEditEndsWhenTheMessageItShowsGoes() throws {
+        store.update { state in
+            state.channels[id(31)] = thread(31, in: 10)
+            state.show(message(31, in: 31, kind: .threadStarterMessage))
+            state.windows[id(31)] = window([31], oldest: true)
+            state.starters[id(31)] = .loaded(message: message(7, in: 10, content: "the start"))
+            state.allow(editing(), message: 31, in: 31)
+        }
+        let list = list(31)
+        list.editor.start(try row(31, in: list))
+        #expect(list.editor.editing?.messageId == id(31))
+
+        store.update { $0.starters[id(31)] = .unavailable }
+        list.apply(updated(31, in: 31))
+
+        #expect(list.editor.editing == nil)
+    }
+
+    @Test
+    func aRefusalBeforeAskingWaitsWhileAnotherEditIsOpenAndOpensWhenItEnds() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "new"
+        account.editRefusedEarly.withLock { $0 = .Request(error: .InvalidRequest) }
+        list.editor.save()
+        list.editor.start(try row(102, in: list))
+
+        await finished(list.editor.saving)
+        #expect(list.editor.editing?.messageId == id(102))
+        list.editor.cancel()
+
+        #expect(list.editor.editing?.messageId == id(101))
+        #expect(list.editor.text == "new")
+        #expect(list.editor.editing?.problem == .refused(.Request(error: .InvalidRequest)))
+    }
+
+    // The earlier save's answer, after the later save started, isn't the later one's.
+    @Test
+    func aRefusalBeforeAskingAfterAnEarlierSavesAnswerStillOpensTheEditor() async throws {
+        let list = list()
+        account.holdEdits.withLock { $0 = true }
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "first"
+        list.editor.save()
+        let first = list.editor.saving
+        await account.editReplies.pulled(1)
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "second"
+        account.editRefusedEarly.withLock { $0 = .Request(error: .InvalidRequest) }
+        list.editor.save()
+        await account.editReplies.pulled(2)
+
+        account.editReplies.send(())
+        await finished(first)
+        account.editReplies.send(())
+        await finished(list.editor.saving)
+
+        #expect(list.editor.editing?.messageId == id(101))
+        #expect(list.editor.text == "second")
+        #expect(list.editor.editing?.problem == .refused(.Request(error: .InvalidRequest)))
+    }
+
     @Test
     func upArrowEditsTheNewestLoadedMessageTheUserMayEdit() {
         let list = list()

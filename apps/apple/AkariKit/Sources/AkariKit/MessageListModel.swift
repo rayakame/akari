@@ -347,8 +347,9 @@ public final class MessageListModel {
             self?.rows.first { $0.message.id == message }
         }
         editor.rows = { [weak self] in self?.rows ?? [] }
+        editor.lost = { [weak self] message in self?.lost(message) ?? false }
         editor.ended = { [weak composer] in composer?.requestFocus() }
-        editor.reopenRefused()
+        editor.opened()
         composer.onRefusalChanged = { [weak self] pending in
             self?.reread([pending])
         }
@@ -409,6 +410,16 @@ public final class MessageListModel {
         if !atPresent || store.window(channelId: channelId)?.latest == false {
             await load(.latest)
         }
+    }
+
+    // Deleted, also where nothing said so: a window evicted meanwhile, a delete while offline.
+    private func lost(_ message: MessageId) -> Bool {
+        let sent = rows.filter { $0.message.delivery == .sent }
+        guard let first = sent.first?.message.id, let last = sent.last?.message.id else {
+            return false
+        }
+        return (reachedOldest || first <= message) && (atPresent || message <= last)
+            && !rows.contains { $0.message.id == message }
     }
 
     /// Up arrow in an empty composer: edits the newest loaded message the user may edit, wherever
