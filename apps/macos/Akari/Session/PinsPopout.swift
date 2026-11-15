@@ -153,14 +153,17 @@ struct PinsButton: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .opacity(disabled ? 0.5 : 1)
         .onHover { hovered = $0 }
         .background(CursorArea(disabled ? .arrow : .pointingHand))
         .anchorPreference(key: PinsButtonBounds.self, value: .bounds) { $0 }
-        .help(selected ? "" : PinsModel.title)
+        .help(Self.tooltip(selected: selected))
         .accessibilityLabel(PinsModel.title)
         .accessibilityValue(unread ? "Unread" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    static func tooltip(selected: Bool) -> String {
+        selected ? "" : PinsModel.title
     }
 
     private var color: NSColor {

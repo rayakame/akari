@@ -67,6 +67,25 @@ struct PinsLayoutTests {
         #expect(PinsLayout.contentHeight(try pins(2), upTo: 2000) == cards)
     }
 
+    // The first page's spinner 100 under the header and 120 above the bottom; Try Again 16 under
+    // the failed state's words and 32 above the bottom.
+    @Test
+    func theFirstPagesSpinnerAndTheFailedStateTakeTheirRoom() throws {
+        #expect(PinsLayout.contentHeight(try pins(0, state: .loading), upTo: 2000) == 252)
+        let failed = try pins(0, state: .failed)
+        #expect(failed.phase == .failed)
+        #expect(
+            PinsLayout.contentHeight(failed, upTo: 2000)
+                == PinsLayout.emptyHeight(PinsModel.failedText) + 16 + 32 + 32)
+    }
+
+    // 8 under the header, the art's 120, 20, and each line of the words 20.
+    @Test
+    func theEmptyStatesWordsTakeALineEach() {
+        #expect(PinsLayout.emptyHeight("a") == 168)
+        #expect(PinsLayout.emptyHeight("a\nb") == 188)
+    }
+
     @Test
     func aLongListIsMeasuredOnlyAsFarAsItCanShow() throws {
         let fake = FakeBrowserStore()
@@ -266,6 +285,9 @@ final class PinsPopoutTests {
         let band = try #require(image.color(4, height - 4))
         let surface = try #require(image.color(4, height - footer - 4))
         #expect(band.brightnessComponent > surface.brightnessComponent)
+        // The measure is the band's: it starts where the panel's height leaves room for it.
+        #expect(same(image.color(4, height - footer + 1), band))
+        #expect(same(image.color(4, height - footer - 1), surface))
         var greens = 0
         for x in stride(from: CGFloat(16), to: PinsLayout.width - 16, by: 0.5) {
             for y in stride(from: height - footer + 16, to: height - 16, by: 0.5) {
@@ -326,12 +348,13 @@ final class PinsPopoutTests {
     }
 }
 
-// The header's button: its dot while the channel has pins the user hasn't seen.
+// The header's button: its dot while the channel has pins the user hasn't seen, dimmed and without
+// the hand behind the age gate, no tooltip while its popout is open.
 @MainActor
 struct PinsButtonTests {
-    func rendered(unread: Bool, theme: NSAppearance.Name = .darkAqua) throws -> Rendered {
+    func rendered(unread: Bool, disabled: Bool = false, theme: NSAppearance.Name = .darkAqua) throws -> Rendered {
         try Rendered(
-            PinsButton(selected: false, unread: unread) {}
+            PinsButton(selected: false, unread: unread, disabled: disabled) {}
                 .frame(width: 48, height: 48)
                 .background(Color(nsColor: Palette.chat))
                 .ignoresSafeArea(),
@@ -359,5 +382,36 @@ struct PinsButtonTests {
         // The ring: the header's color between the dot and the pin.
         let ring = middle - PinsButton.dot / 2 - PinsButton.dotRing / 2
         #expect(same(dot.color(ring, middle), plain.color(4, 4)))
+    }
+
+    // The most any pixel of the pin's 20 box stands out from the header's color.
+    func ink(_ image: Rendered) -> CGFloat {
+        let header = image.color(4, 4)?.brightnessComponent ?? 0
+        var most: CGFloat = 0
+        for x in stride(from: CGFloat(14), to: 34, by: 0.5) {
+            for y in stride(from: CGFloat(14), to: 34, by: 0.5) {
+                most = max(most, abs((image.color(x, y)?.brightnessComponent ?? header) - header))
+            }
+        }
+        return most
+    }
+
+    // Dimmed by its disabled state alone: an opacity over it would leave a quarter.
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func behindTheAgeGateItIsDimmedToAboutHalfWithoutTheHand(theme: NSAppearance.Name) throws {
+        let enabled = try rendered(unread: false, theme: theme)
+        let disabled = try rendered(unread: false, disabled: true, theme: theme)
+
+        let share = ink(disabled) / ink(enabled)
+        #expect(share > 0.4 && share < 0.7, "\(share)")
+        let size = NSSize(width: 48, height: 48)
+        #expect(ShownView(PinsButton(selected: false, unread: false) {}, size: size).hands().count == 1)
+        #expect(ShownView(PinsButton(selected: false, unread: false, disabled: true) {}, size: size).hands().isEmpty)
+    }
+
+    @Test
+    func itsTooltipGoesWhileThePopoutIsOpen() {
+        #expect(PinsButton.tooltip(selected: false) == "Pinned Messages")
+        #expect(PinsButton.tooltip(selected: true) == "")
     }
 }
