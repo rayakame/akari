@@ -185,7 +185,8 @@ final class PinsModelTests {
     @Test
     func aFailedLaterPageKeepsTheRowsAndLeavesTheNextTryToTheButton() async throws {
         store.update { $0.pins[id(11)] = self.pins([125, 124], more: true) }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
         account.pinLoadError.withLock { $0 = .ServerError(status: 502) }
 
         await pins.reachedEnd()
@@ -194,6 +195,10 @@ final class PinsModelTests {
         #expect(pins.offersMore)
         await pins.reachedEnd()
         #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1, "no retry by scrolling")
+        store.update { $0.pins[id(11)] = self.pins([125], more: true, state: .failed) }
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        await pins.reachedEnd()
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1, "nor after a pin went")
 
         account.pinLoadError.withLock { $0 = nil }
         account.pinsAfterMore.withLock { $0[id(11)] = self.pins([125, 124, 123]) }
@@ -209,13 +214,23 @@ final class PinsModelTests {
     @Test
     func anEmptyPageWithMoreAsksForTheNext() async throws {
         store.update { $0.pins[id(11)] = self.pins([], more: true) }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
         #expect(pins.phase == .list)
         #expect(pins.offersMore)
+        account.holdPinLoads.withLock { $0 = true }
 
-        await pins.loadMore()
+        let asking = Task { await pins.loadMore() }
+        try await eventually { self.store.log.calls.contains(.loadMorePins(id(11))) }
+        // The core says so as the page is asked for: with no row, it's the first page's spinner.
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        #expect(pins.phase == .loading)
+        #expect(!pins.offersMore)
+        account.pinLoadReplies.send(())
+        await asking.value
 
         #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+        session.close()
     }
 
     // The view asks on every update near the end, and the rows still end there.
@@ -235,6 +250,23 @@ final class PinsModelTests {
         #expect(
             store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 3,
             "the button asks, and the end once rows came")
+    }
+
+    @Test
+    func aRowFromTheGatewayLetsASpentEndAskAgain() async throws {
+        store.update { $0.pins[id(11)] = self.pins([103], more: true) }
+        let session = session()
+        let pins = try await opened(session)
+        await pins.reachedEnd()
+        await pins.reachedEnd()
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+
+        store.update { $0.pins[id(11)] = self.pins([104, 103], more: true) }
+        session.apply(EventBatch([.pinsChanged(channelId: id(11))]))
+        await pins.reachedEnd()
+
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 2)
+        session.close()
     }
 
     // A new session's first page may bring the same rows, which page on from there.
