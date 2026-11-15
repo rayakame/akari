@@ -204,7 +204,8 @@ final class PinsModelTests {
         #expect(!pins.offersMore)
     }
 
-    // A page whose pins were all left out (another channel's) still says Discord has more.
+    // Every pin of this connection went (a bulk delete) while Discord has more: the core asks for
+    // the first page again.
     @Test
     func anEmptyPageWithMoreAsksForTheNext() async throws {
         store.update { $0.pins[id(11)] = self.pins([], more: true) }
@@ -215,6 +216,25 @@ final class PinsModelTests {
         await pins.loadMore()
 
         #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+    }
+
+    // The view asks on every update near the end, and the rows still end there.
+    @Test
+    func theEndDoesntAskAgainAfterAPageThatChangedNothing() async throws {
+        store.update { $0.pins[id(11)] = self.pins([], more: true) }
+        let pins = try await opened(session())
+
+        await pins.reachedEnd()
+        await pins.reachedEnd()
+        #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 1)
+        #expect(pins.offersMore)
+        account.pinsAfterMore.withLock { $0[id(11)] = self.pins([103], more: true) }
+        await pins.loadMore()
+        await pins.reachedEnd()
+
+        #expect(
+            store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 3,
+            "the button asks, and the end once rows came")
     }
 
     @Test

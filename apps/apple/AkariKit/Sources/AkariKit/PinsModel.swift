@@ -69,6 +69,8 @@ public final class PinsModel {
     @ObservationIgnored private var opened = false
     @ObservationIgnored private var asking = false
     @ObservationIgnored private var askAgain = false
+    // The view reports the end on every update: after a page that moved no row, only the button asks.
+    @ObservationIgnored private var endSpent = false
 
     /// `jump` jumps to a message of the channel and closes the popout unless Shift (its second
     /// argument) is held; `ask` asks before an unpin, `confirm` offers to try a failed one again
@@ -102,7 +104,7 @@ public final class PinsModel {
 
     /// The list's end came near: the next page, while Discord has more and the last page came.
     public func reachedEnd() async {
-        guard state == .loaded else {
+        guard state == .loaded, !endSpent else {
             return
         }
         await loadMore()
@@ -113,10 +115,12 @@ public final class PinsModel {
         guard hasMore, state != .loading else {
             return
         }
+        let shown = rows.map(\.id)
         state = .loading
         loadingMore = true
         try? await account.loadMorePins(channelId: channelId)
         reread()
+        endSpent = rows.map(\.id) == shown
     }
 
     /// The failed state's button.
@@ -195,6 +199,9 @@ public final class PinsModel {
                 id: item.message.id, message: item.message, reply: ReplyLine.of(item.message, in: store))
         }
         if rows != self.rows {
+            if rows.map(\.id) != self.rows.map(\.id) {
+                endSpent = false
+            }
             self.rows = rows
         }
         if page.hasMore != hasMore {
