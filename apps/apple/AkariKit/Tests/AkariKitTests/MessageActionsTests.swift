@@ -222,7 +222,7 @@ final class MessageActionsTests {
 
     @Test
     func aMessageThatMayNotBeDeletedIsNotAsked() {
-        model().perform(.delete, on: row(100, allowed()), shift: true)
+        model().perform(.delete, on: row(100, allowed()), from: .menu)
 
         #expect(deleteQuestions.isEmpty)
         #expect(!store.log.calls.contains(.delete(id(11), id(100))))
@@ -669,6 +669,21 @@ final class SessionMessageActionsTests {
         session.answerDeleteQuestion(true)
         try await eventually { self.store.log.calls.contains(.delete(id(11), id(100))) }
         #expect(store.log.calls.filter { $0 == .delete(id(11), id(100)) }.count == 1)
+        session.close()
+    }
+
+    @Test
+    func aQuestionWhoseMessageGoesMeanwhileCloses() throws {
+        let list = try ownMessages()
+        session.messageActions(for: list) { _ in }.perform(.delete, on: try #require(list.rows.first))
+        #expect(session.deleteQuestion != nil)
+
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(101))]))
+        #expect(session.deleteQuestion != nil, "another message's delete leaves it")
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(100))]))
+
+        #expect(session.deleteQuestion == nil)
+        #expect(!store.log.calls.contains(.delete(id(11), id(100))))
         session.close()
     }
 

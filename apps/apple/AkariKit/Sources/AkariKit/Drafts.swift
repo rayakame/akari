@@ -10,6 +10,8 @@ final class Drafts {
     var edits: [ChannelId: EditDraft] = [:]
     // Saves whose answer hasn't come back to the model that sent them.
     var unansweredSaves: Set<MessageId> = []
+    // Refusals the editor took; a row read before the core forgot them still shows them.
+    var takenRefusals: Set<MessageId> = []
     var editOpenings = 0
 
     subscript(channel: ChannelId) -> String {

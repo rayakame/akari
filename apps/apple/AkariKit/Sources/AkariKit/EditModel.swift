@@ -158,7 +158,7 @@ public final class EditModel {
         else {
             return
         }
-        if case .failed(let content, let error) = row.shown.edit {
+        if case .failed(let content, let error) = row.shown.edit, !drafts.takenRefusals.contains(own.id) {
             reopen(row, text: content, error: error)
         } else {
             open(own.id, text: row.shown.content, problem: nil)
@@ -204,6 +204,7 @@ public final class EditModel {
         end()
         let own = row.message
         drafts.unansweredSaves.insert(own.id)
+        drafts.takenRefusals.remove(own.id)
         saving = Task { [weak self, account, drafts] in
             do {
                 try await account.editMessage(
@@ -242,7 +243,7 @@ public final class EditModel {
         guard editing == nil else {
             return
         }
-        for row in rows().reversed() {
+        for row in rows().reversed() where !drafts.takenRefusals.contains(row.message.id) {
             if case .failed(let content, let error) = row.shown.edit {
                 reopen(row, text: content, error: error)
                 return
@@ -252,6 +253,7 @@ public final class EditModel {
 
     private func reopen(_ row: MessageListModel.Row, text content: String, error: EditError) {
         drafts.unansweredSaves.remove(row.message.id)
+        drafts.takenRefusals.insert(row.message.id)
         open(row.message.id, text: content, problem: .refused(error))
         account.dismissEdit(channelId: row.shown.channelId, messageId: row.shown.id)
     }

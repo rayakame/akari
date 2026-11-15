@@ -141,7 +141,8 @@ public final class SessionModel {
     /// What a message action asks before it removes reactions, until
     /// `answerMessageConfirmation(_:)`.
     public private(set) var messageConfirmation: MessageActionsModel.Confirmation?
-    /// What Delete asks, with the message, until `answerDeleteQuestion(_:)`.
+    /// What Delete asks, with the message, until `answerDeleteQuestion(_:)` or the message's
+    /// deletion.
     public private(set) var deleteQuestion: MessageActionsModel.DeleteQuestion?
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
@@ -1402,6 +1403,11 @@ public final class SessionModel {
             if window.isEmpty {
                 reactors = nil
             }
+        }
+        if let asked = deleteQuestion?.row.message,
+            batch.deletedMessages[asked.channelId]?.contains(asked.id) == true
+        {
+            deleteQuestion = nil
         }
         if let peeked {
             let threads = moreActiveThreads(of: peeked)

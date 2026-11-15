@@ -130,12 +130,13 @@ final class EditModelTests {
     }
 
     @Test(arguments: ["my first", "  my first\n"])
-    func anUnchangedSaveSendsNothingAndCloses(text: String) throws {
+    func anUnchangedSaveSendsNothingAndCloses(text: String) async throws {
         let list = list()
         list.editor.start(try row(101, in: list))
         list.editor.text = text
 
         list.editor.save()
+        await finished(list.editor.saving)
 
         #expect(list.editor.editing == nil)
         #expect(edits.isEmpty)
@@ -287,6 +288,44 @@ final class EditModelTests {
         #expect(list.editor.text == "kinder words")
         #expect(list.editor.editing?.problem == .refused(.Forbidden))
         #expect(edits.filter { $0 == .dismissEdit(here, id(101)) }.count == 1)
+    }
+
+    @Test
+    func aRefusalGivenUpBeforeDiscordsAnswerStaysGivenUp() async throws {
+        let list = list()
+        list.editor.start(try row(101, in: list))
+        list.editor.text = "rude words"
+        account.editError.withLock { $0 = .Forbidden }
+        account.holdEdits.withLock { $0 = true }
+        list.editor.save()
+        try await eventually { !self.edits.isEmpty }
+        store.update { state in
+            state.messages[id(101)]?.edit = .failed(content: "rude words", error: .Forbidden)
+        }
+        list.apply(updated(101))
+        #expect(list.editor.editing != nil)
+
+        list.editor.cancel()
+        account.editReplies.send(())
+        await finished(list.editor.saving)
+
+        #expect(list.editor.editing == nil)
+    }
+
+    @Test
+    func aChannelOpenedAgainKeepsItsEditOverARefusal() throws {
+        let first = list()
+        first.editor.start(try row(101, in: first))
+        first.editor.text = "half typed"
+        store.update { state in
+            state.messages[id(102)]?.edit = .failed(content: "saved", error: .Forbidden)
+        }
+
+        let back = list()
+
+        #expect(back.editor.editing?.messageId == id(101))
+        #expect(back.editor.text == "half typed")
+        #expect(!edits.contains(.dismissEdit(here, id(102))))
     }
 
     @Test
