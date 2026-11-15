@@ -9,6 +9,7 @@ mod image;
 mod keychain;
 mod login;
 mod messages;
+mod pins;
 mod reactions;
 mod read_state;
 mod session;
