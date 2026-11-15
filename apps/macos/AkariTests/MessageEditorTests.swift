@@ -177,6 +177,22 @@ struct MessageEditorTests {
     }
 
     @Test
+    func theHintsLinksLieOverTheirWords() {
+        threeMessages()
+        edit(1, text: "first")
+
+        func width(_ text: String) -> CGFloat {
+            NSAttributedString(string: text, attributes: [.font: TypeScale.small.nsFont]).size().width
+        }
+        let cancel = editor.hint.cancel.frame
+        let save = editor.hint.save.frame
+        #expect(abs(cancel.minX - width("escape to ")) <= 0.5)
+        #expect(abs(cancel.width - width("cancel")) <= 1)
+        #expect(abs(save.minX - width("escape to cancel • enter to ")) <= 0.5)
+        #expect(abs(save.width - width("save")) <= 1)
+    }
+
+    @Test
     func theCounterSaysWhatIsLeftOnceFewAre() {
         threeMessages()
         edit(1, text: "first")
@@ -315,6 +331,34 @@ struct MessageEditorTests {
 
         #expect(try cell(1).editor === editor)
         #expect(editor.textView.string == "first draft")
+        #expect(list.window.firstResponder === editor.textView)
+    }
+
+    @Test
+    func anUpdateOfTheEditedRowLeavesTheFocusWhereTheUserPutIt() throws {
+        threeMessages()
+        edit(1, text: "first")
+        list.window.makeFirstResponder(list.table)
+
+        var changed = list.rows
+        changed[0] = row(1, at: list.noon, content: "first", edited: list.noon + 5)
+        list.show(changed)
+
+        #expect(try cell(1).editor === editor)
+        #expect(list.window.firstResponder === list.table)
+    }
+
+    @Test
+    func aReloadOfTheRowsKeepsTheEditorsFocus() throws {
+        threeMessages()
+        edit(1, text: "first")
+        try #require(list.window.firstResponder === editor.textView)
+
+        list.controller.show(
+            MessageTableState(rows: list.rows, reachedOldest: true, showsAltText: true, editing: list.editing))
+        list.window.layoutIfNeeded()
+
+        #expect(try cell(1).editor === editor)
         #expect(list.window.firstResponder === editor.textView)
     }
 
