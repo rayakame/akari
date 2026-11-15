@@ -57,7 +57,7 @@ struct DeleteMessageTests {
         #expect(!preview.cell.menuItems().isEmpty)
     }
 
-    // 10 above and below the row, which keeps its own insets: the text at 72.
+    // 10 above and below the row, which keeps its own insets (the text at 72) and has no group space.
     @Test
     func theBoxHoldsTheRowTenInWithItsInsets() throws {
         let box = MessagePreviewBox()
@@ -66,7 +66,10 @@ struct DeleteMessageTests {
         let height = MessagePreviewBox.height(of: message, width: 440)
         _ = shown(box, height: height)
 
-        #expect(height == 20 + MessagePreview.height(of: message.message, width: 440))
+        #expect(height == 20 + MessagePreview.height(of: message.message, spaced: false, width: 440))
+        #expect(
+            height == 20 + MessagePreview.height(of: message.message, width: 440) - 16,
+            "no space before the group inside the box")
         let frame = box.convert(box.preview.bounds, from: box.preview)
         #expect(frame.minY == 10)
         #expect(frame.height == height - 20)

@@ -289,7 +289,9 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         replyHovered = false
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
         if message.editedTimestamp != nil, message.content.isEmpty || message.hidesContent {
-            lines.append(CellText.editedMark(tooltip: editedTip))
+            let mark = CellText.editedMark(tooltip: editedTip)
+            // The official tag stands alone among the accessories: its space goes.
+            lines.append(lines.length == 0 ? mark.attributedSubstring(from: NSRange(location: 1, length: mark.length - 1)) : mark)
         }
         // The link the one embed shows alone (Discord's hideSimpleEmbedContent).
         content.isHidden = editing || message.content.isEmpty || message.hidesContent

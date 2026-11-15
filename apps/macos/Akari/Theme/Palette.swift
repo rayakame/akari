@@ -97,6 +97,7 @@ enum Palette {
     static let inputBackground = token(
         "inputBackground", dark: "#000000", light: "#000000", alpha: (0.12, 0.02))
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")
+    static let dangerHover = token("dangerHover", dark: "#da373c", light: "#a12829")
     static let brand = NSColor(hex: "#5865f2")
     static let composer = token("composer", dark: "#222327", light: "#ffffff")
     /// The official confirmations' message box: its ring and its shadow.

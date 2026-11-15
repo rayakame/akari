@@ -162,7 +162,8 @@ final class MessageEditorView: NSView {
         var y = boxFrame.maxY
         if !problem.isHidden {
             let height = problemHeight(width: width)
-            problem.frame = NSRect(x: 0, y: y + Self.lineGap, width: width, height: height)
+            // A label's text starts 2 into its frame.
+            problem.frame = NSRect(x: -2, y: y + Self.lineGap, width: width + 4, height: height)
             y += Self.lineGap + height
         }
         hint.frame = NSRect(x: 0, y: y + Self.lineGap, width: width, height: EditorHint.height)
@@ -262,24 +263,22 @@ final class EditorBox: NSView {
     }
 }
 
-/// "escape to cancel • enter to save", the two words links.
+/// "escape to cancel • enter to save", drawn as one line; the two words are links, each a
+/// transparent button over its word.
 final class EditorHint: NSView {
     static let height: CGFloat = 16
 
     let cancel = EditorLink(MessageEditorView.cancelWords.1)
     let save = EditorLink(MessageEditorView.saveWords.1)
-    private let before = EditorHint.words(MessageEditorView.cancelWords.0)
-    private let between = EditorHint.words(MessageEditorView.saveWords.0)
 
     override var isFlipped: Bool { true }
 
     init() {
         super.init(frame: .zero)
-        for view in [before, cancel, between, save] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = true
-            addSubview(view)
+        for link in [cancel, save] {
+            link.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(link)
         }
-        setAccessibilityElement(false)
     }
 
     required init?(coder: NSCoder) {
@@ -288,31 +287,49 @@ final class EditorHint: NSView {
 
     /// The line as it reads.
     var text: String {
-        before.stringValue + cancel.word + between.stringValue + save.word
+        pieces.map(\.text).joined()
+    }
+
+    private var pieces: [(text: String, link: EditorLink?)] {
+        [
+            (MessageEditorView.cancelWords.0, nil), (cancel.word, cancel),
+            (MessageEditorView.saveWords.0, nil), (save.word, save),
+        ]
+    }
+
+    private func drawn(_ text: String, link: EditorLink?) -> NSAttributedString {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: TypeScale.small.nsFont,
+            .foregroundColor: link == nil ? Palette.textDefault : Palette.textLink,
+        ]
+        if link?.isHovered == true {
+            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        }
+        return NSAttributedString(string: text, attributes: attributes)
     }
 
     override func layout() {
         super.layout()
         var x: CGFloat = 0
-        for view in [before, cancel, between, save] as [NSView] {
-            let size = view.intrinsicContentSize
-            view.frame = NSRect(
-                x: x, y: ((Self.height - size.height) / 2).rounded(), width: ceil(size.width),
-                height: size.height)
-            x += ceil(size.width)
+        for (text, link) in pieces {
+            let size = drawn(text, link: link).size()
+            link?.frame = NSRect(x: x, y: 0, width: ceil(size.width), height: Self.height)
+            x += size.width
         }
     }
 
-    private static func words(_ text: String) -> NSTextField {
-        let label = CellText.label()
-        label.stringValue = text
-        label.font = TypeScale.small.nsFont
-        label.textColor = Palette.textDefault
-        return label
+    override func draw(_ dirtyRect: NSRect) {
+        var x: CGFloat = 0
+        for (text, link) in pieces {
+            let string = drawn(text, link: link)
+            let size = string.size()
+            string.draw(at: NSPoint(x: x, y: ((Self.height - size.height) / 2).rounded()))
+            x += size.width
+        }
     }
 }
 
-/// A word of the hint line that acts: the link color, underlined while the list says the
+/// A word of the hint line that acts; the line draws it, underlined while the list says the
 /// pointer is on it.
 final class EditorLink: NSButton {
     let word: String
@@ -320,7 +337,7 @@ final class EditorLink: NSButton {
     var isHovered = false {
         didSet {
             if isHovered != oldValue {
-                update()
+                superview?.needsDisplay = true
             }
         }
     }
@@ -328,11 +345,12 @@ final class EditorLink: NSButton {
     init(_ word: String) {
         self.word = word
         super.init(frame: .zero)
+        title = word
         isBordered = false
+        isTransparent = true
         refusesFirstResponder = true
         target = self
         action = #selector(clicked)
-        update()
     }
 
     required init?(coder: NSCoder) {
@@ -343,20 +361,5 @@ final class EditorLink: NSButton {
 
     @objc private func clicked() {
         onClick()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        update()
-    }
-
-    private func update() {
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: TypeScale.small.nsFont, .foregroundColor: Palette.textLink,
-        ]
-        if isHovered {
-            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-        }
-        attributedTitle = NSAttributedString(string: word, attributes: attributes)
     }
 }

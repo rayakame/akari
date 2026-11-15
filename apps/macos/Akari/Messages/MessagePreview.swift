@@ -21,16 +21,18 @@ struct MessagePreview: NSViewRepresentable {
         Self.configure(view.cell, with: message, reply: reply, now: now)
     }
 
-    /// `authorName` is the header's name, as the list resolves it.
+    /// `authorName` is the header's name, as the list resolves it; without `spaced` the row
+    /// leaves out the space a list keeps before a group.
     static func configure(
         _ cell: MessageCell, with message: Message, reply: ReplyLine? = nil, authorName: String? = nil,
-        menu: Bool = true, now: Date
+        menu: Bool = true, spaced: Bool = true, now: Date
     ) {
         cell.menuItems = { menu ? MessageMenu.copyText(message) : [] }
         let calendar = Calendar.current
         let locale = Locale.current
         cell.configure(
             message, body: Self.text(message, now: now), authorName: authorName, startsGroup: true,
+            followsLine: !spaced,
             groupTime: MessageFormat.groupTime(
                 message.timestamp, now: now, calendar: calendar, locale: locale),
             shortTime: MessageFormat.shortTime(message.timestamp, calendar: calendar, locale: locale),
@@ -65,11 +67,13 @@ struct MessagePreview: NSViewRepresentable {
         return CGSize(width: width, height: Self.height(of: message, reply: reply, width: width))
     }
 
-    static func height(of message: Message, reply: ReplyLine? = nil, width: CGFloat) -> CGFloat {
+    static func height(
+        of message: Message, reply: ReplyLine? = nil, spaced: Bool = true, width: CGFloat
+    ) -> CGFloat {
         let now = Date()
         return MessageCell.height(
-            message, body: text(message, now: now), startsGroup: true, embeds: embeds(message, now: now),
-            hasReply: reply != nil, width: width)
+            message, body: text(message, now: now), startsGroup: true, followsLine: !spaced,
+            embeds: embeds(message, now: now), hasReply: reply != nil, width: width)
     }
 
     private static func text(_ message: Message, now: Date) -> NSAttributedString {
@@ -214,13 +218,13 @@ final class MessagePreviewBox: NSView {
         preview.cell.images = images
         MessagePreview.configure(
             preview.cell, with: row.shown, reply: row.reply, authorName: row.authorName, menu: false,
-            now: now)
+            spaced: false, now: now)
         needsLayout = true
     }
 
     /// The box's height around `row` at `width`, before any cap.
     static func height(of row: MessageListModel.Row, width: CGFloat) -> CGFloat {
-        2 * padding + MessagePreview.height(of: row.shown, reply: row.reply, width: width)
+        2 * padding + MessagePreview.height(of: row.shown, reply: row.reply, spaced: false, width: width)
     }
 
     override func layout() {
@@ -230,7 +234,7 @@ final class MessagePreviewBox: NSView {
             return
         }
         let width = scroll.contentSize.width
-        let row = MessagePreview.height(of: shown.shown, reply: shown.reply, width: width)
+        let row = MessagePreview.height(of: shown.shown, reply: shown.reply, spaced: false, width: width)
         document.frame = NSRect(x: 0, y: 0, width: width, height: row + 2 * Self.padding)
         preview.frame = NSRect(x: 0, y: Self.padding, width: width, height: row)
     }

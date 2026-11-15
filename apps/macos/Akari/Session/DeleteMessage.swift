@@ -13,7 +13,6 @@ enum DeleteLayout {
     static let boxGap: CGFloat = 20
     static let buttonsGap: CGFloat = 24
     static let buttonGap: CGFloat = 12
-    static let buttonWidth: CGFloat = 80
     static let radius: CGFloat = 12
     // The least of the message that shows before the box scrolls.
     static let minimumBox: CGFloat = 80
@@ -40,8 +39,8 @@ final class DeleteMessageView: NSView {
     let message = DeleteMessageView.label(Question.message, style: TypeScale.body, color: Palette.textDefault)
     let box = MessagePreviewBox()
     let tip = DeleteMessageView.label("", style: TypeScale.detail, color: Palette.textMuted)
-    let cancel = NSButton(title: Question.cancel, target: nil, action: nil)
-    let delete = NSButton(title: Question.confirm, target: nil, action: nil)
+    let cancel = PanelButton(Question.cancel, kind: .secondary)
+    let delete = PanelButton(Question.confirm, kind: .critical)
     /// Delete's `true`, Cancel's `false`.
     var answer: (Bool) -> Void = { _ in }
     private var question: Question?
@@ -57,14 +56,11 @@ final class DeleteMessageView: NSView {
         layer?.borderWidth = 1
         title.setAccessibilityRole(.staticText)
         tip.attributedStringValue = Self.tipText
-        cancel.bezelStyle = .push
         cancel.keyEquivalent = "\u{1b}"
         cancel.target = self
         cancel.action = #selector(cancelled)
-        delete.bezelStyle = .push
         delete.keyEquivalent = "\r"
         delete.hasDestructiveAction = true
-        delete.bezelColor = Palette.danger
         delete.target = self
         delete.action = #selector(confirmed)
         for view in [title, message, box, tip, cancel, delete] as [NSView] {
@@ -114,7 +110,7 @@ final class DeleteMessageView: NSView {
         frames.message = NSRect(x: inset, y: y, width: inner, height: Self.height(of: message, width: inner))
         y = frames.message.maxY + DeleteLayout.boxGap
         let tipHeight = tip.isHidden ? 0 : DeleteLayout.boxGap + Self.height(of: tip, width: inner)
-        let buttons = max(cancel.fittingSize.height, delete.fittingSize.height)
+        let buttons = PanelButton.height
         let rest = tipHeight + DeleteLayout.buttonsGap + buttons + inset
         let room = max(DeleteLayout.minimumBox, maxHeight - y - rest)
         let box = min(MessagePreviewBox.height(of: row, width: inner), room)
@@ -126,8 +122,8 @@ final class DeleteMessageView: NSView {
             y = frames.tip.maxY
         }
         y += DeleteLayout.buttonsGap
-        let deleteWidth = max(DeleteLayout.buttonWidth, delete.fittingSize.width)
-        let cancelWidth = max(DeleteLayout.buttonWidth, cancel.fittingSize.width)
+        let deleteWidth = delete.width
+        let cancelWidth = cancel.width
         frames.delete = NSRect(x: width - inset - deleteWidth, y: y, width: deleteWidth, height: buttons)
         frames.cancel = NSRect(
             x: frames.delete.minX - DeleteLayout.buttonGap - cancelWidth, y: y, width: cancelWidth,
@@ -142,10 +138,11 @@ final class DeleteMessageView: NSView {
             return
         }
         let frames = frames(width: bounds.width, row: question.row, maxHeight: maxHeight)
-        title.frame = frames.title
-        message.frame = frames.message
+        // A label's text starts 2 into its frame.
+        title.frame = frames.title.insetBy(dx: -2, dy: 0)
+        message.frame = frames.message.insetBy(dx: -2, dy: 0)
         box.frame = frames.box
-        tip.frame = frames.tip
+        tip.frame = frames.tip.insetBy(dx: -2, dy: 0)
         cancel.frame = frames.cancel
         delete.frame = frames.delete
     }
@@ -207,5 +204,93 @@ struct DeleteMessagePanel: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeleteMessageView, context: Context) -> CGSize? {
         size
+    }
+}
+
+/// The official modal's buttons, as `BrandButton` draws them: secondary gray, critical red;
+/// 40 high, at least 100 wide, 16 beside the title, a faint border, darker under the pointer.
+final class PanelButton: NSButton {
+    enum Kind {
+        case secondary, critical
+    }
+
+    static let height: CGFloat = 40
+    static let minWidth: CGFloat = 100
+    static let padding: CGFloat = 16
+
+    let kind: Kind
+    private(set) var isHovered = false {
+        didSet { needsDisplay = true }
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    init(_ title: String, kind: Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        updateTitle()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    var width: CGFloat {
+        let text = (title as NSString).size(withAttributes: [.font: TypeScale.button.nsFont]).width
+        return max(Self.minWidth, text.rounded(.up) + 2 * Self.padding)
+    }
+
+    private func updateTitle() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: TypeScale.button.nsFont, .paragraphStyle: paragraph,
+                .foregroundColor: kind == .critical ? NSColor.white : Palette.textStrong,
+            ])
+    }
+
+    override func updateLayer() {
+        let fill: NSColor =
+            switch kind {
+            case .secondary: isHovered ? Palette.backgroundModStrong : Palette.backgroundModNormal
+            case .critical: isHovered ? Palette.dangerHover : Palette.danger
+            }
+        layer?.backgroundColor = fill.cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateTitle()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .cursorUpdate],
+                owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
     }
 }
