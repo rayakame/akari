@@ -203,7 +203,6 @@ impl Windows {
         list.used = self.pin_counter;
         list.previous = list.state;
         list.state = PinsState::Loading;
-        list.missed.clear();
         let ask = PinsAsk {
             channel,
             before,
@@ -583,8 +582,7 @@ fn reconcile(
         .collect();
     list.more = more;
     list.fresh = true;
-    let seen = ask.seen.filter(|_| ask.before.is_none());
-    list.newest = latest([list.newest, first, seen]);
+    list.newest = latest([list.newest, first, ask.seen]);
 }
 
 fn replay(

@@ -212,6 +212,8 @@ fn the_next_page_asks_before_the_last_pins_time_and_follows_it() {
 #[test]
 fn nothing_is_asked_while_a_page_loads_or_once_the_list_is_current() {
     let mut state = ready_state();
+    assert!(begin(&mut state, PinsLoad::More).0.is_none(), "no list yet");
+    assert_eq!(page(&state), PinsPage::default());
     let (first, _) = begin(&mut state, PinsLoad::First);
     assert!(first.is_some());
 
@@ -824,4 +826,63 @@ fn a_message_the_pins_list_has_is_unpinned_whatever_an_older_copy_says() {
     let actions = state.message_actions(id(GENERAL), id(2), now);
 
     assert!(actions.unpin && !actions.pin, "{actions:?}");
+}
+
+// Its first page reconciles from the start; a later page would leave its head unasked.
+#[test]
+fn a_pin_placed_before_the_reload_of_a_new_session_doesnt_page_on() {
+    let mut state = three_pins();
+    apply(&mut state, "READY", ready_value());
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    whole(&mut state, 10, true, "hi");
+
+    assert_eq!(listed(&state), [10, 3, 2, 1]);
+    assert!(begin(&mut state, PinsLoad::More).0.is_none());
+}
+
+#[test]
+fn an_older_pin_edited_while_the_first_page_loads_waits_for_the_page() {
+    let mut state = ready_state();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", pinned(10, GENERAL));
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+
+    whole(&mut state, 10, true, "edited");
+
+    assert!(listed(&state).is_empty(), "not before its page");
+    finish(&mut state, ask.unwrap(), &[pin(10, 3)], false);
+    assert_eq!(listed(&state), [10]);
+    assert_eq!(text_of(&state, 10), "edited");
+}
+
+#[test]
+fn an_empty_list_of_an_earlier_connection_isnt_complete() {
+    let mut state = ready_state();
+    load(&mut state, PinsLoad::First, &[], false);
+    apply(&mut state, "READY", ready_value());
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", pinned(10, GENERAL));
+
+    whole(&mut state, 10, true, "an edit of an old pin");
+
+    assert!(listed(&state).is_empty());
+}
+
+#[test]
+fn a_page_answered_once_is_never_answered_again() {
+    let mut state = ready_state();
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    let ask = ask.unwrap();
+    finish(&mut state, ask, &[pin(3, 3)], false);
+    let mut events = Vec::new();
+
+    state.fail_pins(ask, &mut events);
+    state.abandon_pins(ask, &mut events);
+    finish(&mut state, ask, &[], false);
+
+    assert!(events.is_empty());
+    assert_eq!(page(&state).state, PinsState::Loaded);
+    assert_eq!(listed(&state), [3]);
 }
