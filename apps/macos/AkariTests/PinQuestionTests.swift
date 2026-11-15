@@ -65,6 +65,8 @@ struct PinQuestionTests {
         #expect(tip.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == Palette.statusPositive)
         #expect(weight(tip, at: 0) > weight(tip, at: label.length + 2))
         #expect(weight(tip, at: bold.location) > weight(tip, at: label.length + 2))
+        #expect(weight(tip, at: NSMaxRange(bold) - 1) > weight(tip, at: label.length + 2))
+        #expect(weight(tip, at: bold.location - 1) == weight(tip, at: label.length + 2))
         #expect(
             tip.attribute(.foregroundColor, at: bold.location, effectiveRange: nil) as? NSColor
                 == Palette.textMuted)
