@@ -299,9 +299,23 @@ impl Windows {
         };
         let took = take_current_reactions(list, window, &mut page);
         let paged: HashSet<MessageId> = page.iter().map(|pin| pin.message.id).collect();
+        let live: HashMap<MessageId, Pin> = list
+            .items
+            .iter()
+            .filter(|pin| pin.live)
+            .map(|pin| (pin.message.id, pin.clone()))
+            .collect();
         reconcile(list, ask, page, more, &paged);
         for missed in std::mem::take(&mut list.missed) {
-            replay(list, missed, &paged, &took, users);
+            match &missed {
+                Missed::Deleted(id) => self.targets.delete(channel, *id, events),
+                Missed::Updated(update) => {
+                    self.targets
+                        .update(update, &mut |user| intern(user, users, &[]), events);
+                }
+                Missed::Reacted(..) => {}
+            }
+            replay(list, missed, &paged, &took, &live, users);
         }
         list.state = PinsState::Loaded;
         events.push(StoreEvent::PinsChanged {
@@ -597,11 +611,13 @@ fn reconcile(
     list.newest = latest([list.newest, first, ask.seen]);
 }
 
+// `live`: the pins the gateway had placed before the page landed.
 fn replay(
     list: &mut PinsList,
     missed: Missed,
     paged: &HashSet<MessageId>,
     took: &HashSet<MessageId>,
+    live: &HashMap<MessageId, Pin>,
     users: &HashMap<UserId, Arc<User>>,
 ) {
     match missed {
@@ -626,6 +642,18 @@ fn replay(
                 return;
             }
             let Some(index) = list.position(update.id) else {
+                // An unpin replayed before took the page's copy: the gateway's repin after it stays.
+                if update.pinned == Some(true)
+                    && let Some(pin) = live.get(&update.id)
+                {
+                    let at = list.items.partition_point(|other| {
+                        other.pinned_at.unix_millis() >= pin.pinned_at.unix_millis()
+                    });
+                    list.items.insert(at, pin.clone());
+                    if at <= list.confirmed {
+                        list.confirmed += 1;
+                    }
+                }
                 return;
             };
             if update.pinned == Some(false) {

@@ -751,6 +751,59 @@ fn a_pin_the_gateway_placed_while_a_page_loads_stays_when_the_page_lacks_it() {
     );
 }
 
+// The page was asked before the unpin: the repin the gateway placed after it is the one that stays.
+#[test]
+fn an_unpin_and_a_repin_while_a_page_loads_leave_the_message_pinned() {
+    let mut state = ready_state();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    load(&mut state, PinsLoad::First, &[pin(10, 4), pin(3, 3)], false);
+    last_pin(&mut state, 5);
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    whole(&mut state, 10, false, "hi");
+    whole(&mut state, 10, true, "hi");
+    let repinned = pinned_at(&state, 10);
+
+    finish(&mut state, ask.unwrap(), &[pin(10, 4), pin(3, 3)], false);
+
+    assert_eq!(listed(&state), [10, 3]);
+    assert_ne!(repinned, at(4));
+    assert_eq!(
+        pinned_at(&state, 10),
+        repinned,
+        "the repin's time, not the page's"
+    );
+}
+
+// The page predates them; the replies' lines show the message as it is.
+#[test]
+fn a_reply_target_edited_or_deleted_while_a_page_loads_keeps_the_change() {
+    let mut state = ready_state();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    for (reply_id, target) in [(20, "3"), (21, "2")] {
+        let mut reply = message(reply_id, GENERAL);
+        reply["type"] = 19.into();
+        reply["message_reference"] =
+            json!({"message_id": target, "channel_id": GENERAL.to_string()});
+        apply(&mut state, "MESSAGE_CREATE", reply);
+    }
+    let (ask, _) = begin(&mut state, PinsLoad::First);
+    update(&mut state, 3, json!({"content": "edited"}));
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": "2", "channel_id": GENERAL.to_string()}),
+    );
+
+    finish(&mut state, ask.unwrap(), &[pin(3, 3), pin(2, 2)], false);
+
+    match state.reply_target(id(GENERAL), id(3)) {
+        ReplyTarget::Loaded(preview) => assert_eq!(&*preview.content, "edited"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(state.reply_target(id(GENERAL), id(2)), ReplyTarget::Deleted);
+}
+
 #[test]
 fn at_most_ten_channels_keep_their_pins() {
     let mut state = ready_state();
