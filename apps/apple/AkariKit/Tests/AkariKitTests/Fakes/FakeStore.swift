@@ -24,8 +24,8 @@ final class FakeStore: Store, @unchecked Sendable {
         // By the target's ID; none: not loaded.
         var replyTargets: [MessageId: ReplyTarget] = [:]
         var unreadPins: Set<ChannelId> = []
-        // None: nothing is allowed.
-        var messageActions: [MessageId: MessageActions] = [:]
+        // By the channel and message asked with. None: nothing is allowed.
+        var messageActions: [MessageKey: MessageActions] = [:]
         var lengthLimit: UInt32 = 2000
         var slowmodes: [ChannelId: Slowmode] = [:]
         var channelBadges: [ChannelId: Badge] = [:]
@@ -219,12 +219,19 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
         read(.messageActions(channelId, messageId)) { state in
-            state.messageActions[messageId]
+            state.messageActions[MessageKey(channelId, messageId)]
                 ?? MessageActions(
                     reply: false, replyPings: false, mentionToggle: false, edit: false, delete: false,
                     pin: false, unpin: false, react: false, toggleReaction: false,
                     removeReactions: false, markUnread: false, copyLink: false, createThread: false,
                     viewThread: false)
+        }
+    }
+
+    // The core builds the link; the fake names what it was asked for.
+    override func messageLink(channelId: ChannelId, messageId: MessageId) -> String {
+        read(.messageLink(channelId, messageId)) { _ in
+            "link \(channelId.rawValue) \(messageId.rawValue)"
         }
     }
 
@@ -324,5 +331,23 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func newPosts(postIds: [ChannelId]) -> [ChannelId] {
         read(.newPosts(postIds)) { state in postIds.filter(state.newPosts.contains) }
+    }
+}
+
+// A message as the store is asked about it: a thread's starter row and the message it shows have
+// the same answer only where the core says so.
+struct MessageKey: Hashable {
+    let channel: ChannelId
+    let message: MessageId
+
+    init(_ channel: ChannelId, _ message: MessageId) {
+        self.channel = channel
+        self.message = message
+    }
+}
+
+extension FakeStore.State {
+    mutating func allow(_ actions: MessageActions?, message: UInt64, in channel: UInt64) {
+        messageActions[MessageKey(id(channel), id(message))] = actions
     }
 }

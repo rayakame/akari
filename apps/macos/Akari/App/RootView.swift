@@ -124,11 +124,9 @@ struct SessionScreen: View {
                     Task { await session.openBeside(thread: thread, from: parent) }
                 },
                 openThreads: { [session] in session.openThreadBrowser(of: $0, as: .modal) },
-                canStartThread: { [session] in
-                    session.canStartThread(from: $0, in: messages.channelId)
-                },
-                createThread: { [session] in
-                    session.openThreadForm(in: messages.channelId, from: $0, location: .message)
+                messageActions: session.messageActions(for: messages) { text in
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
                 },
                 expressions: { [session] in session.expressionPopout($0, in: messages.channelId) },
                 followPost: { [session] follows in

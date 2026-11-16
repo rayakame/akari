@@ -32,6 +32,8 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {}
     override func markGuildsRead(guildIds: [GuildId]) {}
 }
@@ -59,6 +61,10 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     // Nothing to create here.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }

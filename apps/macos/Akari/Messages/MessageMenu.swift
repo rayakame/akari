@@ -1,28 +1,44 @@
 import AkariKit
 import AppKit
 
-/// What a message's context menu offers, in the official client's order: "Create Thread" closes
-/// the Reply and Forward group, "Copy Text" opens the next.
+/// A message's context menu: the model's groups in their order, a separator between two.
 enum MessageMenu {
     static func items(
-        for message: Message, createThread: (() -> Void)? = nil,
-        pasteboard: NSPasteboard = .general
+        _ groups: [[MessageActionItem]], run: @escaping (MessageAction) -> Void
     ) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
-        if let createThread {
-            items.append(item("Create Thread", run: createThread))
-        }
-        if !message.content.isEmpty {
+        for group in groups where !group.isEmpty {
             if !items.isEmpty {
                 items.append(.separator())
             }
-            items.append(
-                item("Copy Text") {
-                    pasteboard.clearContents()
-                    pasteboard.setString(message.content, forType: .string)
-                })
+            for entry in group {
+                let item = item(entry.title) { run(entry.action) }
+                item.isEnabled = entry.enabled
+                if entry.destructive {
+                    item.attributedTitle = NSAttributedString(
+                        string: entry.title,
+                        attributes: [
+                            .foregroundColor: Palette.textError,
+                            .font: NSFont.menuFont(ofSize: 0),
+                        ])
+                }
+                items.append(item)
+            }
         }
         return items
+    }
+
+    /// "Copy Text" alone, where a message shows outside a list (the New Thread form).
+    static func copyText(_ message: Message, pasteboard: NSPasteboard = .general) -> [NSMenuItem] {
+        guard !message.content.isEmpty else {
+            return []
+        }
+        return [
+            item("Copy Text") {
+                pasteboard.clearContents()
+                pasteboard.setString(message.content, forType: .string)
+            }
+        ]
     }
 
     static func item(_ title: String, run: @escaping () -> Void) -> NSMenuItem {
@@ -35,8 +51,15 @@ enum MessageMenu {
     }
 }
 
+/// The list and row a menu item belongs to: the row stays lit while its menu is open.
+struct RowMenu {
+    weak var list: MessageTableController?
+    let row: MessageTimeline.ItemId
+}
+
 final class MenuAction: NSObject {
     private let action: () -> Void
+    var row: RowMenu?
 
     init(_ run: @escaping () -> Void) {
         self.action = run
@@ -54,6 +77,8 @@ final class MenuAction: NSObject {
 protocol MessageMenuRow: NSView {
     /// The message's menu for a click at the event's location; nil outside the message's box.
     func messageMenu(for event: NSEvent) -> NSMenu?
+    /// The message's own area in the row: hover, the menu and the hover bar go by it.
+    var box: NSRect { get }
 }
 
 extension MessageMenu {

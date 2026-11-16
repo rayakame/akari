@@ -7,6 +7,10 @@ import Testing
 
 /// What the list asked for, in order.
 final class RecordingMediaActions: MessageListActions {
+    func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] {
+        [[MessageTableTests.RecordingActions.item(.copyText, "Copy Text")]]
+    }
+
     var opened: [ImageKey] = []
     var revealed: [MediaKey] = []
     var toggled: [MediaKey] = []

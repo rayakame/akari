@@ -154,7 +154,7 @@ struct SpoilerTests {
     func aRightClickOnAHiddenSpoilerKeepsItHidden() throws {
         let drawing = MessageTextDrawingTests()
         let view = drawing.shown("a ||secret|| b", appearance: .darkAqua)
-        view.messageMenu = { MessageMenu.items(for: row(1, at: .now, content: "x").message) }
+        view.messageMenu = { MessageMenu.copyText(row(1, at: .now, content: "x").message) }
         let point = try drawing.insidePill(of: "secret", in: view)
         let before = view.selectedRange()
 

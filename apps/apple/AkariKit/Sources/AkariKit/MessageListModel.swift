@@ -236,6 +236,14 @@ public final class MessageListModel {
     @ObservationIgnored private var readUpTo: MessageId?
     // Whether `readUpTo` came from the store or a mark as read, not from the first rows shown.
     @ObservationIgnored private var readUpToKnown = false
+    // The message a Mark Unread named: the line may stand over the user's own.
+    @ObservationIgnored private var markedFrom: MessageId?
+    @ObservationIgnored private var marks = 0
+    @ObservationIgnored private var unansweredMarks: Set<Int> = []
+    // The mark whose line shows before Discord's answer to it.
+    @ObservationIgnored private var shownMark: Int?
+    // Where Discord has the line: before the unanswered marks, or at the newest one it took.
+    @ObservationIgnored private var trueLine: (mark: Int, line: LinePosition)?
     // The read positions whose line the view said was out of sight, and on screen; the line of a
     // later position starts unplaced.
     @ObservationIgnored private var hiddenLineFrom: MessageId?
@@ -520,8 +528,59 @@ public final class MessageListModel {
             hidesDownloads: store.hidesMediaDownloads(channelId: shown.channelId), account: account)
     }
 
+    /// Mark Unread from `message` was asked: the new messages line stands over it at once, the
+    /// user's own message too. What it returns takes Discord's answer, whether it took the mark:
+    /// a mark it didn't take puts the line back where Discord has it.
+    func markUnread(from message: MessageId) -> (_ taken: Bool) -> Void {
+        if unansweredMarks.isEmpty {
+            trueLine = (marks, linePosition)
+        }
+        marks += 1
+        let mark = marks
+        unansweredMarks.insert(mark)
+        shownMark = mark
+        let marked = LinePosition(
+            readUpTo: MessageId(rawValue: message.rawValue == 0 ? 0 : message.rawValue - 1),
+            known: true, markedFrom: message)
+        linePosition = marked
+        return { [weak self] taken in
+            guard let self, unansweredMarks.remove(mark) != nil, let trueLine else {
+                return
+            }
+            if taken {
+                guard mark > trueLine.mark else {
+                    return
+                }
+                self.trueLine = (mark, marked)
+                if shownMark == nil {
+                    linePosition = marked
+                }
+            } else if shownMark == mark {
+                shownMark = nil
+                linePosition = trueLine.line
+            }
+        }
+    }
+
+    private struct LinePosition {
+        var readUpTo: MessageId?
+        var known: Bool
+        var markedFrom: MessageId?
+    }
+
+    private var linePosition: LinePosition {
+        get { LinePosition(readUpTo: readUpTo, known: readUpToKnown, markedFrom: markedFrom) }
+        set {
+            (readUpTo, readUpToKnown, markedFrom) = (newValue.readUpTo, newValue.known, newValue.markedFrom)
+            placeNewMessagesLine()
+        }
+    }
+
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
+        markedFrom = nil
+        unansweredMarks = []
+        shownMark = nil
         // A latest load would overtake a running jump too, but at the present none runs.
         if aroundLoadRunning {
             supersedeJumps()
@@ -787,7 +846,8 @@ public final class MessageListModel {
         }
         let line = readUpTo.flatMap { readUpTo in
             rows.first { row in
-                row.message.id > readUpTo && row.message.author.id != userId
+                row.message.id > readUpTo
+                    && (row.message.author.id != userId || row.message.id == markedFrom)
                     && row.message.delivery == .sent
             }?.id
         }
