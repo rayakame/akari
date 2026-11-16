@@ -492,6 +492,33 @@ fn a_deleted_pin_leaves_the_pages_going_on_after_the_last_one() {
     );
 }
 
+// Pins the store never held lie between the refreshed page and the ones it had: the pages go on
+// after the refreshed one, and the old pins stay shown until a page reaches them.
+#[test]
+fn a_refreshed_first_page_short_of_the_pins_the_list_had_pages_on_after_itself() {
+    let mut state = ready_state();
+    let old: Vec<Value> = (1..=25i64)
+        .rev()
+        .map(|n| pin(n.unsigned_abs(), n))
+        .collect();
+    load(&mut state, PinsLoad::First, &old, false);
+    last_pin(&mut state, 51);
+
+    let fresh: Vec<Value> = (27..=51i64)
+        .rev()
+        .map(|n| pin(n.unsigned_abs() + 100, n))
+        .collect();
+    load(&mut state, PinsLoad::First, &fresh, true);
+
+    assert_eq!(listed(&state).len(), 50);
+    let (more, _) = begin(&mut state, PinsLoad::More);
+    assert_eq!(
+        more.unwrap().before.map(Timestamp::unix_millis),
+        Some(at(27)),
+        "26 is asked for"
+    );
+}
+
 #[test]
 fn a_reload_for_a_newer_pin_keeps_the_pages_after_it() {
     let mut state = three_pins();

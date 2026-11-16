@@ -578,6 +578,12 @@ fn reconcile(
         .last()
         .map(|pin| pin.pinned_at.unix_millis())
         .filter(|_| more);
+    // Short of the page's last time, pins never held may lie between it and the old ones.
+    let reached = low.is_some_and(|low| {
+        rest.iter()
+            .take(confirmed.saturating_sub(newer.len()))
+            .any(|pin| !pin.live && pin.pinned_at.unix_millis() >= low)
+    });
     let mut kept = Vec::new();
     let mut older = Vec::new();
     let mut older_confirmed = 0;
@@ -588,7 +594,7 @@ fn reconcile(
         if pin.live {
             kept.push(pin.clone());
         } else if low.is_some_and(|low| pin.pinned_at.unix_millis() < low) {
-            if newer.len() + index < confirmed && older_confirmed == older.len() {
+            if reached && newer.len() + index < confirmed && older_confirmed == older.len() {
                 older_confirmed += 1;
             }
             older.push(pin.clone());
