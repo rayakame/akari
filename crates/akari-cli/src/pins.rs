@@ -32,18 +32,28 @@ fn pin_error(err: &PinError, pin: bool) -> String {
     }
 }
 
+// Discord may list pins Akari can't read, and pins may go while a page loads: only a page that
+// brought no pin the list lacked ends the listing early.
+fn brought_new(before: &[MessageId], after: &[MessageId]) -> bool {
+    after.iter().any(|id| !before.contains(id))
+}
+
 pub(crate) async fn lines(account: &Account, channel: ChannelId) -> Result<Vec<String>, String> {
     let failed = |err: RequestError| format!("Couldn't load the pins: {}", report(&err));
     account.load_pins(channel).await.map_err(failed)?;
     let store = account.store();
-    loop {
-        let page = store.pins(channel);
-        if !page.has_more {
-            break;
-        }
+    let listed = || -> Vec<MessageId> {
+        store
+            .pins(channel)
+            .items
+            .iter()
+            .map(|item| item.message.id)
+            .collect()
+    };
+    while store.pins(channel).has_more {
+        let before = listed();
         account.load_more_pins(channel).await.map_err(failed)?;
-        // Discord may list pins Akari can't read: a page short of 25 isn't the end.
-        if store.pins(channel).items.len() == page.items.len() {
+        if !brought_new(&before, &listed()) {
             break;
         }
     }
@@ -110,7 +120,25 @@ pub async fn change(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::RangeInclusive;
+
     use super::*;
+
+    #[test]
+    fn only_a_page_that_brings_no_pin_the_list_lacked_ends_the_listing() {
+        let ids = |range: RangeInclusive<u64>| range.map(MessageId::new).collect::<Vec<_>>();
+
+        assert!(
+            brought_new(&ids(1..=25), &ids(26..=50)),
+            "every pin shown went while the page loaded: as many pins, all new"
+        );
+        assert!(brought_new(&ids(1..=25), &ids(1..=26)));
+        assert!(!brought_new(&ids(1..=25), &ids(1..=25)));
+        assert!(
+            !brought_new(&ids(1..=25), &ids(2..=25)),
+            "one went, none came"
+        );
+    }
 
     #[test]
     fn a_pin_line_puts_the_pin_time_before_the_message() {
