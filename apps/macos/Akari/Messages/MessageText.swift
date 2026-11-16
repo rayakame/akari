@@ -93,7 +93,7 @@ enum MessageText {
         let content: String
         let formatted: FormattedText
         var spoilersShown = false
-        var edited = false
+        var edited: Date?
         var color = Palette.textDefault
         var base = Base.body
 
@@ -101,12 +101,13 @@ enum MessageText {
             content = message.content
             formatted = message.formatted
             spoilersShown = message.spoilersShown
-            edited = message.editedTimestamp != nil
+            edited = message.editedTimestamp
             color =
                 switch message.delivery {
                 case .pending: Palette.textMuted
                 case .failed: Palette.danger
-                default: Palette.textDefault
+                // A saved edit Discord hasn't taken yet, dimmed as a message being sent (D162).
+                default: message.edit == .pending ? Palette.textMuted : Palette.textDefault
                 }
         }
 
@@ -429,8 +430,9 @@ private struct Builder {
             }
             previous = (block, style)
         }
-        if text.edited, !text.content.isEmpty {
-            var mark: NSAttributedString = CellText.editedMark()
+        if let edited = text.edited, !text.content.isEmpty {
+            var mark: NSAttributedString = CellText.editedMark(
+                tooltip: times.fullDate(Int64(edited.timeIntervalSince1970)))
             if let previous, previous.style.isCode {
                 separate(previous.block, previous.style, nil)
                 mark = mark.attributedSubstring(from: NSRange(location: 1, length: mark.length - 1))

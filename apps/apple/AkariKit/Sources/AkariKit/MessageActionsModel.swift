@@ -47,6 +47,32 @@ public final class MessageActionsModel {
         }
     }
 
+    /// The question before a message is deleted, with the message as its row shows it (the
+    /// official client's modal); `run` deletes it.
+    public struct DeleteQuestion: Identifiable {
+        public static let title = "Delete Message"
+        public static let message = "Are you sure you want to delete this message?"
+        /// The tip, with the words that are bold in it.
+        public static let tip =
+            "You can hold down shift when clicking delete message to bypass this confirmation "
+            + "entirely."
+        public static let tipBold = "delete message"
+        public static let confirm = "Delete"
+        public static let cancel = "Cancel"
+
+        public let id = UUID()
+        public let row: MessageListModel.Row
+        /// From the menu: the tip that Shift skips the question.
+        public let showsTip: Bool
+        public let run: @MainActor () -> Void
+
+        public init(row: MessageListModel.Row, showsTip: Bool, run: @escaping @MainActor () -> Void) {
+            self.row = row
+            self.showsTip = showsTip
+            self.run = run
+        }
+    }
+
     /// A question before something that can't be undone; `run` does it.
     public struct Confirmation: Identifiable {
         public let id = UUID()
@@ -101,7 +127,8 @@ public final class MessageActionsModel {
         [.copyId],
     ]
 
-    enum Surface {
+    /// Where an action was clicked.
+    public enum Surface: Sendable {
         case bar, menu
     }
 
@@ -117,6 +144,8 @@ public final class MessageActionsModel {
     private let reactions: ReactionsModel?
     private let viewReactions: (MessageListModel.Row) -> Void
     private let confirm: (Confirmation) -> Void
+    private let edit: (MessageListModel.Row) -> Void
+    private let askDelete: (DeleteQuestion) -> Void
     private let failed: (Failure) -> Void
 
     /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
@@ -124,7 +153,8 @@ public final class MessageActionsModel {
     /// once and returns what takes Discord's answer: whether it took the mark; `reply` starts a
     /// reply to the row's message, with Shift as it was at the click; `reactions` is the list's
     /// (without it nothing about reactions is offered), `viewReactions` opens the reactions
-    /// window and `confirm` asks before reactions are removed.
+    /// window and `confirm` asks before reactions are removed; `edit` opens the row's editor and
+    /// `askDelete` asks before a message is deleted.
     public init(
         store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
@@ -135,8 +165,12 @@ public final class MessageActionsModel {
         reactions: ReactionsModel? = nil,
         viewReactions: @escaping (MessageListModel.Row) -> Void = { _ in },
         confirm: @escaping (Confirmation) -> Void = { _ in },
+        edit: @escaping (MessageListModel.Row) -> Void = { _ in },
+        askDelete: @escaping (DeleteQuestion) -> Void = { _ in },
         failed: @escaping (Failure) -> Void
     ) {
+        self.edit = edit
+        self.askDelete = askDelete
         self.reactions = reactions
         self.viewReactions = viewReactions
         self.confirm = confirm
@@ -243,10 +277,13 @@ public final class MessageActionsModel {
         }
     }
 
-    /// Does what a button or an item says. `shift` is the key at the click, for the actions
-    /// that read it. More is the host's: it opens the menu; so are Add Reaction and Remove
-    /// Reactions, which list emoji to choose from.
-    public func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool = false) {
+    /// Does what a button (`surface` `.bar`) or an item says. `shift` is the key at the click, for
+    /// the actions that read it. More is the host's: it opens the menu; so are Add Reaction and
+    /// Remove Reactions, which list emoji to choose from.
+    public func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool = false,
+        from surface: Surface = .menu
+    ) {
         let message = row.shown
         switch action {
         case .copyText:
@@ -262,17 +299,53 @@ public final class MessageActionsModel {
         case .retry:
             retry(row.message.id)
         case .delete:
-            if row.message.delivery == .failed {
-                discard(row.message.id)
-            }
+            delete(row, shift: shift, from: surface)
+        case .edit:
+            edit(row)
         case .reply:
             reply(row, shift)
         case .viewReactions:
             viewReactions(row)
         case .removeAllReactions:
             removeReactions(of: nil, on: row, shift: shift)
-        case .addReaction, .edit, .pin, .unpin, .removeReactions, .copyId, .more:
+        case .addReaction, .pin, .unpin, .removeReactions, .copyId, .more:
             break
+        }
+    }
+
+    private func delete(_ row: MessageListModel.Row, shift: Bool, from surface: Surface) {
+        guard offer(for: row).has(.delete) else {
+            return
+        }
+        if row.message.delivery == .failed {
+            discard(row.message.id)
+            return
+        }
+        let question = Self.deleteQuestion(row, showsTip: surface == .menu, account: account, failed: failed)
+        if shift {
+            question.run()
+        } else {
+            askDelete(question)
+        }
+    }
+
+    // Its `run` holds what it needs, not the model, which a host may have let go by the answer.
+    static func deleteQuestion(
+        _ row: MessageListModel.Row, showsTip: Bool, account: Account,
+        failed: @escaping (Failure) -> Void
+    ) -> DeleteQuestion {
+        let own = row.message
+        return DeleteQuestion(row: row, showsTip: showsTip) { @MainActor in
+            _ = Task {
+                do {
+                    try await account.deleteMessage(channelId: own.channelId, messageId: own.id)
+                } catch {
+                    failed(
+                        Failure(
+                            title: "Couldn't Delete Message",
+                            message: Self.text(for: error as? RequestError ?? .UnexpectedResponse)))
+                }
+            }
         }
     }
 
@@ -319,7 +392,8 @@ public final class MessageActionsModel {
             case .copyLink: actions.copyLink
             case .createThread: actions.createThread
             case .viewThread: actions.viewThread
-            case .delete: failed && actions.delete
+            case .delete: actions.delete
+            case .edit: !failed && actions.edit
             case .more: true
             case .reply: actions.reply
             case .addReaction: reactions && !failed && actions.react
@@ -327,7 +401,7 @@ public final class MessageActionsModel {
             case .removeReactions, .removeAllReactions:
                 reactions && hasReactions && actions.removeReactions
             // Their features aren't built yet.
-            case .edit, .pin, .unpin, .copyId:
+            case .pin, .unpin, .copyId:
                 false
             }
         }

@@ -150,7 +150,8 @@ struct MessageArea: View {
                     onShiftPageUp: { bridge.jumpToUnread() },
                     onAttach: { link.composer = $0 },
                     autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused,
-                    onReplyJump: { bridge.jump(to: $0) }
+                    onReplyJump: { bridge.jump(to: $0) },
+                    onEditLast: { messages.editNewest() }
                 )
                 .id(messages.channelId)
             }
@@ -171,7 +172,7 @@ struct MessageArea: View {
             hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
-            replyingTo: messages.replyingTo,
+            replyingTo: messages.replyingTo, editing: messages.editor.editing,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
             images: ImageCacheRef(images, placeholders: placeholders), motion: motion,
             focused: focused)
@@ -295,8 +296,8 @@ final class MessageListBridge: MessageListActions {
         if let escapeAll {
             escapeAll()
         } else {
-            // A pending reply takes the key: nothing is marked and nothing scrolls.
-            let replying = messages.composer.reply != nil
+            // An edit or a pending reply takes the key: nothing is marked and nothing scrolls.
+            let replying = messages.editor.editing != nil || messages.composer.reply != nil
             Task { await messages.escape() }
             if !replying {
                 link.controller?.jumpToPresent(load: false)
@@ -387,8 +388,11 @@ final class MessageListBridge: MessageListActions {
         messageActions?.menu(for: row) ?? []
     }
 
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
-        messageActions?.perform(action, on: row, shift: shift)
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface
+    ) {
+        messageActions?.perform(action, on: row, shift: shift, from: surface)
     }
 
     func markUnread(from row: MessageListModel.Row) {
@@ -439,5 +443,29 @@ final class MessageListBridge: MessageListActions {
 
     func viewReactions(of row: MessageListModel.Row) {
         messageActions?.perform(.viewReactions, on: row)
+    }
+
+    func editText() -> String {
+        messages.editor.text
+    }
+
+    func editChanged(_ text: String) {
+        messages.editor.text = text
+    }
+
+    func editRemaining() -> Int? {
+        messages.editor.remaining
+    }
+
+    func saveEdit() {
+        messages.editor.save()
+    }
+
+    func cancelEdit() {
+        messages.editor.cancel()
+    }
+
+    func editFocused(_ focused: Bool) {
+        messages.editor.editorFocused = focused
     }
 }

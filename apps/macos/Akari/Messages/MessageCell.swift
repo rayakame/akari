@@ -70,6 +70,19 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             spine.hovered = replyHovered
         }
     }
+    /// The message is edited in its row: the hover tint stays, as the official client's
+    /// selected row.
+    var isEditing = false {
+        didSet {
+            if isEditing != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
+    // The list's one editor while this row hosts it.
+    private(set) weak var editor: MessageEditorView?
+    // The sizing cell's stand-in for the editor.
+    private var editorHeight: CGFloat?
     /// The pending reply answers this message: the official client's tint and bar.
     var isReplyTarget = false {
         didSet {
@@ -177,6 +190,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private static let avatarSize: CGFloat = 40
     // Discord's box border sits 15.5 below the text's baseline; the stack's spacing gives 2 of it.
     private static let boxGap: CGFloat = 9.5
+    static let deletingAlpha: CGFloat = 0.5
     private static let sizing = MessageCell()
 
     init() {
@@ -194,17 +208,19 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     func configure(
         _ message: Message, body: NSAttributedString, authorName: String? = nil,
         startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
-        groupTime: String, shortTime: String, fullDate: String,
+        groupTime: String, shortTime: String, fullDate: String, editedDate: String? = nil,
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
         media: MediaState = MediaState(), embeds: [EmbedView.Shown] = [],
         reply: (line: ReplyLine, text: NSAttributedString)? = nil, replyJumps: Bool = true,
-        replyRefused: Bool = false, reactions: ReactionRow? = nil
+        replyRefused: Bool = false, reactions: ReactionRow? = nil, editor: MessageEditorView? = nil
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
             followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate, hasBox: threadBox != nil, media: media, embeds: embeds,
-            hasReply: reply != nil, reactions: reactions)
+            hasReply: reply != nil, reactions: reactions, editing: editor != nil,
+            editedTip: editedDate)
+        host(editor)
         if let reply {
             replyLine.configure(reply.line, text: reply.text, jumps: replyJumps)
             spine.isEnabled = replyJumps && reply.line.jumps
@@ -237,8 +253,14 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
         followsLine: Bool, groupTime: String, shortTime: String, fullDate: String,
         hasBox: Bool = false, media: MediaState = MediaState(), embeds shown: [EmbedView.Shown] = [],
-        hasReply: Bool = false, reactions: ReactionRow? = nil
+        hasReply: Bool = false, reactions: ReactionRow? = nil, editing: Bool = false,
+        editorHeight: CGFloat? = nil, editedTip: String? = nil
     ) {
+        self.editorHeight = editorHeight
+        isEditing = editing
+        // The official client's delete changes nothing until Discord answers; Akari dims it (D162).
+        stack.alphaValue = message.deleting ? Self.deletingAlpha : 1
+        avatar.alphaValue = stack.alphaValue
         if hasBox {
             boxView().isHidden = false
         } else {
@@ -267,10 +289,12 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         replyHovered = false
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
         if message.editedTimestamp != nil, message.content.isEmpty || message.hidesContent {
-            lines.append(CellText.editedMark())
+            let mark = CellText.editedMark(tooltip: editedTip)
+            // The official tag stands alone among the accessories: its space goes.
+            lines.append(lines.length == 0 ? mark.attributedSubstring(from: NSRange(location: 1, length: mark.length - 1)) : mark)
         }
         // The link the one embed shows alone (Discord's hideSimpleEmbedContent).
-        content.isHidden = message.content.isEmpty || message.hidesContent
+        content.isHidden = editing || message.content.isEmpty || message.hidesContent
         extras.show(lines)
         extras.isHidden = lines.length == 0
         if message.attachments.isEmpty {
@@ -320,6 +344,22 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             failed = line
         }
         failed?.isHidden = !isFailed
+    }
+
+    private func host(_ editor: MessageEditorView?) {
+        if let editor {
+            if editor.superview !== stack {
+                let after = stack.views(in: .top).firstIndex(of: content).map { $0 + 1 } ?? 0
+                stack.insertView(editor, at: after, in: .top)
+                editor.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+            self.editor = editor
+        } else if let shown = self.editor {
+            if shown.superview === stack {
+                stack.removeView(shown)
+            }
+            self.editor = nil
+        }
     }
 
     /// The reactions under the message; `animated` for a change in place, whose counts roll.
@@ -381,17 +421,19 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
 
     /// The row height for `message` showing `body` at `width`, as Auto Layout would size the
     /// cell.
+    /// `editor` is the height of the editor in the text's place.
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
         followsLine: Bool = false, hasBox: Bool = false, embeds: [EmbedView.Shown] = [],
-        hasReply: Bool = false, reactions: ReactionRow? = nil, width: CGFloat
+        hasReply: Bool = false, reactions: ReactionRow? = nil, editor: CGFloat? = nil,
+        width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
             groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox, embeds: embeds,
-            hasReply: hasReply, reactions: reactions)
+            hasReply: hasReply, reactions: reactions, editing: editor != nil, editorHeight: editor)
         let textWidth = width - textLeading - textTrailing
-        let shown = !message.content.isEmpty && !message.hidesContent
+        let shown = editor == nil && !message.content.isEmpty && !message.hidesContent
         let body = shown ? TextMeasurer.shared.height(body, width: textWidth) : 0
         return sizing.height(width: width, body: body)
     }
@@ -428,7 +470,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
                             : view === failed
                                 ? FailedLine.height : view.intrinsicContentSize.height
             }
-            .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
+            .reduce(0, +) + (editorHeight ?? 0)
+            + Self.spacing * CGFloat(max(shown.count + (editorHeight == nil ? 0 : 1) - 1, 0))
             + (shown.contains { $0 === attachments } && shown.contains { $0 === embeds }
                 ? Self.accessoryGap - Self.spacing : 0)
             + (replyLine.isHidden ? 0 : ReplyLineView.gapBelow - Self.spacing)
@@ -560,10 +603,11 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     override func draw(_ dirtyRect: NSRect) {
         let box = box
         defer { drawConnector() }
+        let lit = isHovered || isEditing
         // The official client's sheet: the reply's tint takes the mention's place, and its
         // hovered color the hover tint's.
         if isReplyTarget {
-            (isHovered ? Palette.replyingBackgroundHover : Palette.replyingBackground).setFill()
+            (lit ? Palette.replyingBackgroundHover : Palette.replyingBackground).setFill()
             box.fill(using: .sourceOver)
             Palette.brand.setFill()
             NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
@@ -575,7 +619,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             Palette.mentionedBar.setFill()
             NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
         }
-        if isHovered {
+        if lit {
             Palette.hoverBackground.setFill()
             box.fill(using: .sourceOver)
         }
@@ -604,7 +648,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)
-        let anchor: NSView = reactions ?? stickers ?? extras
+        let anchor: NSView = reactions ?? extras
         let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
         stack.insertView(box, at: after, in: .top)
         box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -624,8 +668,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         row.onAdd = { [weak self] button in self?.onAddReaction(button) }
         row.tooltip = { [weak self] pill in self?.reactionTooltip(pill) }
         row.rolls = { [weak self] in self?.reactionsRoll() ?? false }
-        let anchor: NSView = stickers ?? extras
-        let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
+        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
         stack.insertView(row, at: after, in: .top)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         reactions = row
@@ -679,8 +722,9 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         row.images = images
         row.animates = animatesStickers
         row.onSticker = { [weak self] sticker, rect in self?.onExpression(.sticker(sticker), rect) }
-        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
-        stack.insertView(row, at: after, in: .top)
+        // Discord's accessories: the media, the embeds, the stickers, then what follows them.
+        let before = stack.views(in: .top).firstIndex(of: extras) ?? 0
+        stack.insertView(row, at: before, in: .top)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         stickers = row
         return row

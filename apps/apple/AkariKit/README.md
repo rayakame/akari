@@ -112,6 +112,27 @@ screen, so views render from them without calling into Rust.
   list, from the held preview. `replyWasRefused(_:)` says whether a failed message is a reply
   Discord refused for its deleted message (`RequestError.ReplyTargetDeleted` on its send or
   retry, until the next retry or its discard); the row has it as `replyRefused`.
+- `EditModel` (`messages.editor`) is the channel's edit of one of the user's messages in its
+  row (`docs/ui/edit-delete.md`): `editing` (the row's message, a refusal's `EditProblem` and
+  `opening`, which counts the times the editor takes `text` and the focus), `text` as the
+  editor writes it, `remaining` from a tenth of the limit (`messageLengthLimit`, 4,000 with
+  Nitro). One per channel, kept with its text in the session's drafts while other channels are
+  open. `start(_:)` opens it where `MessageActions.edit` allows (Edit, Edit Message, and Up
+  arrow through `messages.editNewest()`, the core's `newestEditableMessage`), `cancel()` is
+  Escape and "cancel", `save()` Return and "save": unchanged text sends nothing, emptied text on
+  a message without attachments or stickers asks to delete it (the session's
+  `deleteQuestion`), text past the limit stays with `.tooLong`, anything else closes the editor
+  and goes to `Account.editMessage`. A refusal opens the editor again with the saved text and
+  `.refused(error)`, from the message's `edit` (`.failed`) or the thrown error, whichever comes
+  first, then `dismissEdit`; one waits while another edit is open and opens when that ends or
+  the channel opens again, also one refused before asking, which the core keeps no record of
+  (the session's drafts keep it). `.Deleted` opens nothing. The edit ends when its message is
+  deleted (bulk deletes too), in a channel that isn't open too (the session's batch), or when
+  the list's loaded rows would show it and don't (a delete nothing told of, seen as the channel
+  opens or loads), and a thread's starter row's edit when the message it shows goes. An end
+  the user made gives the composer the focus (`focusRequests`); any other only while the
+  host's editor has it (`editorFocused`). `MessageListModel.escape()` and
+  `SessionModel.escape(from:)` end an edit before a pending reply, per pane.
 - `ViewerModel` is the media viewer's (`docs/ui/viewer.md`): `attachments(of:from:shows:)` and
   `embed(_:from:)` pick the items a click opens (a message's shown images and videos, an embed's
   gallery, its image or GIFV alone), and `messages.viewer(_:at:of:)` makes the model with the
@@ -168,13 +189,18 @@ waits in `membershipError`, in Discord's words, until `dismissMembershipError()`
 `messageActions(for:copy:)` gives a list its `MessageActionsModel`: what a message's hover bar
 (`bar(for:shift:)`, the longer row with Shift held) and menu (`menu(for:)`, in groups) list, as
 `MessageActionItem`s (the action, the official client's words, an SF Symbol, enabled, destructive)
-in the official client's order, and `perform(_:on:shift:)` for a click. The orders are three
+in the official client's order, and `perform(_:on:shift:from:)` for a click (`from`: the bar or
+the menu). The orders are three
 tables in the model (`barOrder`, `shiftBarOrder`, `menuOrder`) that name every action, also
 those whose feature isn't built; one switch (`Offer.has`) says which show, from `Store.messageActions`, asked
 every time since nothing announces a change. Today: Reply (`ComposerModel.startReply`, Shift
 as it is at the click; a message the user can edit has it in the Shift row only), Copy Text,
 Copy Message Link (the link is the core's, `Store.messageLink`), Mark Unread, Create Thread,
-View Thread, and Retry and Delete for a failed send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
+View Thread, Edit (the list's `EditModel.start`), Delete (a failed send at once, without a
+request; Shift at the click deletes at once; otherwise `SessionModel.deleteQuestion`, a
+`MessageActionsModel.DeleteQuestion` with the row and, from the menu, the Shift tip, until
+`answerDeleteQuestion(_:)`; a refusal waits in `messageActionFailure`), and Retry for a failed
+send. `markUnread(from:)` (the item, the button, an Option-click) puts the list's
 new messages line over the message at once, asks `Account.markUnread`, and on a refusal puts the
 line back and leaves one `messageActionFailure` on the session, in Akari's words, until
 `dismissMessageActionFailure()`; a mark the core says was replaced (`MarkOutcome.replaced`: an
@@ -244,8 +270,9 @@ newest messages). When the jump left the present, `replyReturn` names the reply 
 jump ends it. `shownJump` is the last jump a view
 scrolled to, so a view made later doesn't repeat it. `replyingTo` is the message the pending
 reply answers. `SessionModel.escape(from:)` takes the pane the key was pressed in: an open
-New Thread form closes first, then a pending reply is cancelled (that pane's before the other's)
-and nothing else happens; `MessageListModel.escape()` cancels its own reply the same way.
+New Thread form closes first, then that pane's edit, then its pending reply, then the other
+pane's edit and reply, and nothing else happens; `MessageListModel.escape()` ends its own edit
+and reply the same way.
 The session tells the core which lists the window shows (`Account.setOpenChannels`: the open
 channel or forum and the split thread), from the setters of `messages`, `forum` and `split`, so
 every way a list goes says so: a channel marked unread stays unread until its list goes, whatever

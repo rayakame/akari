@@ -81,7 +81,10 @@ These keep the values Akari had; each needs an official screenshot that shows it
 | Notes in the list (attachments, "Not sent.", load errors) | 14 regular | not shown |
 | A reply's line: the name, the text, the words in place of a text | 14 medium, 14 regular, 14 italic, on an 18 line | from the official stylesheet (canary 671549), not a screenshot |
 | The reply bar: "Replying to", the name, "ON" and "OFF" | 14 regular, 14 semibold, 14 semibold, on an 18 line | from the official stylesheet (canary 671549), not a screenshot |
-| Small notes (edited mark, times of system messages, the composer's strip and counter, "Catching up…", DM member counts) | 12 regular | not shown |
+| Small notes (times of system messages, the composer's strip and counter, the editor's hint line and a refused edit's reason, "Catching up…", DM member counts) | 12 regular | not shown |
+| "(edited)" | 10 regular | from the official stylesheet (canary 671549), not a screenshot |
+| The editor's counter | 14 semibold, digits of one width | from the official code (canary 671549) |
+| The delete question: title, question, tip | 20 semibold on a 24 line, 16 regular, 14 regular with "delete message" semibold | Akari's modal |
 | Jump bar | 14 medium | not shown |
 | Connection bar, warning line | 13 medium, 13 regular | Akari's own |
 | Message formatting: headings 1–3, subtext, code blocks, jumbo emoji | 24/32, 20/28, 16/22 bold; 13/18; 14/18 mono; 48/56 | not shown |

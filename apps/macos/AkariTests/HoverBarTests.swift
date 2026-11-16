@@ -16,6 +16,7 @@ final class BarList {
     var shift = false
     var popped: [(titles: [String], view: NSView, point: NSPoint, moreSelected: Bool)] = []
     private(set) var rows: [MessageListModel.Row] = []
+    var editing: EditModel.Editing?
 
     static let plain: [MessageAction] = [.createThread, .more]
     static let shifted: [MessageAction] = [.copyLink, .markUnread, .createThread, .more]
@@ -62,7 +63,7 @@ final class BarList {
                 actions.bars[row.id.rawValue] = (Self.plain, Self.shifted)
             }
         }
-        controller.show(MessageTableState(rows: rows, reachedOldest: true))
+        controller.show(MessageTableState(rows: rows, reachedOldest: true, editing: editing))
         window.layoutIfNeeded()
     }
 
@@ -1577,7 +1578,7 @@ struct MessageBridgeTests {
         #expect(
             bridge.messageMenu(for: message).map { $0.map(\.action) }
                 == [[.createThread], [.copyText, .markUnread, .copyLink]])
-        bridge.perform(.copyText, on: message, shift: false)
+        bridge.perform(.copyText, on: message, shift: false, from: .menu)
         #expect(copied.texts == ["hello"])
         bridge.markUnread(from: message)
         try await eventually { account.marked.withLock { $0 } == ["10 2"] }

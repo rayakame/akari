@@ -10,12 +10,13 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 |---|---|---|
 | Send | Return | Done |
 | New line | Shift+Return | Done; Option+Return too |
-| Edit the last message | Up arrow in an empty composer | Reserved: the key is taken, editing comes later |
-| Mark the channel read, or cancel an edit or reply | Escape | Done: cancels a pending reply first; else marks the channel read and jumps to the present (below) |
+| Edit the last message | Up arrow in an empty composer | Done: the newest loaded message the user may edit ([edit-delete.md](edit-delete.md#starting-an-edit)) |
+| Save an edit, a new line in it, cancel it | Return, Shift+Return, Escape in the editor | Done; Option+Return adds a line too ([edit-delete.md](edit-delete.md#keys)) |
+| Mark the channel read, or cancel an edit or reply | Escape | Done: ends an open edit first, then a pending reply, the pane's own before the other pane's; else marks the channel read and jumps to the present (below) |
 | Mark the server read | Shift+Escape | Done |
 | Mark unread from a message | Alt+click on it | Done: Option-click anywhere in the message's box but on its buttons ([message-actions.md](message-actions.md#mark-unread)) |
 | The longer hover bar | Shift held over a message | Done: Copy Link and Mark Unread come first; the bar changes while the pointer rests |
-| An action without its question, a reply without its ping | Shift+click on Delete, Pin, Reply | Reply: done, in the hover bar and the menu ([replies.md](replies.md#starting-a-reply)); Delete and Pin later, with each feature. Shift counts as it is at the click |
+| An action without its question, a reply without its ping | Shift+click on Delete, Pin, Reply | Reply and Delete: done, in the hover bar and the menu ([replies.md](replies.md#starting-a-reply), [edit-delete.md](edit-delete.md#deleting)); Pin later. Shift counts as it is at the click |
 | A focused message's keys: E edit, R reply, P pin, Backspace delete, + react, F forward, T thread, Cmd+C copy text, Alt+Enter mark unread | on a message with keyboard focus (Tab or the arrows) | Later: Akari's messages take no keyboard focus yet |
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
@@ -36,14 +37,16 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
 ## Notes
 
 - **Up arrow.** Discord's blog describes Up arrow in an empty composer. Its support article
-  lists Shift+Up (Option+Up on macOS) for the same action. Akari follows the blog; the key
-  does nothing until editing exists, and never beeps.
+  lists Shift+Up (Option+Up on macOS) for the same action. Akari follows the blog and the code
+  read (canary 671549): the key edits the newest loaded message the user may edit, and with
+  none does nothing and never beeps.
 - **Escape.** In Discord, Escape marks the open channel as read and cancels an edit or a
   reply in progress; it also jumps to the present from a list scrolled up, and with nothing
-  unread it sends nothing. Akari has no edits yet. With a reply pending, Escape cancels it and
-  does nothing else: nothing is marked read, nothing scrolls and what was typed stays; in the
-  split view the reply of the pane the key was pressed in goes first, then the other pane's
-  ([replies.md](replies.md#escape)). Otherwise Escape marks the channel read
+  unread it sends nothing. With an edit open, Escape from the composer or the list ends it and
+  does nothing else; in the editor itself Escape cancels it. With a reply pending, Escape cancels
+  it and does nothing else: nothing is marked read, nothing scrolls and what was typed stays. In
+  the split view the pane the key was pressed in goes first, whole: its edit, its reply, then the
+  other pane's edit and reply ([replies.md](replies.md#escape)). Otherwise Escape marks the channel read
   and jumps to the present: it loads the newest messages if the list shows older ones, and
   scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
   ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this
@@ -67,10 +70,10 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   marks nothing read, and Cmd+Shift+. doesn't mark the server read. In the composer it does
   nothing, as in the official client (**unverified**); in the message list and a message's
   text AppKit handles it as usual.
-- **Escape with something open.** A pending reply and the New Thread form take Escape first,
-  as above. The emoji picker, the media viewer and the other panels have the keyboard while
-  they show, and Escape closes them and marks nothing read, as in the official client's
-  handler. Once Akari has edits, Escape cancels one first.
+- **Escape with something open.** An edit, a pending reply and the New Thread form take Escape
+  first, as above. The emoji picker, the media viewer, the delete question and the other panels
+  have the keyboard while they show, and Escape closes them and marks nothing read, as in the
+  official client's handler.
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
   give the same keys. In Akari it jumps to the first unread message, as a click on the unread

@@ -208,6 +208,8 @@ final class ChildWindows {
     var refocus: () -> Void = {}
     var focus = WindowFocus()
 
+    var closesOnDeactivate = true
+
     init(keyable: Bool) {
         self.keyable = keyable
     }
@@ -302,10 +304,12 @@ final class ChildWindows {
             observers.append(
                 center.addObserver(forName: name, object: parent, queue: nil, using: closing))
         }
-        observers.append(
-            center.addObserver(
-                forName: NSApplication.didResignActiveNotification, object: nil, queue: nil,
-                using: closing))
+        if closesOnDeactivate {
+            observers.append(
+                center.addObserver(
+                    forName: NSApplication.didResignActiveNotification, object: nil, queue: nil,
+                    using: closing))
+        }
     }
 
     /// Takes the windows away; `refocus` gives the session's window the key back.
@@ -344,6 +348,7 @@ struct ChildWindowsHost: NSViewRepresentable {
     var dimmed = false
     var label: String?
     var fitsWidth = false
+    var closesOnDeactivate = true
     var onClose: () -> Void = {}
     var refocus: () -> Void = {}
 
@@ -374,6 +379,7 @@ struct ChildWindowsHost: NSViewRepresentable {
         windows.refocus = refocus
         windows.label = label
         windows.fitsWidth = fitsWidth
+        windows.closesOnDeactivate = closesOnDeactivate
         let content = content
         let frame = frame
         let dimmed = dimmed

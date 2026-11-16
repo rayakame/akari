@@ -52,9 +52,12 @@ The official placeholder measured `#6c6d75` on the dark theme, darker than `text
 - **Shift+Return**, **Option+Return** and **Ctrl+Return** start a new line.
 - **Return while an input method is composing** (Japanese, Chinese and other input sources)
   commits the composition; it never sends.
-- **Up arrow in an empty composer** edits the user's last message in the official client.
-  Akari reserves the key for that and does nothing yet.
-- **Escape** cancels a pending reply first, see [shortcuts.md](shortcuts.md).
+- **Up arrow in an empty composer** edits the user's last message: the core's answer,
+  `Store::newest_editable_message`, the newest loaded message whose actions allow `edit`,
+  wherever the list is ([messages.md](../protocol/messages.md#up-arrow)). The editor opens in
+  that message's row and takes the focus; the composer takes it back when the edit ends
+  ([edit-delete.md](edit-delete.md)).
+- **Escape** ends an open edit first, then a pending reply, see [shortcuts.md](shortcuts.md).
 
 Pasted text arrives as plain text. Smart quotes, smart dashes, text replacement and automatic
 spelling correction are off, since they would change markdown and code; the official client

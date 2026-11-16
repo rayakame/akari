@@ -297,6 +297,7 @@ pub(crate) struct Shared {
     // Wakes the post-data task when cards want their posts' first messages.
     previews: Arc<previews::Wake>,
     wishes: reactions::Wishes,
+    editing: edits::Editing,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -633,6 +634,19 @@ impl Shared {
             .messages(channel)
             .is_some_and(|window| window.messages.is_empty());
         empty.then_some(cache)
+    }
+
+    // The official client opens an archived thread before a reaction, an edit or a delete there.
+    async fn open_archived(&self, channel: ChannelId) -> Result<(), RequestError> {
+        let archived = self
+            .store
+            .channel(channel)
+            .and_then(|channel| channel.thread.as_deref().map(|thread| thread.archived))
+            .unwrap_or(false);
+        if archived {
+            self.rest.unarchive_thread(channel).await?;
+        }
+        Ok(())
     }
 
     // A 401 means the token is gone, like the gateway's 4004: the UI has to log in again.
@@ -1483,6 +1497,7 @@ impl Account {
                 forum_unreads_wait,
                 previews: Arc::default(),
                 wishes: reactions::Wishes::default(),
+                editing: edits::Editing::default(),
             }
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -2327,6 +2342,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
 
 mod acks;
 mod deadlines;
+mod edits;
 mod expressions;
 mod previews;
 mod reactions;

@@ -18,6 +18,8 @@ struct ComposerView: View {
     var onFocused: () -> Void = {}
     /// A click on the reply bar: to the message the reply answers.
     var onReplyJump: (MessageId) -> Void = { _ in }
+    /// Up arrow in the empty composer.
+    var onEditLast: () -> Void = {}
     @State private var height: CGFloat = 56
 
     var body: some View {
@@ -57,7 +59,7 @@ struct ComposerView: View {
                 },
                 onEscape: onEscape, onShiftEscape: onShiftEscape, onShiftPageUp: onShiftPageUp,
                 onAttach: onAttach, autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused,
-                focusRequests: composer.focusRequests
+                focusRequests: composer.focusRequests, onEditLast: onEditLast
             )
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
@@ -108,8 +110,9 @@ struct ComposerField: NSViewRepresentable {
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}
-    /// Counts the model's requests for the focus: a reply was started.
+    /// Counts the model's requests for the focus: a reply was started, an edit ended.
     var focusRequests = 0
+    var onEditLast: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -138,6 +141,7 @@ struct ComposerField: NSViewRepresentable {
         textView.onEscape = onEscape
         textView.onShiftEscape = onShiftEscape
         textView.onShiftPageUp = onShiftPageUp
+        textView.onEditLastMessage = onEditLast
         context.coordinator.measure()
         context.coordinator.focusIfAsked()
         if context.coordinator.focusRequests != focusRequests {

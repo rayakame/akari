@@ -13,7 +13,8 @@ from it at once; READY then brings only what changed. Linux and Android get it w
 - The token. Nor READY's `analytics_token` or `auth_session_id_hash`: the state layer doesn't
   keep them, so nothing can write them.
 - Pending and failed messages (the outbox), drafts, slowmode cooldowns and the gateway
-  session (no resume across launches). Each holds what the user typed or needs the exact state
+  session (no resume across launches). Nor an edit Discord hasn't confirmed: such a message is
+  written with Discord's text ([messages.md](messages.md#an-edit-on-its-way)). Each holds what the user typed or needs the exact state
   at the end of a session, so each is its own decision for later.
 - Images: they have their own files and index ([cdn.md](cdn.md)).
 - Blocked, ignored and befriended users. They decide which live messages count as mentions and
