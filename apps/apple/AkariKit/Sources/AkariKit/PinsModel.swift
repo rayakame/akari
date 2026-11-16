@@ -110,15 +110,20 @@ public final class PinsModel {
 
     /// "Load more messages".
     public func loadMore() async {
-        guard hasMore, state != .loading else {
+        guard hasMore, state != .loading, !asking else {
             return
         }
         let shown = rows.map(\.id)
         state = .loading
         loadingMore = true
+        asking = true
         try? await account.loadMorePins(channelId: channelId)
+        asking = false
         reread()
         endSpent = rows.map(\.id) == shown
+        if askAgain {
+            await load()
+        }
     }
 
     /// The failed state's button.
@@ -174,7 +179,8 @@ public final class PinsModel {
         }
     }
 
-    // A new session during a load drops its page, so a call meanwhile asks once more after it.
+    // A call while a page loads asks once more after it: the core takes none then, and a new
+    // session drops the one loading.
     private func load() async {
         guard !asking else {
             askAgain = true

@@ -732,8 +732,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
-    // As the core: `.loading` at once, then the page `pinsAfterLoad` (`pinsAfterMore`) held as the
-    // call began, else the list as it was; `.failed` with it after `pinLoadError`.
+    // As the core: nothing while a page loads, else `.loading` at once, then the page
+    // `pinsAfterLoad` (`pinsAfterMore`) held as the call began, else the list as it was; `.failed`
+    // with it after `pinLoadError`.
     let pinsAfterLoad = Locked<[ChannelId: PinsPage]>([:])
     let pinsAfterMore = Locked<[ChannelId: PinsPage]>([:])
     let pinLoadError = Locked<RequestError?>(nil)
@@ -759,7 +760,12 @@ final class FakeAccount: Account, @unchecked Sendable {
         var before = PinsPage(items: [], hasMore: false, state: .notLoaded)
         fakeStore.update { state in
             before = state.pins[channel] ?? before
-            state.pins[channel] = PinsPage(items: before.items, hasMore: before.hasMore, state: .loading)
+            if before.state != .loading {
+                state.pins[channel] = PinsPage(items: before.items, hasMore: before.hasMore, state: .loading)
+            }
+        }
+        guard before.state != .loading else {
+            return
         }
         if holdPinLoads.current {
             _ = await pinLoadReplies.next()

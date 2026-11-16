@@ -419,6 +419,27 @@ final class PinsModelTests {
         session.close()
     }
 
+    // The core takes no first page while a later one loads, as after a new pin: it's asked after.
+    @Test
+    func aFirstPageAskedWhileALaterOneLoadsIsAskedAfterIt() async throws {
+        store.update { $0.pins[id(11)] = self.pins([103], more: true) }
+        let session = session()
+        let pins = try await opened(session)
+        account.holdPinLoads.withLock { $0 = true }
+        account.pinsAfterMore.withLock { $0[id(11)] = self.pins([103, 102]) }
+        account.pinsAfterLoad.withLock { $0[id(11)] = self.pins([104, 103, 102]) }
+        let paging = Task { await pins.loadMore() }
+        try await eventually { self.store.log.calls.contains(.loadMorePins(id(11))) }
+        account.holdPinLoads.withLock { $0 = false }
+
+        await pins.retry()
+        account.pinLoadReplies.send(())
+        await paging.value
+
+        #expect(shown(pins) == [104, 103, 102])
+        session.close()
+    }
+
     // The core drops a page asked before a new session, which leaves the list `.notLoaded`.
     @Test
     func aNewSessionWhileTheFirstPageLoadsAsksAgainOnceItEnds() async throws {
