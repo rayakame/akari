@@ -58,6 +58,12 @@ last read, never opened), and acks a forum being read at "now"; it asks Discord 
 are new in the open forum's opened posts (op 28, each post once per connection) and keeps the
 counts with messages and acks, says what the user may post in a forum (the tags they may apply, a
 required tag) and creates posts with the forum's slowmode, the user's own post read for its forum;
+it keeps each message's reactions, counted live by the reaction dispatches on every copy of the
+message, with an event and a read of their own; the messages replies answer in a store of their
+own (loaded, deleted or not loaded, bounded per channel, kept current by edits and deletes);
+whether a channel has pins the user hasn't seen (the pins dot); and says what the user may do
+with a message (`MessageActions`: reply, edit, delete, pin, react, mark unread, copy its link,
+create or view its thread, by the official client's rules);
 `akari_core::media` gets images: keys by Discord's
 IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
 without the token on a client of their own (eight at a time, newest first, one per image however
@@ -77,15 +83,16 @@ under its one image, and the same covers, a spoilered link covering them all), a
 channel waits behind the age gate, with the user's agreement per server in the cache, and whether
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
-messages, show where a channel's unread state and mentions come from, and get an image as the app
-would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+messages with their reactions and what a reply answers, show where a channel's unread state,
+mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+message's thumbnail), a message's reactions, what a reply answers, the pins dot and what the user
+may do with a message, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, the composer, the media viewer, the
 forum page and its form for a new post), the message

@@ -2867,6 +2867,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: stored(window),
+                        targets: Default::default(),
                     },
                 )]
                 .into(),
@@ -2994,6 +2995,82 @@ mod cache {
         assert_eq!(ids(&account), (2..=51).collect::<Vec<_>>());
         let window = account.store().messages(general()).unwrap();
         assert!(window.latest && !window.stale);
+    }
+
+    // The line over a cached reply is there with the reply, before any page comes.
+    #[tokio::test]
+    async fn a_cached_reply_shows_what_it_answers_after_a_restart() {
+        use crate::model::{MessageReferenceType, MessageType};
+        use crate::state::{MessageReference, ReplyPreview, ReplyTarget};
+
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        let target = MessageId::new(7);
+        let answered = stored([7]).remove(0);
+        let reply = Message {
+            kind: MessageType::Reply,
+            reference: Some(Box::new(MessageReference {
+                kind: MessageReferenceType::Default,
+                message_id: Some(target),
+                channel_id: Some(general()),
+                guild_id: None,
+            })),
+            ..(*stored([50]).remove(0)).clone()
+        };
+        let thread = CacheThread::start(dir.file(OWNER), UserId::new(OWNER));
+        thread
+            .flush(crate::cache::Snapshot {
+                entities: ready_entities(&fake, |_| {}),
+                windows: [(
+                    general(),
+                    crate::state::CachedWindow {
+                        viewed_at: 1,
+                        messages: vec![Arc::new(reply)],
+                        targets: [(
+                            (general(), target),
+                            ReplyTarget::Loaded(Arc::new(ReplyPreview::of(&answered))),
+                        )]
+                        .into(),
+                    },
+                )]
+                .into(),
+                ..crate::cache::Snapshot::default()
+            })
+            .await
+            .unwrap();
+        drop(thread);
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let account = Arc::new(account);
+        let subscription = restored(&account).await;
+        assert_eq!(
+            account.store().reply_target(general(), target),
+            ReplyTarget::NotLoaded,
+            "the channel isn't open yet"
+        );
+        mock_latest(&server, &[50], &[], Duration::from_secs(30)).await;
+        let loading = tokio::spawn({
+            let account = account.clone();
+            async move {
+                let _ = account
+                    .load_messages(general(), MessageLoad::Latest { limit: 50 })
+                    .await;
+            }
+        });
+
+        let events = events_until(&subscription, "MessagesStale(300000000000000002)").await;
+
+        assert!(
+            events.contains(&"MessagesLoaded(50..50)".to_owned()),
+            "{events:?}"
+        );
+        let ReplyTarget::Loaded(preview) = account.store().reply_target(general(), target) else {
+            panic!("expected the cached target");
+        };
+        assert_eq!(*preview, ReplyPreview::of(&answered));
+        let shown = account.store().messages(general()).unwrap().messages;
+        assert_eq!(shown[0].replied_to(), Some((general(), target)));
+        loading.abort();
     }
 
     #[tokio::test]
@@ -3144,7 +3221,14 @@ mod cache {
             .await
             .unwrap();
         account.flush_cache().await;
-        assert!(thread.read_window(general()).await.unwrap().is_empty());
+        assert!(
+            thread
+                .read_window(general())
+                .await
+                .unwrap()
+                .messages
+                .is_empty()
+        );
 
         let _connection = online(&mut fake, &account).await;
 
@@ -3202,7 +3286,10 @@ mod cache {
         account.view_channel(general());
         account.flush_cache().await;
 
-        assert_eq!(thread.read_window(general()).await.unwrap().len(), 50);
+        assert_eq!(
+            thread.read_window(general()).await.unwrap().messages.len(),
+            50
+        );
     }
 
     #[tokio::test]
@@ -3238,7 +3325,14 @@ mod cache {
 
         assert!(account.store().messages(general()).is_none());
         account.flush_cache().await;
-        assert!(thread.read_window(general()).await.unwrap().is_empty());
+        assert!(
+            thread
+                .read_window(general())
+                .await
+                .unwrap()
+                .messages
+                .is_empty()
+        );
         loading.abort();
     }
 
@@ -3771,6 +3865,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: stored(1..=50),
+                        targets: Default::default(),
                     },
                 )]
                 .into(),
@@ -3886,6 +3981,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: vec![starter],
+                        targets: Default::default(),
                     },
                 )]
                 .into(),

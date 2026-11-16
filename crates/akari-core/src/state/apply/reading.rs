@@ -252,8 +252,24 @@ impl State {
 
     // CHANNEL_UNREAD_UPDATE and PASSIVE_UPDATE_V2 come once, when a channel turns unread, so
     // they only ever move a channel's newest message forward, like everything but READY.
-    pub(super) fn note_unreads(&mut self, guild: GuildId, channels: &[ChannelUnread]) {
+    pub(super) fn note_unreads(
+        &mut self,
+        guild: GuildId,
+        channels: &[ChannelUnread],
+        events: &mut Vec<StoreEvent>,
+    ) {
         for unread in channels {
+            // Only a time that is there says something, as in the official client.
+            if let Some(pinned) = unread.last_pin_timestamp {
+                self.changing_pins(unread.id, events, |state| {
+                    if let Some(stored) = state.entities.channels.get_mut(&unread.id)
+                        && stored.guild_id == Some(guild)
+                        && stored.last_pin_timestamp != Some(pinned)
+                    {
+                        Arc::make_mut(stored).last_pin_timestamp = Some(pinned);
+                    }
+                });
+            }
             let Some(last) = unread.last_message_id else {
                 continue;
             };

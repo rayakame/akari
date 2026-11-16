@@ -65,14 +65,18 @@ Two details:
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
-| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. A thread with the user's `member` is joined ([Threads](#threads)). DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
-| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
+| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. A thread with the user's `member` is joined ([Threads](#threads)). DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer, and its `last_pin_timestamp` if the object has none; `PinsUnreadChanged` if the object's moved the pins dot. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
+| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it. `PinsUnreadChanged` if its `last_pin_timestamp` moved the pins dot |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
 | THREAD_MEMBER_UPDATE | `ThreadMemberUpdate` | The user's own thread member: the thread's membership, mute and level are replaced, `ChannelUpdated` ([Threads](#threads)) |
 | THREAD_MEMBERS_UPDATE | `ThreadMembersUpdate` | The user's ID in `added_members` joins the thread, in `removed_member_ids` leaves it: `ChannelUpdated`. Other members and `member_count` are ignored |
 | MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
-| MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
-| MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
+| MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated`. Patches a reply's target, loaded or not: `ReplyTargetChanged` ([messages.md](messages.md#replies)). Reactions stay |
+| MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message; a reply's target becomes deleted: `ReplyTargetChanged` |
+| MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE | `MessageReaction` | One user's reaction counts up or down on every copy of the message: `MessageReactionsChanged` for a loaded one ([Reactions](#reactions)) |
+| MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI | `MessageReactionRemoveAll`, `MessageReactionRemoveEmoji` | The message's reactions, or one emoji's, go: `MessageReactionsChanged` |
+| MESSAGE_REACTION_ADD_MANY | `MessageReactionAddMany` | Each listed user's reaction counts as an ADD; one `MessageReactionsChanged` |
+| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | The channel's newest pin's time, and the pin time the user acknowledged: `PinsUnreadChanged` when the pins dot changed ([read-states.md](read-states.md#pins)) |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
@@ -417,6 +421,86 @@ with each READY, and a post's with the post, however it leaves the store. `PostC
 { forum_id }` says to read them again: when a count changed, or a read post the user opened
 before got a message and now shows "1+".
 
+## Reactions
+
+The shapes are from the code read of canary 671549, not observed; everything but the IDs and
+the emoji falls back to a default when it is missing or in another shape.
+
+- MESSAGE_REACTION_ADD and MESSAGE_REACTION_REMOVE
+  ([reference](https://docs.discord.food/gateway/gateway-events#message-reaction-add)):
+  `channel_id`, `message_id`, `guild_id` (missing in DMs), `user_id`, `emoji` (`id`, `name`,
+  `animated`), `type` (0 normal, 1 burst: a super reaction; missing counts as 0) and the
+  older `burst` flag. The official client reads `type` and never `burst`; Akari takes either
+  to mean a burst reaction. `member`, `message_author_id` and `burst_colors` aren't read.
+- MESSAGE_REACTION_REMOVE_ALL: `channel_id`, `message_id`, `guild_id`.
+- MESSAGE_REACTION_REMOVE_EMOJI: the same and `emoji`; it takes the emoji's normal and burst
+  reactions at once.
+- MESSAGE_REACTION_ADD_MANY: `channel_id`, `message_id`, `guild_id` and `reactions`, each
+  `{users: [user id], emoji}`; a broken entry or user ID is skipped. It replaces
+  MESSAGE_REACTION_ADD on busy messages for sessions whose Identify names
+  `DEBOUNCE_MESSAGE_REACTIONS` (capability bit 13). Akari's doesn't, so it shouldn't come.
+  Nothing in an item names a type, and the official client applies each as a normal reaction.
+
+An emoji is the same as another when both have the same `id`, or neither has one and the
+`name`s are the same string; the official client compares no other way (no variation selector
+or skin tone is normalized).
+
+**In the store.** A message keeps its reactions (`state::Message::reactions`) as Discord
+listed them: per emoji the normal and the burst count and whether the user is in each (`me`,
+`me_burst`), from `count_details` (without it `count` is the normal count); an entry that counts
+nothing, such as a poll's answers (`count_details.vote`), is left out. `burst_colors` aren't
+kept. The dispatches change them as the official client's message record does [383233]:
+
+- An add for an emoji the message has counts up in place; a new emoji goes to the end.
+- The user's own add changes nothing when their flag is set, their own removal nothing when
+  it is clear: the echo of a click Akari already applied counts once. Other users' events
+  never change the user's flags.
+- A removal never takes a count below zero, and *Akari:* another user's removal never takes it
+  below the user's own reaction (the official client's would, and drops the entry).
+- An emoji whose two counts are both 0 leaves the list; when it comes back it is at the end.
+- In a DM (not a group DM) the other user's add for an emoji they are already counted for
+  changes nothing: they react once.
+- MESSAGE_UPDATE never changes reactions (the official client keeps the record's on every
+  update); a message that arrives whole again (a page, a refresh) replaces them, with
+  `MessageUpdated`.
+
+They reach every copy of the message the store holds: the window's row, a live message held
+back until its window is refreshed, a thread box's newest message, a forum post's first
+message (`Store::post_preview`) and the message a viewed thread started from. Events only for
+what shows them: `MessageReactionsChanged { channel_id, message_id }` for the window's row and
+for the starter row of each viewed thread showing the message (the thread's ID and the row's),
+`PostPreviewChanged` for a post's first message; nothing for a thread box, whose preview shows
+no reactions. `Store::reactions(channel, message)` reads them alone, so a click doesn't read the
+message again; a starter row's IDs answer for the message it shows.
+
+A reaction that comes while a page of its channel loads is kept and put over the page, like
+edits and deletes. Nothing says whether Discord built the page before or after the reaction,
+and a count, unlike an edit, would be wrong applied twice: where the window already had the
+message and wasn't stale, its copy counted every reaction since and the page's copy takes that
+copy's reactions; else the reaction is applied to the page's copy, which is right when the
+page was built first and counts one too many, or one too few for a removal, when Discord built
+the page after it: accepted, until the message arrives whole again. The same holds where the
+window has the message but is stale, as a page that refreshes it replaces its counts. Each
+kept change is put only over the pages whose load was running when it came, so two loads that
+overlap never apply it twice. A reaction to the message a thread started from, while the thread's page
+loads, isn't replayed onto the copy that page brings.
+
+`akari-cli read` and `tail` print each message's reactions under it (emoji, count, `*` for
+the user's own, the super reactions among them) and what a reply answers, and `tail` prints
+every `MessageReactionsChanged` and `ReplyTargetChanged` of its channel as a line of its own.
+
+## Pins
+
+From the code read of canary 671549, not observed:
+
+- CHANNEL_PINS_UPDATE: `channel_id`, `guild_id` and `last_pin_timestamp`, the channel's newest
+  pin's time (`null`, missing or anything that isn't a timestamp: none). What Discord sends
+  after an unpin isn't known.
+- CHANNEL_PINS_ACK: `channel_id`, `timestamp` (the pin time the user acknowledged) and
+  `version` (the read states' version). Whether the acking session gets it too isn't known.
+- CHANNEL_UPDATE and THREAD_UPDATE carry `last_pin_timestamp` like the channel object: missing
+  is unchanged, `null` none.
+
 ## Large guilds
 
 The reference says the gateway stops "sending non-stateful events for guilds without a
@@ -433,8 +517,9 @@ Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscript
 "periodically" instead of CHANNEL_UNREAD_UPDATE, which then comes only for directory
 channels. It carries only what changed: `updated_channels` (each channel's `id`,
 `last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
-`guild_id` and each channel's `id` and `last_message_id`, skipping a channel entry that
-doesn't parse, and the store raises those channels' `last_message_id`.
+`guild_id` and each channel's `id`, `last_message_id` and `last_pin_timestamp` (a broken pin
+time is none), skipping a channel entry that doesn't parse, and the store raises those
+channels' `last_message_id` and takes a pin time that is there ([read-states.md](read-states.md#pins)).
 
 Observed on 2026-10-15 with akari-cli on a test account:
 
@@ -499,7 +584,8 @@ and applies each event.
   stands for `SEND_MESSAGES_IN_THREADS`. A timeout leaves only `VIEW_CHANNEL` and
   `READ_MESSAGE_HISTORY`, AutoMod quarantine also `CHANGE_NICKNAME`. Without `VIEW_CHANNEL`
   nothing is left. READY sends channels the user can't see, and the official client hides
-  them.
+  them. DMs and group DMs have no computed permissions; what a message's actions take them to
+  grant is in [message-actions.md](../ui/message-actions.md#the-terms).
 
 ### Message windows
 

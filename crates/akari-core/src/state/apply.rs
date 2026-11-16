@@ -9,7 +9,9 @@ use super::clock::Clock;
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
+use super::reactions::{ReactionChange, ReactionEmoji};
 use super::read_states::{Ack, ReadStates};
+use super::replies::ReplyTarget;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     DisplaySettings, GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
@@ -20,7 +22,8 @@ use super::types::{
     ThreadMembership, User,
 };
 use super::windows::{
-    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits, Windows,
+    CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch,
+    WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
@@ -165,6 +168,23 @@ impl Entities {
         }
         self.unavailable.remove(&id);
         self.guilds.insert(id, Arc::new(guild));
+    }
+
+    // The official client's rule: the newest pin is past the one acknowledged, in a channel that
+    // can be unread (not muted, not a thread the user hasn't joined).
+    pub(crate) fn pins_unread(&self, channel: ChannelId, now: Timestamp) -> bool {
+        let Some(stored) = self.channels.get(&channel) else {
+            return false;
+        };
+        let Some(pinned) = stored.last_pin_timestamp else {
+            return false;
+        };
+        let unjoined = stored.thread.as_deref().is_some_and(|info| !info.joined());
+        if unjoined || self.channel_muted_at(channel, now) {
+            return false;
+        }
+        let acked = self.read_states.pins_acked(channel);
+        pinned.unix_millis() > acked.map_or(0, Timestamp::unix_millis)
     }
 
     // A thread's own mute is on its member; neither a muted channel nor a muted category mutes it.
@@ -375,6 +395,8 @@ pub(crate) struct State {
     recounts: HashMap<ChannelId, MessageId>,
     // The memberships of joined threads in guilds that are down, for their GUILD_CREATE.
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
+    // The channels of guilds that are down, whose read states go if the user leaves meanwhile.
+    outage_channels: HashMap<GuildId, Vec<ChannelId>>,
     // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
     pending_joins: HashMap<ChannelId, ThreadMembership>,
     // Threads Get Channel refused or didn't find, for the session.
@@ -432,6 +454,7 @@ impl State {
             journal: None,
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
+            outage_channels: HashMap::new(),
             pending_joins: HashMap::new(),
             unavailable_threads: HashSet::new(),
             fetched_threads: HashSet::new(),
@@ -694,6 +717,20 @@ impl State {
         let implied = |channel: &Channel| channel.guild_id.is_some_and(|id| !kept.contains(&id));
         push_channel_changes(&old.channels, &next.channels, implied, events);
 
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        let mut dots: Vec<ChannelId> = next
+            .channels
+            .keys()
+            .filter(|id| old.channels.contains_key(id))
+            .filter(|id| old.pins_unread(**id, now) != next.pins_unread(**id, now))
+            .copied()
+            .collect();
+        dots.sort_unstable();
+        events.extend(
+            dots.into_iter()
+                .map(|channel_id| StoreEvent::PinsUnreadChanged { channel_id }),
+        );
+
         if old.server_list() != next.server_list() {
             events.push(StoreEvent::ServerListChanged);
         }
@@ -869,10 +906,10 @@ impl State {
             }
             E::MessageAck(ack) => self.apply_ack(&ack),
             E::ChannelUnreadUpdate(update) => {
-                self.note_unreads(update.guild_id, &update.channel_unread_updates);
+                self.note_unreads(update.guild_id, &update.channel_unread_updates, events);
             }
             E::PassiveUpdateV2(update) => {
-                self.note_unreads(update.guild_id, &update.updated_channels);
+                self.note_unreads(update.guild_id, &update.updated_channels, events);
             }
             E::RelationshipAdd(relationship) => {
                 let user = relationship.id;
@@ -893,7 +930,65 @@ impl State {
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
             E::ForumUnreads(unreads) => self.forum_unreads(&unreads),
             E::Resumed => self.forget_unanswered_forum_unreads(),
+            E::MessageReactionAdd(reaction) => self.reaction_event(*reaction, true, events),
+            E::MessageReactionRemove(reaction) => self.reaction_event(*reaction, false, events),
+            E::MessageReactionRemoveAll(removal) => self.react(
+                removal.channel_id,
+                removal.message_id,
+                &[ReactionChange::RemoveAll],
+                events,
+            ),
+            E::MessageReactionRemoveEmoji(removal) => {
+                if let Some(emoji) = ReactionEmoji::from_wire(removal.emoji) {
+                    self.react(
+                        removal.channel_id,
+                        removal.message_id,
+                        &[ReactionChange::RemoveEmoji(emoji)],
+                        events,
+                    );
+                }
+            }
+            E::MessageReactionAddMany(many) => self.reactions_added(*many, events),
+            E::ChannelPinsUpdate(update) => {
+                self.changing_pins(update.channel_id, events, |state| {
+                    if let Some(stored) = state.entities.channels.get_mut(&update.channel_id)
+                        && stored.last_pin_timestamp != update.last_pin_timestamp
+                    {
+                        Arc::make_mut(stored).last_pin_timestamp = update.last_pin_timestamp;
+                    }
+                });
+            }
+            E::ChannelPinsAck(ack) => {
+                self.changing_pins(ack.channel_id, events, |state| {
+                    let newest = state
+                        .entities
+                        .channels
+                        .get(&ack.channel_id)
+                        .and_then(|stored| stored.last_pin_timestamp);
+                    // Without a time the official client takes it to be for the newest pin.
+                    let acked = ack.timestamp.filter(|time| time.unix_millis() > 0);
+                    if let Some(acked) = acked.or(newest) {
+                        state.entities.read_states.ack_pins(ack.channel_id, acked);
+                    }
+                });
+            }
             E::Other(_) => {}
+        }
+    }
+
+    fn changing_pins(
+        &mut self,
+        channel: ChannelId,
+        events: &mut Vec<StoreEvent>,
+        change: impl FnOnce(&mut Self),
+    ) {
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        let before = self.entities.pins_unread(channel, now);
+        change(self);
+        if self.entities.pins_unread(channel, now) != before {
+            events.push(StoreEvent::PinsUnreadChanged {
+                channel_id: channel,
+            });
         }
     }
 
@@ -945,6 +1040,8 @@ impl State {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
+            // Absent in most thread objects; only CHANNEL_PINS_UPDATE takes the last pin away.
+            channel.last_pin_timestamp = channel.last_pin_timestamp.or(known.last_pin_timestamp);
             if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
                 // An absent member isn't a leave: only a members update or READY says so.
                 if info.member.is_none() {
@@ -979,11 +1076,17 @@ impl State {
         match self.entities.channels.get(&id) {
             Some(known) if *known == channel => {}
             Some(_) => {
-                self.entities.channels.insert(id, channel.clone());
+                let stored = channel.clone();
+                self.changing_pins(id, events, |state| {
+                    state.entities.channels.insert(id, stored);
+                });
                 events.push(StoreEvent::ChannelUpdated(channel));
             }
             None => {
-                self.entities.channels.insert(id, channel.clone());
+                let stored = channel.clone();
+                self.changing_pins(id, events, |state| {
+                    state.entities.channels.insert(id, stored);
+                });
                 // The open forum came after it was opened: its visit begins now.
                 self.find_forum_position(id, events);
                 events.push(StoreEvent::ChannelAdded(channel));
@@ -1058,7 +1161,10 @@ impl State {
             self.mark_channel(&next);
             self.threads.remove(&known);
             self.threads.add(&next);
-            self.entities.channels.insert(id, next.clone());
+            let stored = next.clone();
+            self.changing_pins(id, events, |state| {
+                state.entities.channels.insert(id, stored);
+            });
             events.push(StoreEvent::ChannelUpdated(next.clone()));
             if self.drop_stale_latest(id, known.last_message_id) {
                 self.reread_boxes(id, events);
@@ -1261,6 +1367,7 @@ impl State {
             return;
         };
         self.outage_members.retain(|_, (guild, _)| *guild != id);
+        self.outage_channels.remove(&id);
         for channel in next.channels.keys() {
             self.pending_joins.remove(channel);
         }
@@ -1337,12 +1444,14 @@ impl State {
         } else if self.entities.guilds.contains_key(&delete.id)
             || self.entities.unavailable.contains(&delete.id)
         {
+            let down = self.outage_channels.remove(&delete.id).unwrap_or_default();
             let channels: Vec<ChannelId> = self
                 .entities
                 .channels
                 .values()
                 .filter(|channel| channel.guild_id == Some(delete.id))
                 .map(|channel| channel.id)
+                .chain(down)
                 .collect();
             for channel in channels {
                 self.entities.read_states.forget(channel);
@@ -1371,19 +1480,25 @@ impl State {
     }
 
     fn stash_members(&mut self, guild: GuildId) {
+        let mut channels = Vec::new();
         for channel in self.entities.channels.values() {
-            if channel.guild_id == Some(guild)
-                && let Some(member) = channel.thread.as_deref().and_then(|info| info.member)
-            {
+            if channel.guild_id != Some(guild) {
+                continue;
+            }
+            channels.push(channel.id);
+            if let Some(member) = channel.thread.as_deref().and_then(|info| info.member) {
                 self.outage_members.insert(channel.id, (guild, member));
             }
         }
+        self.outage_channels.insert(guild, channels);
     }
 
     // Before the swap: a guild READY lists as down keeps its threads' memberships until it's back.
     fn keep_outage_members(&mut self, next: &Entities) {
         self.outage_members
             .retain(|_, (guild, _)| next.unavailable.contains(guild));
+        self.outage_channels
+            .retain(|guild, _| next.unavailable.contains(guild));
         let down: Vec<GuildId> = next
             .unavailable
             .iter()
@@ -1580,10 +1695,10 @@ impl State {
     pub(crate) fn fill_from_cache(
         &mut self,
         ticket: LoadTicket,
-        messages: Vec<Arc<Message>>,
+        cached: CachedMessages,
         events: &mut Vec<StoreEvent>,
     ) {
-        self.windows.fill_from_cache(ticket, messages, events);
+        self.windows.fill_from_cache(ticket, cached, events);
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
@@ -1966,6 +2081,35 @@ impl State {
         self.entities.permissions(channel, now_millis)
     }
 
+    pub(crate) fn pins_unread(&self, channel: ChannelId, now: Timestamp) -> bool {
+        self.entities.pins_unread(channel, now)
+    }
+
+    pub(crate) fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {
+        self.windows.reply_target(channel, target)
+    }
+
+    pub(crate) fn reply_targets(
+        &self,
+        channel: ChannelId,
+        targets: &[MessageId],
+    ) -> Vec<ReplyTarget> {
+        targets
+            .iter()
+            .map(|target| self.windows.reply_target(channel, *target))
+            .collect()
+    }
+
+    pub(crate) fn reply_mentions_author(&self, reply: &Message) -> bool {
+        let Some((channel, target)) = reply.replied_to() else {
+            return false;
+        };
+        match self.windows.reply_target(channel, target) {
+            ReplyTarget::Loaded(preview) => reply.mentions_user(preview.author.id),
+            ReplyTarget::Deleted | ReplyTarget::NotLoaded => false,
+        }
+    }
+
     pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
         self.windows.starter_message(thread)
     }
@@ -2103,11 +2247,13 @@ pub(crate) fn wall_millis() -> i64 {
         })
 }
 
+mod actions;
 mod boxes;
 mod browser;
 mod creating;
 mod forum;
 mod media;
+mod reactions;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};

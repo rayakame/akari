@@ -4,7 +4,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use akari_core::model::{ChannelId, ChannelType, GuildId, MessageId, Permissions, Snowflake};
-use akari_core::state::{Channel, ConnectionState, Delivery, Message, StoreEvent, display_order};
+use akari_core::state::{
+    Channel, ConnectionState, Delivery, Message, Reaction, ReplyTarget, Store, StoreEvent,
+    display_order,
+};
 use akari_core::{DiscordClient, MessageLoad, RequestError};
 use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
@@ -14,6 +17,7 @@ use crate::session::{self, Session, closed_message};
 use crate::{printable, report};
 
 const TAIL_BACKLOG: u8 = 20;
+const TARGET_START: usize = 60;
 
 /// Commands that need a session.
 #[derive(Subcommand)]
@@ -22,7 +26,8 @@ pub enum SessionCommand {
     Guilds,
     /// List a guild's channels you can see, in Discord's order.
     Channels { guild_id: u64 },
-    /// Print a channel's latest messages, oldest first.
+    /// Print a channel's latest messages, oldest first, each with what it replies to and its
+    /// reactions (`*` marks yours).
     Read {
         channel_id: u64,
         /// How many messages, 1 to 100.
@@ -38,7 +43,8 @@ pub enum SessionCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
     },
-    /// Print a channel's latest messages, then new, edited and deleted ones until Ctrl+C.
+    /// Print a channel's latest messages, then new, edited and deleted ones, reaction changes
+    /// and changes to messages that replies answer, until Ctrl+C.
     Tail {
         // Sends op 37 without member lists, to test whether very large guilds need them.
         #[arg(long, hide = true)]
@@ -156,8 +162,8 @@ async fn read(session: &Session, channel: ChannelId, limit: u8) -> ExitCode {
         eprintln!("Couldn't load the messages: {}", report(&err));
         return ExitCode::FAILURE;
     }
-    let messages = account
-        .store()
+    let store = account.store();
+    let messages = store
         .messages(channel)
         .map(|window| window.messages)
         .unwrap_or_default();
@@ -165,7 +171,7 @@ async fn read(session: &Session, channel: ChannelId, limit: u8) -> ExitCode {
         println!("(no messages)");
     }
     for message in messages {
-        println!("{}", line(&message));
+        println!("{}", line(store, &message));
     }
     ExitCode::SUCCESS
 }
@@ -253,11 +259,27 @@ async fn tail(
                 if message.channel_id == channel =>
             {
                 if shown.insert(message.id) {
-                    println!("{}", marked(Change::New, &line(&message)));
+                    println!("{}", marked(Change::New, &line(store, &message)));
                 }
             }
             StoreEvent::MessageUpdated(message) if message.channel_id == channel => {
-                println!("{}", marked(Change::Edited, &line(&message)));
+                println!("{}", marked(Change::Edited, &line(store, &message)));
+            }
+            StoreEvent::MessageReactionsChanged {
+                channel_id,
+                message_id,
+            } if channel_id == channel => {
+                let reactions = store.reactions(channel, message_id);
+                println!(
+                    "{}",
+                    reactions_changed_line(message_id.get(), &marks(&reactions))
+                );
+            }
+            StoreEvent::ReplyTargetChanged {
+                channel_id,
+                target_id,
+            } if channel_id == channel => {
+                println!("{}", target_change(store, channel, target_id));
             }
             StoreEvent::MessageDeleted {
                 channel_id,
@@ -279,7 +301,7 @@ async fn tail(
                     .filter(|message| (first..=last).contains(&message.id))
                 {
                     if shown.insert(message.id) {
-                        println!("{}", marked(Change::New, &line(message)));
+                        println!("{}", marked(Change::New, &line(store, message)));
                     }
                 }
             }
@@ -325,15 +347,14 @@ async fn jump_to_present(
         eprintln!("Couldn't load the messages: {}", report(&err));
         return Err(ExitCode::FAILURE);
     }
-    let messages = session
-        .account
-        .store()
+    let store = session.account.store();
+    let messages = store
         .messages(channel)
         .map(|window| window.messages)
         .unwrap_or_default();
     for message in messages {
         if shown.insert(message.id) {
-            println!("{}", marked(change, &line(&message)));
+            println!("{}", marked(change, &line(store, &message)));
         }
     }
     Ok(())
@@ -364,7 +385,7 @@ fn guild_note(
     Some(format!("(a large server{size}: {subscription})"))
 }
 
-fn line(message: &Message) -> String {
+fn line(store: &Store, message: &Message) -> String {
     let text = MessageLine {
         time: utc_minute(message.timestamp.unix_millis()),
         author: message.author.display_name(),
@@ -373,11 +394,171 @@ fn line(message: &Message) -> String {
         attachments: message.attachments.len(),
         embeds: message.embeds.len(),
     };
-    match message.delivery {
+    let line = match message.delivery {
         Delivery::Pending => format!("{text} (sending)"),
         Delivery::Failed => format!("{text} (failed)"),
         _ => text.to_string(),
+    };
+    let target = message
+        .replied_to()
+        .map(|(channel, target)| store.reply_target(channel, target));
+    let target = target
+        .as_ref()
+        .map(|target| shown_target(target, Some(message)));
+    with_extras(line, target.as_ref(), &marks(message.reactions()))
+}
+
+fn with_extras(
+    mut line: String,
+    target: Option<&Target<'_>>,
+    reactions: &[ReactionMark],
+) -> String {
+    if let Some(target) = target {
+        line.push('\n');
+        line.push_str(&target_line(target));
     }
+    if !reactions.is_empty() {
+        line.push_str("\n    reactions: ");
+        line.push_str(&reactions_text(reactions));
+    }
+    line
+}
+
+struct ReactionMark {
+    emoji: String,
+    count: u32,
+    burst: u32,
+    mine: bool,
+}
+
+fn marks(reactions: &[Reaction]) -> Vec<ReactionMark> {
+    reactions
+        .iter()
+        .map(|reaction| ReactionMark {
+            emoji: emoji_text(
+                reaction.emoji.id.map(Snowflake::get),
+                reaction.emoji.name.as_deref(),
+            ),
+            count: reaction.normal.saturating_add(reaction.burst),
+            burst: reaction.burst,
+            mine: reaction.me || reaction.me_burst,
+        })
+        .collect()
+}
+
+fn emoji_text(id: Option<u64>, name: Option<&str>) -> String {
+    match (id, name) {
+        (Some(_), Some(name)) => format!(":{}:", printable(name)),
+        (Some(id), None) => format!(":{id}:"),
+        (None, name) => printable(name.unwrap_or("?")).into_owned(),
+    }
+}
+
+fn reactions_text(reactions: &[ReactionMark]) -> String {
+    if reactions.is_empty() {
+        return "none".to_owned();
+    }
+    let shown: Vec<String> = reactions
+        .iter()
+        .map(|reaction| {
+            let mine = if reaction.mine { "*" } else { "" };
+            let burst = match reaction.burst {
+                0 => String::new(),
+                burst => format!(" ({burst} super)"),
+            };
+            format!("{} {}{mine}{burst}", reaction.emoji, reaction.count)
+        })
+        .collect();
+    shown.join("  ")
+}
+
+fn reactions_changed_line(message: u64, reactions: &[ReactionMark]) -> String {
+    format!("* {message} reactions: {}", reactions_text(reactions))
+}
+
+enum Target<'a> {
+    Loaded {
+        author: &'a str,
+        content: &'a str,
+        pinged: bool,
+        attachments: bool,
+        sticker: bool,
+        embeds: bool,
+    },
+    Deleted,
+    NotLoaded,
+}
+
+fn shown_target<'a>(target: &'a ReplyTarget, reply: Option<&Message>) -> Target<'a> {
+    match target {
+        ReplyTarget::Loaded(preview) => Target::Loaded {
+            author: preview.author.display_name(),
+            content: &preview.content,
+            pinged: reply.is_some_and(|reply| reply.mentions_user(preview.author.id)),
+            attachments: preview.has_attachments,
+            sticker: preview.has_sticker,
+            embeds: preview.has_embeds,
+        },
+        ReplyTarget::Deleted => Target::Deleted,
+        ReplyTarget::NotLoaded => Target::NotLoaded,
+    }
+}
+
+fn target_text(target: &Target<'_>) -> String {
+    let Target::Loaded {
+        author,
+        content,
+        attachments,
+        sticker,
+        embeds,
+        ..
+    } = target
+    else {
+        return String::new();
+    };
+    let start: String = content
+        .chars()
+        .take(TARGET_START)
+        .map(|c| if c == '\n' { ' ' } else { c })
+        .collect();
+    let more = if content.chars().nth(TARGET_START).is_some() {
+        "…"
+    } else {
+        ""
+    };
+    let start = match (start.is_empty(), attachments, sticker, embeds) {
+        (false, ..) => printable(&start).into_owned(),
+        (true, true, ..) => "[attachment]".to_owned(),
+        (true, false, true, _) => "[sticker]".to_owned(),
+        (true, false, false, true) => "[embed]".to_owned(),
+        (true, false, false, false) => "[no text]".to_owned(),
+    };
+    format!("{}: {start}{more}", printable(author))
+}
+
+fn target_line(target: &Target<'_>) -> String {
+    match target {
+        Target::Loaded { pinged, .. } => {
+            let at = if *pinged { "@" } else { "" };
+            format!("    ↳ replying to {at}{}", target_text(target))
+        }
+        Target::Deleted => "    ↳ replying to a deleted message".to_owned(),
+        Target::NotLoaded => "    ↳ replying to a message that is not loaded".to_owned(),
+    }
+}
+
+fn target_change(store: &Store, channel: ChannelId, target: MessageId) -> String {
+    let now = store.reply_target(channel, target);
+    target_changed_line(target.get(), &shown_target(&now, None))
+}
+
+fn target_changed_line(id: u64, target: &Target<'_>) -> String {
+    let now = match target {
+        Target::Loaded { .. } => target_text(target),
+        Target::Deleted => "deleted".to_owned(),
+        Target::NotLoaded => "not loaded".to_owned(),
+    };
+    format!("* {id} answered by a reply here: {now}")
 }
 
 struct MessageLine<'a> {
@@ -483,7 +664,230 @@ pub(crate) fn utc_minute(unix_millis: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use akari_core::model::UserId;
+    use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+    use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
     use super::*;
+
+    const GENERAL: u64 = 300_000_000_000_000_002;
+    // message_reply.json: the user's reply and the message of Mira's it answers.
+    const REPLY: u64 = 400_000_000_000_000_002;
+    const TARGET: u64 = 400_000_000_000_000_001;
+
+    struct NoTokens;
+
+    impl TokenStore for NoTokens {
+        fn load(&self, _: UserId) -> Result<Option<Token>, TokenStoreError> {
+            Ok(None)
+        }
+
+        fn save(&self, _: UserId, _: &Token) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+
+        fn delete(&self, _: UserId) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    fn reply() -> Value {
+        serde_json::from_str(include_str!(
+            "../../akari-core/tests/fixtures/message_reply.json"
+        ))
+        .unwrap()
+    }
+
+    // A reply like the fixture's, to another message.
+    fn reply_to(id: u64, target: u64, sent_along: Option<Value>) -> Value {
+        let mut message = reply();
+        message["id"] = id.to_string().into();
+        message["message_reference"]["message_id"] = target.to_string().into();
+        match sent_along {
+            Some(target) => message["referenced_message"] = target,
+            None => {
+                message
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("referenced_message");
+            }
+        }
+        message
+    }
+
+    // An account that never connects, with `page` loaded into #general from a local server, as
+    // `read` loads it.
+    async fn loaded(page: Vec<Value>) -> (MockServer, Account) {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Value::Array(page)))
+            .mount(&server)
+            .await;
+        let host = HostInfo {
+            os: DesktopOs::MacOs,
+            os_version: "25.0.0".to_owned(),
+            arch: Arch::Arm64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+        let endpoints = Endpoints {
+            api: format!("{}/api/v9/", server.uri()),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        };
+        let client =
+            DiscordClient::with_endpoints(properties, Arc::new(NoTokens), endpoints).unwrap();
+        let account = client
+            .account(Token::new("t".to_owned()), UserId::new(1))
+            .unwrap();
+        account
+            .load_messages(Snowflake::new(GENERAL), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+        (server, account)
+    }
+
+    fn row(account: &Account, id: u64) -> Arc<Message> {
+        let window = account.store().messages(Snowflake::new(GENERAL)).unwrap();
+        window
+            .messages
+            .iter()
+            .find(|message| message.id.get() == id)
+            .cloned()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn marks_add_bursts_and_mark_a_super_reaction_as_mine() {
+        let mut message = reply();
+        message["reactions"] = json!([
+            {"emoji": {"id": null, "name": "👍"}, "count": 3,
+             "count_details": {"normal": 2, "burst": 1}, "me": false, "me_burst": true},
+            {"emoji": {"id": "800000000000000001", "name": "party"}, "count": 1,
+             "count_details": {"normal": 1, "burst": 0}, "me": false, "me_burst": false},
+            {"emoji": {"id": null, "name": "🔥"}, "count": 2,
+             "count_details": {"normal": 2, "burst": 0}, "me": true, "me_burst": false},
+        ]);
+        let (_server, account) = loaded(vec![message]).await;
+
+        let marks = marks(row(&account, REPLY).reactions());
+
+        assert_eq!(reactions_text(&marks), "👍 3* (1 super)  :party: 1  🔥 2*");
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn shown_target_maps_each_state_and_the_ping() {
+        let mut sticker = reply()["referenced_message"].clone();
+        sticker["id"] = "400000000000000011".into();
+        sticker["content"] = "".into();
+        sticker["sticker_items"] =
+            json!([{"id": "700000000000000001", "name": "wave", "format_type": 1}]);
+        let mut file = sticker.clone();
+        file["id"] = "400000000000000012".into();
+        file["sticker_items"] = json!([]);
+        file["attachments"] = json!([
+            {"id": "600000000000000001", "filename": "notes.txt", "size": 12,
+             "url": "https://cdn.discordapp.com/attachments/1/2/notes.txt",
+             "proxy_url": "https://media.discordapp.net/attachments/1/2/notes.txt"},
+        ]);
+        let mut silent = reply_to(400_000_000_000_000_025, TARGET, None);
+        silent["mentions"] = json!([]);
+        let (_server, account) = loaded(vec![
+            silent,
+            reply_to(400_000_000_000_000_024, 400_000_000_000_000_012, Some(file)),
+            reply_to(
+                400_000_000_000_000_023,
+                400_000_000_000_000_011,
+                Some(sticker),
+            ),
+            reply_to(400_000_000_000_000_022, 400_000_000_000_000_009, None),
+            reply_to(
+                400_000_000_000_000_021,
+                400_000_000_000_000_008,
+                Some(Value::Null),
+            ),
+            reply(),
+        ])
+        .await;
+        let store = account.store();
+        let shown = |id: u64| {
+            let reply = row(&account, id);
+            let (channel, target) = reply.replied_to().unwrap();
+            target_line(&shown_target(
+                &store.reply_target(channel, target),
+                Some(&reply),
+            ))
+        };
+
+        assert_eq!(
+            shown(REPLY),
+            "    ↳ replying to @Mira: Release notes are up"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_025),
+            "    ↳ replying to Mira: Release notes are up",
+            "the reply didn't ping"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_021),
+            "    ↳ replying to a deleted message"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_022),
+            "    ↳ replying to a message that is not loaded"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_023),
+            "    ↳ replying to @Mira: [sticker]"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_024),
+            "    ↳ replying to @Mira: [attachment]"
+        );
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn a_reply_with_reactions_prints_all_three_lines() {
+        let mut message = reply();
+        message["reactions"] = json!([
+            {"emoji": {"id": null, "name": "👍"}, "count": 1,
+             "count_details": {"normal": 1, "burst": 0}, "me": false, "me_burst": false},
+        ]);
+        let (_server, account) = loaded(vec![message]).await;
+
+        let printed = line(account.store(), &row(&account, REPLY));
+
+        assert_eq!(
+            printed,
+            "2024-03-01 08:31  Akari Tester: Looks good! (edited)\n    \
+             ↳ replying to @Mira: Release notes are up\n    \
+             reactions: 👍 1"
+        );
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn tail_names_a_changed_target_by_its_own_id() {
+        let (_server, account) = loaded(vec![reply()]).await;
+
+        let printed = target_change(
+            account.store(),
+            Snowflake::new(GENERAL),
+            Snowflake::new(TARGET),
+        );
+
+        assert_eq!(
+            printed,
+            format!("* {TARGET} answered by a reply here: Mira: Release notes are up")
+        );
+        account.close();
+    }
 
     #[test]
     fn times_are_shown_in_utc_to_the_minute() {
@@ -541,6 +945,143 @@ mod tests {
         assert_eq!(
             channel_line(ChannelKind::Text, "gen\u{7}eral", 2, false),
             "#gen\\u{7}eral  2"
+        );
+    }
+
+    fn mark(emoji: &str, count: u32, burst: u32, mine: bool) -> ReactionMark {
+        ReactionMark {
+            emoji: emoji.to_owned(),
+            count,
+            burst,
+            mine,
+        }
+    }
+
+    #[test]
+    fn reactions_show_emoji_count_and_a_mark_for_mine() {
+        let marks = [
+            mark("👍", 3, 0, true),
+            mark(":wave:", 1, 0, false),
+            mark("🔥", 4, 2, true),
+        ];
+
+        assert_eq!(reactions_text(&marks), "👍 3*  :wave: 1  🔥 4* (2 super)");
+        assert_eq!(reactions_text(&[]), "none");
+    }
+
+    #[test]
+    fn a_custom_emoji_shows_by_name_and_a_deleted_one_by_id() {
+        assert_eq!(emoji_text(None, Some("👍")), "👍");
+        assert_eq!(emoji_text(Some(7), Some("wave")), ":wave:");
+        assert_eq!(emoji_text(Some(7), None), ":7:");
+        assert_eq!(emoji_text(Some(7), Some("wa\u{1b}ve")), ":wa\\u{1b}ve:");
+    }
+
+    #[test]
+    fn a_replys_target_line_shows_the_author_and_the_start_of_the_content() {
+        let loaded = |content: &'static str, pinged| Target::Loaded {
+            author: "Mira",
+            content,
+            pinged,
+            attachments: false,
+            sticker: false,
+            embeds: false,
+        };
+
+        assert_eq!(
+            target_line(&loaded("Release notes are up", false)),
+            "    ↳ replying to Mira: Release notes are up"
+        );
+        assert_eq!(
+            target_line(&loaded("first\nsecond\u{1b}[2K", true)),
+            "    ↳ replying to @Mira: first second\\u{1b}[2K"
+        );
+        let long = "a".repeat(80);
+        assert_eq!(
+            target_text(&Target::Loaded {
+                author: "Mira",
+                content: &long,
+                pinged: false,
+                attachments: false,
+                sticker: false,
+                embeds: false,
+            }),
+            format!("Mira: {}…", "a".repeat(60))
+        );
+        assert_eq!(
+            target_line(&Target::Deleted),
+            "    ↳ replying to a deleted message"
+        );
+        assert_eq!(
+            target_line(&Target::NotLoaded),
+            "    ↳ replying to a message that is not loaded"
+        );
+    }
+
+    #[test]
+    fn a_target_without_text_says_what_it_carries() {
+        let carrying = |attachments, sticker, embeds| Target::Loaded {
+            author: "Mira",
+            content: "",
+            pinged: false,
+            attachments,
+            sticker,
+            embeds,
+        };
+
+        assert_eq!(
+            target_text(&carrying(true, true, true)),
+            "Mira: [attachment]"
+        );
+        assert_eq!(target_text(&carrying(false, true, true)), "Mira: [sticker]");
+        assert_eq!(target_text(&carrying(false, false, true)), "Mira: [embed]");
+        assert_eq!(
+            target_text(&carrying(false, false, false)),
+            "Mira: [no text]"
+        );
+    }
+
+    #[test]
+    fn tail_says_which_messages_reactions_or_target_changed() {
+        assert_eq!(
+            reactions_changed_line(42, &[mark("👍", 1, 0, true)]),
+            "* 42 reactions: 👍 1*"
+        );
+        assert_eq!(reactions_changed_line(42, &[]), "* 42 reactions: none");
+        assert_eq!(
+            target_changed_line(41, &Target::Deleted),
+            "* 41 answered by a reply here: deleted"
+        );
+        assert_eq!(
+            target_changed_line(41, &Target::NotLoaded),
+            "* 41 answered by a reply here: not loaded"
+        );
+        assert_eq!(
+            target_changed_line(
+                41,
+                &Target::Loaded {
+                    author: "Mira",
+                    content: "edited text",
+                    pinged: true,
+                    attachments: false,
+                    sticker: false,
+                    embeds: false,
+                }
+            ),
+            "* 41 answered by a reply here: Mira: edited text"
+        );
+    }
+
+    #[test]
+    fn a_messages_extra_lines_follow_it() {
+        assert_eq!(with_extras("a line".to_owned(), None, &[]), "a line");
+        assert_eq!(
+            with_extras(
+                "a line".to_owned(),
+                Some(&Target::Deleted),
+                &[mark("👍", 2, 0, false)]
+            ),
+            "a line\n    ↳ replying to a deleted message\n    reactions: 👍 2"
         );
     }
 

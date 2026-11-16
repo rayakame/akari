@@ -658,6 +658,10 @@ pub struct Message {
     /// The first embed's title, which names a thread started from the message.
     #[uniffi(default = None)]
     pub embed_title: Option<String>,
+    /// The message a reply or a context-menu command's result answers; `None` for every other
+    /// kind.
+    #[uniffi(default = None)]
+    pub replied_to: Option<RepliedTo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -686,6 +690,173 @@ pub struct MessageReference {
     pub message_id: Option<MessageId>,
     pub channel_id: Option<ChannelId>,
     pub guild_id: Option<GuildId>,
+}
+
+/// What a reply answers: the IDs `Store::reply_target` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct RepliedTo {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    /// The reply mentions the target's author (it pinged them, or names them in its text): the
+    /// preview's name gets its "@". False while the target isn't loaded, so read the reply
+    /// again on its target's `ReplyTargetChanged`.
+    pub mentions_author: bool,
+}
+
+/// The message a reply answers: see `Store::reply_target`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum ReplyTarget {
+    Loaded {
+        preview: ReplyPreview,
+    },
+    /// Discord says it is gone, or it was deleted since.
+    Deleted,
+    /// Discord didn't send it along and no load has brought it.
+    NotLoaded,
+}
+
+/// What a reply's one-line preview shows of the message it answers.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReplyPreview {
+    /// System kinds have their own wording; `ChatInputCommand` and `ContextMenuCommand` are a
+    /// command's result.
+    pub kind: MessageType,
+    pub author: User,
+    /// Sent by a webhook; the author is then not a real user.
+    pub from_webhook: bool,
+    pub content: String,
+    pub edited: bool,
+    pub voice_message: bool,
+    pub has_attachments: bool,
+    pub has_embeds: bool,
+    pub has_sticker: bool,
+    /// A forward: its content is in a snapshot Akari doesn't read.
+    pub forwarded: bool,
+}
+
+impl From<&state::ReplyTarget> for ReplyTarget {
+    fn from(target: &state::ReplyTarget) -> Self {
+        match target {
+            state::ReplyTarget::Loaded(preview) => Self::Loaded {
+                preview: ReplyPreview {
+                    kind: preview.kind,
+                    author: User::from(&*preview.author),
+                    from_webhook: preview.webhook,
+                    content: preview.content.to_string(),
+                    edited: preview.edited,
+                    voice_message: preview.flags & state::Message::IS_VOICE_MESSAGE != 0,
+                    has_attachments: preview.has_attachments,
+                    has_embeds: preview.has_embeds,
+                    has_sticker: preview.has_sticker,
+                    forwarded: preview.forwarded,
+                },
+            },
+            state::ReplyTarget::Deleted => Self::Deleted,
+            state::ReplyTarget::NotLoaded => Self::NotLoaded,
+        }
+    }
+}
+
+/// One emoji's reactions on a message.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Reaction {
+    pub emoji: ReactionEmoji,
+    /// How many users reacted normally.
+    pub normal: u32,
+    /// How many users super-reacted.
+    pub burst: u32,
+    /// The current user is among `normal`.
+    pub me: bool,
+    /// The current user is among `burst`.
+    pub me_burst: bool,
+}
+
+/// A reaction's emoji: a custom one by its `id`, else a Unicode one by its `name`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReactionEmoji {
+    pub id: Option<EmojiId>,
+    /// The Unicode emoji itself, or a custom emoji's name; `None` for a deleted custom emoji.
+    pub name: Option<String>,
+    pub animated: bool,
+    /// A custom emoji's image, animated when `animated` says so.
+    pub key: Option<ImageKey>,
+}
+
+impl From<&state::Reaction> for Reaction {
+    fn from(reaction: &state::Reaction) -> Self {
+        let emoji = &reaction.emoji;
+        Self {
+            emoji: ReactionEmoji {
+                id: emoji.id,
+                name: emoji.name.as_deref().map(str::to_owned),
+                animated: emoji.animated,
+                key: emoji.id.map(|emoji_id| ImageKey::Emoji {
+                    emoji_id,
+                    animated: emoji.animated,
+                }),
+            },
+            normal: reaction.normal,
+            burst: reaction.burst,
+            me: reaction.me,
+            me_burst: reaction.me_burst,
+        }
+    }
+}
+
+/// A message's reactions, for `Store::message_reactions`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MessageReactions {
+    pub message_id: MessageId,
+    pub reactions: Vec<Reaction>,
+}
+
+/// What the user may do with a message: see `Store::message_actions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct MessageActions {
+    pub reply: bool,
+    /// The reply pings the message's author unless the user turns that off: never for their own.
+    pub reply_pings: bool,
+    /// The reply bar has the switch for the ping: not in DMs, not for the user's own message.
+    pub mention_toggle: bool,
+    pub edit: bool,
+    /// Without a request for a failed send.
+    pub delete: bool,
+    /// The message isn't pinned and the user may pin it.
+    pub pin: bool,
+    /// The message is pinned and the user may unpin it.
+    pub unpin: bool,
+    /// With an emoji the message doesn't have yet.
+    pub react: bool,
+    /// Adding and removing the user's own reaction with an emoji the message already has.
+    pub toggle_reaction: bool,
+    /// Removing others' reactions: one user's, an emoji's, all of them.
+    pub remove_reactions: bool,
+    pub mark_unread: bool,
+    pub copy_link: bool,
+    pub create_thread: bool,
+    /// The thread started from the message is known and the user may view it.
+    pub view_thread: bool,
+}
+
+impl From<state::MessageActions> for MessageActions {
+    fn from(actions: state::MessageActions) -> Self {
+        Self {
+            reply: actions.reply,
+            reply_pings: actions.reply_pings,
+            mention_toggle: actions.mention_toggle,
+            edit: actions.edit,
+            delete: actions.delete,
+            pin: actions.pin,
+            unpin: actions.unpin,
+            react: actions.react,
+            toggle_reaction: actions.toggle_reaction,
+            remove_reactions: actions.remove_reactions,
+            mark_unread: actions.mark_unread,
+            copy_link: actions.copy_link,
+            create_thread: actions.create_thread,
+            view_thread: actions.view_thread,
+        }
+    }
 }
 
 /// A forum post's first message, for its card: see `Store::post_preview`.
@@ -815,6 +986,7 @@ impl Message {
                 .first()
                 .and_then(|embed| embed.title.as_deref())
                 .map(str::to_owned),
+            replied_to: None,
         }
     }
 }
