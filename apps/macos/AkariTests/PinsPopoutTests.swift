@@ -627,42 +627,53 @@ struct PinsButtonTests {
         #expect(covered > 0, "the ring lies over the pin")
     }
 
+    // The button, and a mark at its corner while the test's own handler on it sees the hover: the
+    // button's handler ran with it, so a drawing with the mark has the button's hovered look.
+    struct Marked: View {
+        let disabled: Bool
+        @State private var hovered = false
+
+        var body: some View {
+            PinsButton(selected: false, unread: false, disabled: disabled) {}
+                .onHover { hovered = $0 }
+                .frame(width: 48, height: 48)
+                .overlay(alignment: .topLeading) {
+                    Color(.sRGB, red: 1, green: 0, blue: 0).opacity(hovered ? 1 : 0).frame(width: 4, height: 4)
+                }
+                .background(Color(nsColor: Palette.chat))
+        }
+    }
+
     // Hover lights an enabled button, not one behind the age gate.
     @Test
     func hoverLightsTheButtonOnlyWhereItCanBeUsed() async throws {
-        let size = NSSize(width: 48, height: 48)
-        func drawn(_ view: ShownView) throws -> NSBitmapImageRep {
+        func drawn(_ view: ShownView) throws -> (pin: CGFloat, marked: Bool) {
             let rep = try #require(view.host.bitmapImageRepForCachingDisplay(in: view.host.bounds))
             view.host.cacheDisplay(in: view.host.bounds, to: rep)
-            return rep
-        }
-        func brightest(_ rep: NSBitmapImageRep) -> CGFloat {
-            let scale = CGFloat(rep.pixelsWide) / size.width
+            let scale = CGFloat(rep.pixelsWide) / view.host.bounds.width
             var most: CGFloat = 0
             for x in Int(14 * scale)..<Int(34 * scale) {
                 for y in Int(14 * scale)..<Int(34 * scale) {
                     most = max(most, rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)?.brightnessComponent ?? 0)
                 }
             }
-            return most
+            let mark = rep.colorAt(x: Int(scale), y: Int(scale))?.usingColorSpace(.sRGB)
+            return (most, (mark?.redComponent ?? 0) > 0.8 && (mark?.greenComponent ?? 1) < 0.4)
         }
         var looks: [Bool: (rest: CGFloat, hovered: CGFloat)] = [:]
         for disabled in [false, true] {
-            let view = ShownView(
-                PinsButton(selected: false, unread: false, disabled: disabled) {}
-                    .frame(width: 48, height: 48)
-                    .background(Color(nsColor: Palette.chat)),
-                size: size)
+            let view = ShownView(Marked(disabled: disabled), size: NSSize(width: 48, height: 48))
             view.window.appearance = NSAppearance(named: .darkAqua)
-            let rest = brightest(try drawn(view))
+            let rest = try drawn(view).pin
             try view.hover(at: NSPoint(x: 24, y: 24))
-            var hovered = rest
+            var hovered = try drawn(view)
             let deadline = ContinuousClock.now + .seconds(2)
-            repeat {
+            while !hovered.marked, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
-                hovered = brightest(try drawn(view))
-            } while !disabled && hovered <= rest + 0.05 && ContinuousClock.now < deadline
-            looks[disabled] = (rest, hovered)
+                hovered = try drawn(view)
+            }
+            #expect(hovered.marked, "the hover reached the button")
+            looks[disabled] = (rest, hovered.pin)
             view.close()
         }
 
