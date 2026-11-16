@@ -109,40 +109,47 @@ final class PinsModelTests {
             state.pins[id(11)] = pinned([answer, message(102, in: 11, by: self.ray)])
             state.answer(preview(content: "the question"), message: 1, in: 11)
         }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
 
         #expect(shown(pins) == [104, 102])
         #expect(pins.rows.map(\.authorName) == ["Ray", "Ray"])
         #expect(pins.rows.first?.reply?.messageId == id(1))
         #expect(pins.rows.last?.reply == nil)
+        session.close()
     }
 
     @Test
     func aChannelWithoutPinsSaysSoInTheOfficialWords() async throws {
         account.pinsAfterLoad.withLock { $0[id(11)] = self.pins([]) }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
 
         #expect(pins.phase == .empty)
         #expect(pins.emptyText == "This channel doesn't have any\npinned messages... yet.")
         #expect(pins.protip == "Users with the ‘Pin Messages’ permission can pin a message from its context menu.")
         #expect(PinsModel.protipLabel == "Protip:")
+        session.close()
     }
 
     @Test(arguments: [20, 22] as [UInt64])
     func aConversationWithoutPinsSpeaksOfADirectMessage(conversation: UInt64) async throws {
         account.pinsAfterLoad.withLock { $0[id(conversation)] = self.pins([], in: conversation) }
-        let pins = try await opened(session(in: conversation))
+        let session = session(in: conversation)
+        let pins = try await opened(session)
 
         #expect(pins.phase == .empty)
         #expect(pins.emptyText == "This direct message doesn't have\nany pinned messages... yet.")
         #expect(pins.protip == "You can pin a message from its context menu.")
+        session.close()
     }
 
     // Akari: the official client shows a failed first page as an empty channel.
     @Test
     func aFailedFirstPageIsntAnEmptyChannelAndTriesAgain() async throws {
         account.pinLoadError.withLock { $0 = .Network(kind: .connect) }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
 
         #expect(pins.phase == .failed)
         #expect(PinsModel.failedText == "Akari couldn't load the pinned messages.")
@@ -154,6 +161,7 @@ final class PinsModelTests {
         #expect(store.log.calls.filter { $0 == .loadPins(id(11)) }.count == 2)
         #expect(pins.phase == .list)
         #expect(shown(pins) == [103])
+        session.close()
     }
 
     @Test
@@ -210,6 +218,7 @@ final class PinsModelTests {
         #expect(store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 2)
         #expect(shown(pins) == [125, 124, 123])
         #expect(!pins.offersMore)
+        session.close()
     }
 
     // Every pin of this connection went (a bulk delete) while Discord has more: the core asks for
@@ -240,7 +249,8 @@ final class PinsModelTests {
     @Test
     func theEndDoesntAskAgainAfterAPageThatChangedNothing() async throws {
         store.update { $0.pins[id(11)] = self.pins([], more: true) }
-        let pins = try await opened(session())
+        let session = session()
+        let pins = try await opened(session)
 
         await pins.reachedEnd()
         await pins.reachedEnd()
@@ -253,6 +263,7 @@ final class PinsModelTests {
         #expect(
             store.log.calls.filter { $0 == .loadMorePins(id(11)) }.count == 3,
             "the button asks, and the end once rows came")
+        session.close()
     }
 
     @Test
