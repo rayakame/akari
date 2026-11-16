@@ -578,26 +578,47 @@ struct PinsButtonTests {
         #expect(ink(selected) > ink(rest) + 0.1, "\(ink(selected)) against \(ink(rest))")
     }
 
-    // The ring is the header's color between the dot and the pin, also where it covers the pin.
-    @Test
-    func theDotsRingCoversThePin() throws {
-        let plain = try rendered(unread: false)
-        let dot = try rendered(unread: true)
-        let header = plain.color(4, 4)
+    // At a fixed scale, as a screen of either kind draws it.
+    func drawn(unread: Bool, scale: CGFloat) throws -> NSBitmapImageRep {
+        let window = ScaledWindow.make(scale: scale)
+        window.appearance = NSAppearance(named: .darkAqua)
+        let host = NSHostingView(
+            rootView: PinsButton(selected: false, unread: unread) {}
+                .frame(width: 48, height: 48)
+                .background(Color(nsColor: Palette.chat))
+                .ignoresSafeArea())
+        window.setContentSize(NSSize(width: 48, height: 48))
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        return rep
+    }
+
+    // The ring is the header's color between the dot and the pin, also where it covers the pin:
+    // every pixel wholly inside the ring's band, whatever the scale.
+    @Test(arguments: [1, 2] as [CGFloat])
+    func theDotsRingCoversThePin(scale: CGFloat) throws {
+        let plain = try drawn(unread: false, scale: scale)
+        let dot = try drawn(unread: true, scale: scale)
+        let brightness = { (rep: NSBitmapImageRep, x: Int, y: Int) in
+            rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)?.brightnessComponent ?? 0
+        }
+        let header = brightness(plain, Int(4 * scale), Int(4 * scale))
         let middle = 34 + PinsButton.dotRing + 1 - PinsButton.dotRing - PinsButton.dot / 2
+        let band = PinsButton.dot / 2 + PinsButton.dotRing / 2
+        let slack = PinsButton.dotRing / 2 - 0.5.squareRoot() / scale
         var covered = 0
-        for x in stride(from: middle - 6, through: middle + 6, by: 0.5) {
-            for y in stride(from: middle - 6, through: middle + 6, by: 0.5) {
-                let distance = hypot(x - middle, y - middle)
-                guard distance > PinsButton.dot / 2 + 0.5, distance < PinsButton.dot / 2 + PinsButton.dotRing - 0.5,
-                    let pin = plain.color(x, y), let head = header,
-                    abs(pin.brightnessComponent - head.brightnessComponent) > 0.15
+        for x in Int((middle - 7) * scale)..<Int((middle + 7) * scale) {
+            for y in Int((middle - 7) * scale)..<Int((middle + 7) * scale) {
+                let center = (x: (CGFloat(x) + 0.5) / scale, y: (CGFloat(y) + 0.5) / scale)
+                guard abs(hypot(center.x - middle, center.y - middle) - band) <= slack,
+                    abs(brightness(plain, x, y) - header) > 0.15
                 else {
                     continue
                 }
                 covered += 1
-                let ring = dot.color(x, y)?.brightnessComponent ?? 1
-                #expect(abs(ring - head.brightnessComponent) < 0.05, "\(x), \(y): \(ring)")
+                #expect(abs(brightness(dot, x, y) - header) < 0.05, "\(x), \(y) at \(scale)x")
             }
         }
         #expect(covered > 0, "the ring lies over the pin")
