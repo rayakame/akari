@@ -78,7 +78,9 @@ These keep the values Akari had; each needs an official screenshot that shows it
 | Time beside a hovered follow-up message | 11 regular | nothing hovered |
 | APP tag after a bot's name | 10 semibold | no bot message |
 | NEW tag on the new messages line | 10 bold, the scale's smallest caps | seen, not measured yet |
-| Notes in the list (attachments, replies, "Not sent.", load errors) | 14 regular | not shown |
+| Notes in the list (attachments, "Not sent.", load errors) | 14 regular | not shown |
+| A reply's line: the name, the text, the words in place of a text | 14 medium, 14 regular, 14 italic, on an 18 line | from the official stylesheet (canary 671549), not a screenshot |
+| The reply bar: "Replying to", the name, "ON" and "OFF" | 14 regular, 14 semibold, 14 semibold, on an 18 line | from the official stylesheet (canary 671549), not a screenshot |
 | Small notes (edited mark, times of system messages, the composer's strip and counter, "Catching up…", DM member counts) | 12 regular | not shown |
 | Jump bar | 14 medium | not shown |
 | Connection bar, warning line | 13 medium, 13 regular | Akari's own |

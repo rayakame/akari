@@ -22,6 +22,8 @@ struct MessageTableState: Equatable {
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
+    /// The message the pending reply answers: its row is tinted.
+    var replyingTo: MessageId?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
     /// Where the rows' images come from; `nil` shows placeholders only.
@@ -120,6 +122,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // A thread box's newest message as the box shows it, and when the box's time changes.
     private var boxContents: [MessageId: (message: Message, text: NSAttributedString)] = [:]
     private var boxTimes: [MessageId: Date] = [:]
+    // A reply line's text, built once per change of the line, and when a time in it changes.
+    private var replyTexts: [MessageId: (line: ReplyLine, text: NSAttributedString)] = [:]
+    private var replyTimes: [MessageId: Date] = [:]
     nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
@@ -141,6 +146,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredFileName: FileNameButton?
     private weak var hoveredFile: FileRowView?
     private weak var hoveredAction: HoverActionButton?
+    private weak var hoveredReply: MessageCell?
     /// The hovered message's buttons: one bar for the list, over the rows.
     let hoverBar = MessageHoverBar()
     private weak var hoveredBarButton: HoverBarButton?
@@ -294,7 +300,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if wasFilled, state.unreadJumps != previous.unreadJumps {
             scroll(toRow: lineRow, below: state.startRoom)
         }
-        if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
+        if previous.replyingTo != state.replyingTo {
+            markReplyTarget()
+        }
+        // A table made for a list that jumped before scrolls only to a jump no table showed.
+        if let jump = state.messageJump,
+            wasFilled ? jump != previous.messageJump : jump.number > (actions?.lastShownJump() ?? .max)
+        {
+            actions?.jumpShown(jump.number)
             // Unless the line has been seen, the unread bar shows once it's out of sight.
             let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
             let target = row(atOrAfter: jump.messageId)
@@ -450,6 +463,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         texts.removeAll()
         embedTexts.removeAll()
         boxContents.removeAll()
+        replyTexts.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -704,6 +718,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 embedTexts[row.id] = nil
                 boxContents[row.id] = nil
                 boxTimes[row.id] = nil
+                replyTexts[row.id] = nil
+                replyTimes[row.id] = nil
             }
         }
         for index in changes.reloaded {
@@ -1066,7 +1082,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row), width: width)
+                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row),
+                hasReply: row.reply != nil, width: width)
         }
     }
 
@@ -1158,13 +1175,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
+            cell.onReplyJump = { [weak self] in
+                guard let self else {
+                    return
+                }
+                actions?.jumpToTarget(of: self.row(item.id) ?? row)
+            }
+            cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
-                embeds: embeds(row))
+                embeds: embeds(row), reply: replyParts(row), replyRefused: row.replyRefused)
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
@@ -1435,8 +1459,37 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return (box, content, time?.text)
     }
 
+    private func replyParts(_ row: MessageListModel.Row) -> (line: ReplyLine, text: NSAttributedString)? {
+        guard let line = row.reply else {
+            replyTexts[row.id] = nil
+            replyTimes[row.id] = nil
+            return nil
+        }
+        if let cached = replyTexts[row.id], cached.line == line {
+            return cached
+        }
+        let built = ReplyLineView.build(line, now: now(), times: times)
+        let parts = (line, built.text)
+        replyTexts[row.id] = parts
+        replyTimes[row.id] = built.nextChange
+        return parts
+    }
+
+    // The row the pending reply answers has the official client's tint while the bar is up.
+    private func markReplyTarget() {
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell,
+                timeline.items.indices.contains(index),
+                case .message(let row, _) = timeline.items[index]
+            else {
+                return
+            }
+            cell.isReplyTarget = state.replyingTo.map { $0 == row.message.id } ?? false
+        }
+    }
+
     private func nextChange(of row: MessageListModel.Row) -> Date? {
-        [relativeTimes[row.id], boxTimes[row.id]].compactMap { $0 }.min()
+        [relativeTimes[row.id], boxTimes[row.id], replyTimes[row.id]].compactMap { $0 }.min()
     }
 
     static func isOnScreen(_ window: NSWindow) -> Bool {
@@ -1512,13 +1565,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             let body = relativeTimes[row.id].map { $0 <= now } ?? false
             let box = boxTimes[row.id].map { $0 <= now } ?? false
+            // A line is one line high whatever its time says.
+            let reply = replyTimes[row.id].map { $0 <= now } ?? false
+            if reply {
+                replyTexts[row.id] = nil
+                replyTimes[row.id] = nil
+            }
             if body {
                 remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
                 embedTexts[row.id] = nil
             }
-            if body || box {
+            if body || box || reply {
                 due.insert(index)
                 boxTimes[row.id] = nil
             }
@@ -1855,6 +1914,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         action?.isHovered = true
         hoveredAction = action
+        let reply =
+            target?.view is ReplyContentButton || target?.view is ReplySpineView
+            ? enclosing(MessageCell.self, around: target?.view) : nil
+        if hoveredReply !== reply {
+            hoveredReply?.replyHovered = false
+        }
+        reply?.replyHovered = true
+        hoveredReply = reply
         let barButton = target?.view as? HoverBarButton
         if hoveredBarButton !== barButton {
             hoveredBarButton?.isHovered = false

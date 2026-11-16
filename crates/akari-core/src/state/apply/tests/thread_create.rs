@@ -251,13 +251,14 @@ fn ephemeral_unknown_and_unsent_messages_cant_start_a_thread() {
     let now = state.now_millis();
     state.queue(
         general,
-        Arc::new(Message::pending(
+        Message::pending(
             pending,
             general,
             Arc::new(me.user.clone()),
             "hi".to_owned(),
             0,
-        )),
+        ),
+        None,
         now,
         &mut Vec::new(),
     );
@@ -334,13 +335,14 @@ fn sending_doesnt_start_the_thread_cooldown() {
     let now = state.now_millis();
     state.queue(
         general,
-        Arc::new(Message::pending(
+        Message::pending(
             Snowflake::new(OTHER),
             general,
             Arc::new(me.user.clone()),
             "hi".to_owned(),
             0,
-        )),
+        ),
+        None,
         now,
         &mut Vec::new(),
     );

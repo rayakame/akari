@@ -17,7 +17,7 @@ use super::media::{AgeGate, ShownAttachment};
 use super::order;
 use super::reactions::Reaction;
 use super::read_states::{Ack, ReadState};
-use super::replies::ReplyTarget;
+use super::replies::{ReplyTarget, ReplyTo};
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
@@ -28,7 +28,8 @@ use super::types::{
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
-    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
+    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, Outgoing, StarterFetch,
+    WindowLimits,
 };
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
@@ -849,10 +850,43 @@ impl Store {
         self.read(|inner| inner.state.viewed_channels())
     }
 
-    pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
+    // False, with nothing queued, for a reply to a message that may not be answered there.
+    pub(crate) fn queue_message(
+        &self,
+        channel: ChannelId,
+        message: Message,
+        reply: Option<ReplyTo>,
+    ) -> bool {
         let now = self.now_millis();
+        let mut queued = false;
         self.write("send", |inner, events| {
-            inner.state.queue(channel, message, now, events)
+            queued = inner.state.queue(channel, message, reply, now, events);
+        });
+        queued
+    }
+
+    pub(crate) fn hold_reply(&self, channel: ChannelId, target: MessageId) -> bool {
+        let now = self.now_millis();
+        self.write("reply", |inner, events| {
+            inner.state.hold_reply(channel, target, now, events)
+        })
+    }
+
+    pub(crate) fn release_reply(&self, channel: ChannelId) {
+        self.write("reply", |inner, _| inner.state.release_reply(channel));
+    }
+
+    pub(crate) fn release_replies(&self) {
+        self.write("reply", |inner, _| inner.state.release_replies());
+    }
+
+    pub(crate) fn held_reply(&self, channel: ChannelId) -> Option<MessageId> {
+        self.read(|inner| inner.state.held_reply(channel))
+    }
+
+    pub(crate) fn reply_target_gone(&self, channel: ChannelId, target: MessageId) {
+        self.write("send", |inner, events| {
+            inner.state.target_gone(channel, target, events);
         });
     }
 
@@ -873,11 +907,7 @@ impl Store {
         });
     }
 
-    pub(crate) fn retry_message(
-        &self,
-        channel: ChannelId,
-        pending: MessageId,
-    ) -> Option<Arc<Message>> {
+    pub(crate) fn retry_message(&self, channel: ChannelId, pending: MessageId) -> Option<Outgoing> {
         let mut message = None;
         let now = self.now_millis();
         self.write("send", |inner, events| {
@@ -886,11 +916,7 @@ impl Store {
         message
     }
 
-    pub(crate) fn pending_message(
-        &self,
-        channel: ChannelId,
-        id: MessageId,
-    ) -> Option<Arc<Message>> {
+    pub(crate) fn pending_message(&self, channel: ChannelId, id: MessageId) -> Option<Outgoing> {
         self.read(|inner| inner.state.pending(channel, id))
     }
 
@@ -1339,7 +1365,8 @@ impl Store {
     /// locked state. Nothing for a message the store doesn't have. Read again when the message,
     /// its channel or the user's permissions change. A viewed thread's starter row (the
     /// thread's ID and the row's) answers for the message it shows, in that message's channel:
-    /// requests take the IDs of [`Store::shown_message`]. Its `mark_unread` alone is the
+    /// requests take the IDs of [`Store::shown_message`]. It allows no reply: one sent in the
+    /// thread can't name a message of the parent channel. Its `mark_unread` is the
     /// thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
     /// row's own IDs.
     pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {

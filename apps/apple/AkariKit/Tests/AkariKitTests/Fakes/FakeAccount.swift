@@ -268,10 +268,50 @@ final class FakeAccount: Account, @unchecked Sendable {
     // Runs inside queueMessage, so a test can look at the caller's state at that moment.
     let onQueue = Locked<(@Sendable () -> Void)?>(nil)
 
-    override func queueMessage(channelId: ChannelId, content: String) throws -> MessageId {
+    // Like akari-core: the message each channel's pending reply answers, kept until a reply is
+    // queued there or the hold is released.
+    let heldReplies = Locked<[ChannelId: MessageId]>([:])
+    // Every hold and release, in order; a release is `nil`.
+    let replyHolds = Locked<[ReplyHold]>([])
+
+    struct ReplyHold: Equatable {
+        let channel: ChannelId
+        let message: MessageId?
+    }
+
+    override func holdReply(channelId: ChannelId, messageId: MessageId) -> Bool {
+        replyHolds.withLock { $0.append(ReplyHold(channel: channelId, message: messageId)) }
+        heldReplies.withLock { $0[channelId] = messageId }
+        return true
+    }
+
+    override func releaseReply(channelId: ChannelId) {
+        replyHolds.withLock { $0.append(ReplyHold(channel: channelId, message: nil)) }
+        heldReplies.withLock { $0[channelId] = nil }
+    }
+
+    // As the core: a reply's message is one the window has, or the one held for the channel.
+    private func answerable(_ message: MessageId, in channel: ChannelId) -> Bool {
+        var loaded = false
+        fakeStore.update { state in
+            loaded = state.windows[channel]?.messageIds.contains(message) ?? false
+        }
+        return loaded || heldReplies.current[channel] == message
+    }
+
+    override func queueMessage(channelId: ChannelId, content: String, reply: ReplyTo? = nil) throws
+        -> MessageId
+    {
         onQueue.current?()
         if let error = queueError.current {
             throw error
+        }
+        if let reply {
+            guard answerable(reply.messageId, in: channelId) else {
+                throw RequestError.InvalidRequest
+            }
+            heldReplies.withLock { $0[channelId] = nil }
+            log.append(.reply(channelId, reply.messageId, mention: reply.mention))
         }
         log.append(.send(channelId, content))
         return id(900)
@@ -288,7 +328,12 @@ final class FakeAccount: Account, @unchecked Sendable {
         return id(901)
     }
 
-    override func sendMessage(channelId: ChannelId, content: String) async throws -> MessageId {
+    override func sendMessage(channelId: ChannelId, content: String, reply: ReplyTo? = nil) async throws
+        -> MessageId
+    {
+        if let reply {
+            log.append(.reply(channelId, reply.messageId, mention: reply.mention))
+        }
         log.append(.send(channelId, content))
         let held = holdSends.current ? await sendReplies.next() ?? nil : nil
         if let error = held ?? sendError.current {

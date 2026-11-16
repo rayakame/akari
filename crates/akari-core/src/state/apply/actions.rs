@@ -3,7 +3,9 @@ use std::sync::Arc;
 use super::State;
 use super::creating::{EPHEMERAL, STARTS_THREADS as USER_MESSAGE};
 use crate::model::{ChannelId, ChannelType, MessageId, MessageReferenceType, Permissions};
+use crate::state::events::StoreEvent;
 use crate::state::permissions::{PRIVATE, silenced};
+use crate::state::replies::ReplyPreview;
 use crate::state::types::{Channel, Delivery, Message, MessageActions};
 
 // The type sets of Discord's client (module 448761, canary 671549).
@@ -31,6 +33,10 @@ impl State {
                 // A mark from the row marks the thread, not the original's channel.
                 mark_unread: row
                     .is_some_and(|row| self.message_actions_of(&row, now_millis).mark_unread),
+                // A reply in the thread would name a message of the parent channel.
+                reply: false,
+                reply_pings: false,
+                mention_toggle: false,
                 ..actions
             };
         }
@@ -38,6 +44,88 @@ impl State {
             .map_or_else(MessageActions::default, |found| {
                 self.message_actions_of(&found, now_millis)
             })
+    }
+
+    // The message of `channel` a reply sent there may answer: a thread's starter row is its
+    // own type there, not the parent's message it shows.
+    pub(crate) fn answerable(
+        &self,
+        channel: ChannelId,
+        target: MessageId,
+        now_millis: i64,
+    ) -> Option<Arc<Message>> {
+        self.message(channel, target)
+            .filter(|message| self.message_actions_of(message, now_millis).reply)
+    }
+
+    // A held target has no message to ask: its kind and flags are the preview's, the
+    // permissions the channel's as it is now.
+    pub(crate) fn answered(
+        &self,
+        channel: ChannelId,
+        target: MessageId,
+        now_millis: i64,
+    ) -> Option<Arc<ReplyPreview>> {
+        if let Some(message) = self.message(channel, target) {
+            let allowed = self.message_actions_of(&message, now_millis).reply;
+            return allowed.then(|| Arc::new(ReplyPreview::of(&message)));
+        }
+        let preview = self.windows.held_preview(channel, target)?;
+        let place = self.entities.channels.get(&channel)?;
+        let permissions = self.permissions_in(place, now_millis);
+        let allowed = preview.flags & EPHEMERAL == 0
+            && self.takes_replies(place, permissions, u16::from(preview.kind));
+        allowed.then_some(preview)
+    }
+
+    pub(crate) fn hold_reply(
+        &mut self,
+        channel: ChannelId,
+        target: MessageId,
+        now_millis: i64,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        match self.answerable(channel, target, now_millis) {
+            Some(message) => {
+                self.windows.hold_reply(&message, events);
+                true
+            }
+            None => {
+                self.windows.release_reply(channel);
+                false
+            }
+        }
+    }
+
+    pub(crate) fn release_reply(&mut self, channel: ChannelId) {
+        self.windows.release_reply(channel);
+    }
+
+    pub(crate) fn release_replies(&mut self) {
+        self.windows.release_replies();
+    }
+
+    pub(crate) fn held_reply(&self, channel: ChannelId) -> Option<MessageId> {
+        self.windows.held_reply(channel)
+    }
+
+    fn permissions_in(&self, channel: &Channel, now_millis: i64) -> Permissions {
+        if matches!(channel.kind, ChannelType::Dm | ChannelType::GroupDm) {
+            PRIVATE
+        } else {
+            self.permissions(channel.id, now_millis)
+                .unwrap_or(Permissions::NONE)
+        }
+    }
+
+    fn takes_replies(&self, channel: &Channel, permissions: Permissions, kind: u16) -> bool {
+        !self.is_system_dm(channel)
+            && permissions.contains(
+                Permissions::VIEW_CHANNEL
+                    | Permissions::SEND_MESSAGES
+                    | Permissions::READ_MESSAGE_HISTORY,
+            )
+            && REPLYABLE.contains(&kind)
     }
 
     pub(crate) fn shown_message(
@@ -82,12 +170,7 @@ impl State {
             Delivery::Sent | Delivery::Pending => return none,
         }
         let private = matches!(channel.kind, ChannelType::Dm | ChannelType::GroupDm);
-        let permissions = if private {
-            PRIVATE
-        } else {
-            self.permissions(channel.id, now_millis)
-                .unwrap_or(Permissions::NONE)
-        };
+        let permissions = self.permissions_in(channel, now_millis);
         if !permissions.contains(Permissions::VIEW_CHANNEL) {
             return none;
         }
@@ -114,9 +197,7 @@ impl State {
             .as_deref()
             .is_some_and(|reference| reference.kind == MessageReferenceType::Forward);
 
-        let reply = !system_dm
-            && can(Permissions::SEND_MESSAGES | Permissions::READ_MESSAGE_HISTORY)
-            && REPLYABLE.contains(&kind);
+        let reply = self.takes_replies(channel, permissions, kind);
         let pinnable = !system_dm
             && user_message
             && can(Permissions::PIN_MESSAGES | Permissions::READ_MESSAGE_HISTORY)

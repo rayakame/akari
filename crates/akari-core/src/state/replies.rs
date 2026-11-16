@@ -10,6 +10,16 @@ use crate::model::{self, ChannelId, MessageId, MessageReferenceType, MessageType
 // The official client's ReferencedMessageStore keeps this many per channel.
 const LIMIT: usize = 100;
 
+/// What a message to send answers: see [`Account::send_message`](crate::Account::send_message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplyTo {
+    /// A message of the channel the reply goes to.
+    pub message: MessageId,
+    /// Whether the reply pings the message's author; a reply to the user's own message never
+    /// does.
+    pub mention: bool,
+}
+
 /// The message a reply answers, as its preview line needs it: see
 /// [`Store::reply_target`](super::Store::reply_target).
 // Exhaustive, so a new case can't reach the apps as one of these unnoticed.

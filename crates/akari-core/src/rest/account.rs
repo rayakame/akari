@@ -12,7 +12,7 @@ use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, MessageId};
+use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, GuildId, MessageId};
 use crate::state::{AckBody, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
@@ -34,6 +34,8 @@ const STICKER_PACK: &str = "sticker-packs/{}";
 const SLOWMODE: u32 = 20016;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
+// The field error Discord's API answers a reply to a message that is gone with; not observed.
+const UNKNOWN_REFERENCE: &str = "REPLIES_UNKNOWN_MESSAGE";
 const RATE_LIMIT_RETRIES: u32 = 3;
 // Longer waits, such as slowmode, fail so the UI can say so instead of showing a pending message.
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(10);
@@ -68,6 +70,9 @@ pub enum RequestError {
     /// `limit` is Discord's limit then.
     #[error("the message is longer than {limit} characters")]
     TooLong { limit: usize },
+    /// A reply's target is gone: Discord refused the reference. The failed reply stays.
+    #[error("the message replied to was deleted")]
+    ReplyTargetDeleted,
     /// Empty content, a send before the account is online, a retry of a message that isn't
     /// failed, or a token that isn't a valid header value.
     #[error("invalid request")]
@@ -93,6 +98,7 @@ impl RequestError {
             Self::Network(_) => "network",
             Self::UnexpectedResponse => "unexpected_response",
             Self::TooLong { .. } => "too_long",
+            Self::ReplyTargetDeleted => "reply_target_deleted",
             Self::InvalidRequest => "invalid_request",
             Self::Closed => "closed",
         }
@@ -142,6 +148,14 @@ impl From<RestError> for RequestError {
             RestError::Captcha(challenge) => Self::CaptchaRequired(challenge),
             RestError::UnexpectedStatus { status } if status >= 500 => Self::ServerError { status },
             RestError::Api(api) if api.status >= 500 => Self::ServerError { status: api.status },
+            RestError::Api(api)
+                if api.code == INVALID_FORM_BODY
+                    && api.field_errors.iter().any(|error| {
+                        error.path == "message_reference" && error.code == UNKNOWN_REFERENCE
+                    }) =>
+            {
+                Self::ReplyTargetDeleted
+            }
             RestError::Api(api) if api.code == INVALID_FORM_BODY => {
                 match api
                     .field_errors
@@ -180,12 +194,32 @@ pub(crate) enum Query {
     Around(MessageId),
 }
 
+// The official client's body, in its order (module 138399, canary 671549).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct CreateMessage {
     content: String,
     nonce: String,
     tts: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_reference: Option<Reference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_mentions: Option<AllowedMentions>,
     flags: u64,
+}
+
+// A reply's: no `type` and no `fail_if_not_exists`, the guild left out in DMs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct Reference {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    guild_id: Option<String>,
+    channel_id: String,
+    message_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AllowedMentions {
+    parse: [&'static str; 3],
+    replied_user: bool,
 }
 
 impl CreateMessage {
@@ -194,8 +228,30 @@ impl CreateMessage {
             content,
             nonce,
             tts: false,
+            message_reference: None,
+            allowed_mentions: None,
             flags: 0,
         }
+    }
+
+    // Without the ping, mentions typed in the text still ping; only the reply's own doesn't.
+    pub(crate) fn answering(
+        mut self,
+        guild: Option<GuildId>,
+        channel: ChannelId,
+        message: MessageId,
+        mention: bool,
+    ) -> Self {
+        self.message_reference = Some(Reference {
+            guild_id: guild.map(|guild| guild.get().to_string()),
+            channel_id: channel.get().to_string(),
+            message_id: message.get().to_string(),
+        });
+        self.allowed_mentions = (!mention).then_some(AllowedMentions {
+            parse: ["users", "roles", "everyone"],
+            replied_user: false,
+        });
+        self
     }
 }
 

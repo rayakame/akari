@@ -62,6 +62,19 @@ impl<'a> Names<'a> {
         }
     }
 
+    // Without the message that mentions them: the user themself, or a user the store keeps.
+    pub(crate) fn stored_user(&self, id: UserId) -> MentionName {
+        let (Some(store), Some(current)) = (self.store, &self.current) else {
+            return MentionName::NotLoaded;
+        };
+        if current.user.id == id {
+            return known(current.user.display_name());
+        }
+        store
+            .user(id)
+            .map_or(MentionName::NotLoaded, |user| known(user.display_name()))
+    }
+
     pub(crate) fn role(&self, id: RoleId) -> (MentionName, u32) {
         if self.current.is_none() {
             return (MentionName::NotLoaded, 0);

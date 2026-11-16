@@ -20,7 +20,7 @@ mod token_store;
 #[cfg(test)]
 mod tests;
 
-pub use account::{Account, MessageLoad};
+pub use account::{Account, MessageLoad, ReplyTo};
 pub use client::{DiscordClient, Endpoints, HostInfo, Token, discord_endpoints};
 pub use embeds::{
     Embed, EmbedAuthor, EmbedFieldText, EmbedFooter, EmbedImage, EmbedKind, EmbedLink, EmbedVideo,

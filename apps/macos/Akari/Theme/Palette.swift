@@ -62,6 +62,15 @@ enum Palette {
     static let boost = token("boost", dark: "#ff73fa", light: "#ff73fa")
     static let warning = token("warning", dark: "#ea9800", light: "#ea9800")
     static let statusPositive = token("statusPositive", dark: "#3d9e60", light: "#269153")
+    // A reply line's elbow: Discord's spine-default.
+    static let spine = token("spine", dark: "#474850", light: "#c5c6ca")
+    // A reply line's name: text-strong at 64 %.
+    static let replyName = token("replyName", dark: "#fbfbfb", light: "#28282d", alpha: (0.64, 0.64))
+    // The row a pending reply answers: Discord's message-highlight, lighter while hovered.
+    static let replyingBackground = token(
+        "replyingBackground", dark: "#5865f2", light: "#5865f2", alpha: (0.16, 0.16))
+    static let replyingBackgroundHover = token(
+        "replyingBackgroundHover", dark: "#5865f2", light: "#5865f2", alpha: (0.10, 0.10))
     static let interactiveText = token("interactiveText", dark: "#abacb2", light: "#595a63")
     static let interactiveTextActive = token(
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")

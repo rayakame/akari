@@ -21,8 +21,8 @@ final class FakeStore: Store, @unchecked Sendable {
         var windows: [ChannelId: MessageWindow] = [:]
         var messages: [MessageId: Message] = [:]
         var reactions: [MessageId: [Reaction]] = [:]
-        // By the target's ID; none: not loaded.
-        var replyTargets: [MessageId: ReplyTarget] = [:]
+        // By the channel and message asked with; none: not loaded.
+        var replyTargets: [MessageKey: ReplyTarget] = [:]
         var unreadPins: Set<ChannelId> = []
         // By the channel and message asked with. None: nothing is allowed.
         var messageActions: [MessageKey: MessageActions] = [:]
@@ -204,12 +204,12 @@ final class FakeStore: Store, @unchecked Sendable {
     }
 
     override func replyTarget(channelId: ChannelId, targetId: MessageId) -> ReplyTarget {
-        read(.replyTarget(channelId, targetId)) { $0.replyTargets[targetId] ?? .notLoaded }
+        read(.replyTarget(channelId, targetId)) { $0.replyTargets[MessageKey(channelId, targetId)] ?? .notLoaded }
     }
 
     override func replyTargets(channelId: ChannelId, targetIds: [MessageId]) -> [ReplyTarget] {
         read(.replyTargets(channelId, targetIds)) { state in
-            targetIds.map { state.replyTargets[$0] ?? .notLoaded }
+            targetIds.map { state.replyTargets[MessageKey(channelId, $0)] ?? .notLoaded }
         }
     }
 
@@ -349,5 +349,9 @@ struct MessageKey: Hashable {
 extension FakeStore.State {
     mutating func allow(_ actions: MessageActions?, message: UInt64, in channel: UInt64) {
         messageActions[MessageKey(id(channel), id(message))] = actions
+    }
+
+    mutating func answer(_ target: ReplyTarget?, message: UInt64, in channel: UInt64) {
+        replyTargets[MessageKey(id(channel), id(message))] = target
     }
 }
