@@ -71,6 +71,11 @@ pub enum StoreEvent {
     PinsUnreadChanged {
         channel_id: ChannelId,
     },
+    /// The channel's pins list changed (a page, a pin, a pinned message, a new session): read
+    /// [`Store::pins`](super::Store::pins) again.
+    PinsChanged {
+        channel_id: ChannelId,
+    },
     /// The thread joined or left its guild's [`channel_list`](super::Store::channel_list) while
     /// it didn't change itself: its inactivity window ended, it was read past it, or a message
     /// came after it.

@@ -45,9 +45,10 @@ pin time the user acknowledged, compared by milliseconds.
   later READY's diff. A mute and a thread's join change it too, with their own events
   (`GuildSettingsChanged`, `ChannelUpdated`). A pin time alone is no `ChannelUpdated` at READY,
   like a newest message.
-- Akari doesn't ack pins yet (`POST /channels/{id}/pins/ack`, sent by the official client only
-  from its open pins popout: from the code read of canary 671549, not observed); another
-  client's ack arrives as CHANNEL_PINS_ACK.
+- `Account::ack_pins` acks while the dot shows (`POST /channels/{id}/pins/ack`, which the
+  official client sends only from its open pins popout: from the code read of canary 671549, not
+  observed), up to the channel's newest pin: the dot goes at once and stays gone if the request
+  fails ([messages.md](messages.md#the-ack)). Another client's ack arrives as CHANNEL_PINS_ACK.
 
 ## The unread rule
 

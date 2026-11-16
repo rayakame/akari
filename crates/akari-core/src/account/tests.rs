@@ -49,6 +49,10 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::MessageReplaced { message, .. } => {
             format!("MessageReplaced({})", message.id.get())
         }
+        StoreEvent::PinsChanged { channel_id } => format!("PinsChanged({})", channel_id.get()),
+        StoreEvent::PinsUnreadChanged { channel_id } => {
+            format!("PinsUnreadChanged({})", channel_id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -4313,6 +4317,7 @@ mod expressions;
 mod forum_posts;
 mod forum_unreads;
 mod images;
+mod pins;
 mod post_create;
 mod reactions;
 mod reading;

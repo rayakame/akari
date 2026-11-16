@@ -86,6 +86,12 @@ pub enum SessionCommand {
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(1..=100))]
         limit: u8,
     },
+    /// List a channel's pinned messages, the newest pin first, each after when it was pinned.
+    Pins { channel_id: u64 },
+    /// Pin a message.
+    Pin { channel_id: u64, message_id: u64 },
+    /// Unpin a message.
+    Unpin { channel_id: u64, message_id: u64 },
     /// What the emoji picker lists for reacting in a channel: the quick reactions, the recently
     /// used ones and each server's emoji with whether you may use them there. With a query, what
     /// its search finds.
@@ -195,6 +201,23 @@ pub async fn run<S: Accounts>(
             };
             let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
             reactions::reactors(&session.account, channel, message, args).await
+        }
+        SessionCommand::Pins { channel_id } => {
+            crate::pins::list(&session.account, Snowflake::new(channel_id)).await
+        }
+        SessionCommand::Pin {
+            channel_id,
+            message_id,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            crate::pins::change(&session.account, channel, message, true).await
+        }
+        SessionCommand::Unpin {
+            channel_id,
+            message_id,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            crate::pins::change(&session.account, channel, message, false).await
         }
         SessionCommand::Emoji {
             channel_id,
@@ -540,7 +563,7 @@ fn guild_note(
     Some(format!("(a large server{size}: {subscription})"))
 }
 
-fn line(store: &Store, message: &Message) -> String {
+pub(crate) fn line(store: &Store, message: &Message) -> String {
     let text = MessageLine {
         time: utc_minute(message.timestamp.unix_millis()),
         author: message.author.display_name(),
@@ -824,8 +847,10 @@ mod tests {
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
     use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use wiremock::matchers::{method, path, query_param, query_param_is_missing};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
     use super::*;
 
@@ -1410,6 +1435,221 @@ mod tests {
             requests.iter().all(|(method, ..)| method == "GET"),
             "{requests:?}"
         );
+    }
+
+    fn pinned(id: u64, at: &str) -> Value {
+        let mut message = answered(id, 0);
+        message["pinned"] = true.into();
+        json!({"pinned_at": at, "message": message})
+    }
+
+    #[tokio::test]
+    async fn pins_lists_every_page_of_the_channels_pins() {
+        let server = MockServer::start().await;
+        let pins = format!("/api/v9/channels/{GENERAL}/messages/pins");
+        Mock::given(method("GET"))
+            .and(path(pins.clone()))
+            .and(query_param_is_missing("before"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [pinned(8, "2026-10-02T09:30:00+00:00")], "has_more": true,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(pins.clone()))
+            .and(query_param("before", "2026-10-02T09:30:00.000Z"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [pinned(7, "2026-10-01T09:30:00+00:00")], "has_more": false,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = online(&server).await;
+
+        let command = SessionCommand::Pins {
+            channel_id: GENERAL,
+        };
+        let code = run(&client, &Arc::new(OneAccount), command).await;
+
+        assert!(succeeded(code));
+    }
+
+    #[tokio::test]
+    async fn pin_and_unpin_load_the_message_then_ask_discord() {
+        for pin in [true, false] {
+            let server = MockServer::start().await;
+            let mut message = answered(7, 0);
+            message["pinned"] = (!pin).into();
+            Mock::given(method("GET"))
+                .and(path(format!("/api/v9/channels/{GENERAL}/messages")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!([message])))
+                .mount(&server)
+                .await;
+            Mock::given(method(if pin { "PUT" } else { "DELETE" }))
+                .and(path(format!("/api/v9/channels/{GENERAL}/messages/pins/7")))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let client = online(&server).await;
+            let (channel_id, message_id) = (GENERAL, 7);
+            let command = if pin {
+                SessionCommand::Pin {
+                    channel_id,
+                    message_id,
+                }
+            } else {
+                SessionCommand::Unpin {
+                    channel_id,
+                    message_id,
+                }
+            };
+
+            let code = run(&client, &Arc::new(OneAccount), command).await;
+
+            assert!(succeeded(code), "pin {pin}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pin_discord_refuses_fails() {
+        let server = MockServer::start().await;
+        pages(&server, 0).await;
+        Mock::given(method("PUT"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages/pins/7")))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "message": "Maximum number of pins reached (250)", "code": 30003,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = online(&server).await;
+
+        let command = SessionCommand::Pin {
+            channel_id: GENERAL,
+            message_id: 7,
+        };
+        let code = run(&client, &Arc::new(OneAccount), command).await;
+
+        assert!(!succeeded(code));
+    }
+
+    async fn pins_answered(
+        server: &MockServer,
+        channel: u64,
+        answer: impl Respond + 'static,
+    ) -> Result<Vec<String>, String> {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages/pins")))
+            .respond_with(answer)
+            .mount(server)
+            .await;
+        let client = online(server).await;
+        let Ok(session) = session::open(&client, &Arc::new(OneAccount), false).await else {
+            panic!("no session");
+        };
+        crate::pins::lines(&session.account, Snowflake::new(channel)).await
+    }
+
+    #[tokio::test]
+    async fn each_pin_is_listed_after_its_pin_time() {
+        let server = MockServer::start().await;
+        let answer = ResponseTemplate::new(200).set_body_json(json!({
+            "items": [pinned(8, "2026-10-02T09:30:00+00:00")], "has_more": false,
+        }));
+
+        let lines = pins_answered(&server, GENERAL, answer).await.unwrap();
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("pinned 2026-10-02 09:30  "),
+            "{lines:?}"
+        );
+    }
+
+    // One pin a page, as when Discord lists pins Akari can't read: `brings(page)` is the message
+    // page `page` lists and whether Discord has more after it.
+    fn one_a_page(brings: impl Fn(u64) -> (u64, bool) + Send + Sync + 'static) -> impl Respond {
+        let asked = AtomicU64::new(0);
+        move |_: &wiremock::Request| {
+            let page = asked.fetch_add(1, Ordering::SeqCst);
+            let (id, more) = brings(page);
+            let at = format!("2026-10-02T09:{:02}:00+00:00", 59 - page.min(59));
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": [pinned(id, &at)], "has_more": more}))
+        }
+    }
+
+    #[tokio::test]
+    async fn every_page_is_listed_while_discord_has_more() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, one_a_page(|page| (100 + page, page < 11)))
+            .await
+            .unwrap();
+
+        assert_eq!(lines.len(), 12, "{lines:?}");
+    }
+
+    #[tokio::test]
+    async fn a_page_that_adds_no_pin_ends_the_listing() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, one_a_page(|_| (100, true)))
+            .await
+            .unwrap();
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let received = server.received_requests().await.unwrap();
+        let pages = received
+            .iter()
+            .filter(|request| request.url.path().ends_with("/pins"))
+            .count();
+        assert_eq!(pages, 2);
+    }
+
+    #[tokio::test]
+    async fn a_channel_without_pins_says_so() {
+        let server = MockServer::start().await;
+        let answer =
+            ResponseTemplate::new(200).set_body_json(json!({"items": [], "has_more": false}));
+
+        let lines = pins_answered(&server, GENERAL, answer).await;
+
+        assert_eq!(lines, Ok(vec!["(no pins)".to_owned()]));
+    }
+
+    #[tokio::test]
+    async fn the_pins_of_a_channel_the_account_doesnt_know_arent_listed() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, 999, ResponseTemplate::new(500)).await;
+
+        assert_eq!(
+            lines,
+            Err("Couldn't load the pins: the channel isn't known.".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pins_listing_discord_failed_says_why_and_fails() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, ResponseTemplate::new(500)).await;
+        let client = online(&server).await;
+        let command = SessionCommand::Pins {
+            channel_id: GENERAL,
+        };
+        let code = run(&client, &Arc::new(OneAccount), command).await;
+
+        assert_eq!(
+            lines,
+            Err(format!(
+                "Couldn't load the pins: {}",
+                report(&RequestError::ServerError { status: 500 })
+            ))
+        );
+        assert!(!succeeded(code));
     }
 
     // #general's message 7 with the user's own reaction with :wave:, and the reactions' routes.

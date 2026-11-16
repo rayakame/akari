@@ -327,6 +327,26 @@ pub struct MessageReference {
     pub guild_id: Option<Snowflake<GuildMarker>>,
 }
 
+/// A page of a channel's pins (`GET /channels/{id}/messages/pins`), the newest pin first. From
+/// the code read of Discord's client, not observed.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[non_exhaustive]
+pub struct MessagePins {
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub items: Vec<MessagePin>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[non_exhaustive]
+pub struct MessagePin {
+    /// When the message was pinned; the page after asks for pins before the last one's.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub pinned_at: Option<Timestamp>,
+    pub message: Message,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct StickerItem {
     pub id: Snowflake<StickerMarker>,

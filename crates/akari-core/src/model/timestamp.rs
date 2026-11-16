@@ -28,6 +28,21 @@ impl Timestamp {
         Self::from_unix_nanos_wide(i128::from(unix_nanos))
     }
 
+    // As JavaScript's `Date.toISOString()`, which the official client's cursors are.
+    pub(crate) fn iso_millis(self) -> String {
+        let time = self.0.to_offset(time::UtcOffset::UTC);
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            time.year(),
+            u8::from(time.month()),
+            time.day(),
+            time.hour(),
+            time.minute(),
+            time.second(),
+            time.millisecond()
+        )
+    }
+
     fn from_unix_nanos_wide(unix_nanos: i128) -> Self {
         Self(
             OffsetDateTime::from_unix_timestamp_nanos(unix_nanos)
@@ -90,6 +105,16 @@ mod tests {
         let written: Timestamp = serde_json::from_value(iso(1_791_461_700_250).into()).unwrap();
 
         assert_eq!(written.unix_millis(), 1_791_461_700_250);
+    }
+
+    #[test]
+    fn a_cursor_is_written_as_javascripts_iso_string_in_utc() {
+        let pinned: Timestamp =
+            serde_json::from_str("\"2026-10-02T11:30:00.250999+02:00\"").unwrap();
+        let whole: Timestamp = serde_json::from_str("\"2026-01-05T03:04:05+00:00\"").unwrap();
+
+        assert_eq!(pinned.iso_millis(), "2026-10-02T09:30:00.250Z");
+        assert_eq!(whole.iso_millis(), "2026-01-05T03:04:05.000Z");
     }
 
     #[test]

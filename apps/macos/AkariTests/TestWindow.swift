@@ -81,6 +81,7 @@ enum TestWindow {
     private static func hidden<W: NSWindow>(_ window: W) -> W {
         window.isReleasedWhenClosed = false
         TestHost.keepOutOfSight(window)
+        Releases.watch(window)
         return window
     }
 }

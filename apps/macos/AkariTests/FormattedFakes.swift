@@ -395,6 +395,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         editable.withLock { $0 } && has(channelId) ? newest(of: channelId) : nil
     }
 
+    override func pinsUnread(channelId: ChannelId) -> Bool { false }
+
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
         let edits = editable.withLock { $0 }
         var actions = testMessageActions(

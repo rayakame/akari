@@ -139,6 +139,11 @@ pub enum StoreEvent {
     PinsUnreadChanged {
         channel_id: ChannelId,
     },
+    /// The channel's pins list changed (a page, a pin or unpin, a pinned message's change, a
+    /// new session): read `Store::pins` again.
+    PinsChanged {
+        channel_id: ChannelId,
+    },
     /// A thread joined or left its guild's `channel_list` without changing itself, e.g. its
     /// inactivity window ended; read the list again.
     ThreadListingChanged {
@@ -280,6 +285,7 @@ impl StoreEvent {
             },
             E::GuildBadgeChanged { guild_id } => Self::GuildBadgeChanged { guild_id },
             E::PinsUnreadChanged { channel_id } => Self::PinsUnreadChanged { channel_id },
+            E::PinsChanged { channel_id } => Self::PinsChanged { channel_id },
             E::ThreadListingChanged {
                 guild_id,
                 thread_id,

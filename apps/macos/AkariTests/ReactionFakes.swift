@@ -34,6 +34,8 @@ nonisolated final class ReactionsStore: Store, @unchecked Sendable {
         reacted.withLock { $0 }
     }
 
+    override func pinsUnread(channelId: ChannelId) -> Bool { false }
+
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
         var actions = testMessageActions()
         actions.react = true

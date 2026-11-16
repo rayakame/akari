@@ -683,4 +683,5 @@ fn a_deleted_reply_target_is_logged_as_its_own_kind() {
 }
 
 mod messages;
+mod pins;
 mod reactions;

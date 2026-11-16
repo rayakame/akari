@@ -18,6 +18,12 @@ extension NSWindow {
     var holdsKey: Bool {
         NSApp.keyWindow?.isFamily(of: self) ?? isKeyWindow
     }
+
+    var keyPanelAbove: NSWindow? {
+        (NSWindow.windowNumbers(options: []) ?? []).lazy
+            .compactMap { NSApp.window(withWindowNumber: $0.intValue) }
+            .first { $0 !== self && $0 is ContainerPanel && $0.canBecomeKey && $0.isVisible && $0.isFamily(of: self) }
+    }
 }
 
 /// How a window takes the key; tests record it, since a test's app never becomes active.
@@ -330,7 +336,12 @@ final class ChildWindows {
         panel = nil
         shield = nil
         host = nil
-        if refocus, hadKey, let parent, parent.isVisible, !parent.isMiniaturized {
+        guard refocus, hadKey, let parent, parent.isVisible, !parent.isMiniaturized else {
+            return
+        }
+        if let above = parent.keyPanelAbove {
+            focus.makeKey(above)
+        } else {
             focus.makeKey(parent)
             self.refocus()
         }

@@ -16,7 +16,9 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Mark the server read | Shift+Escape | Done |
 | Mark unread from a message | Alt+click on it | Done: Option-click anywhere in the message's box but on its buttons ([message-actions.md](message-actions.md#mark-unread)) |
 | The longer hover bar | Shift held over a message | Done: Copy Link and Mark Unread come first; the bar changes while the pointer rests |
-| An action without its question, a reply without its ping | Shift+click on Delete, Pin, Reply | Reply and Delete: done, in the hover bar and the menu ([replies.md](replies.md#starting-a-reply), [edit-delete.md](edit-delete.md#deleting)); Pin later. Shift counts as it is at the click |
+| An action without its question, a reply without its ping | Shift+click on Delete, Pin, Unpin, Reply | Done, in the hover bar and the menu, and the pins popout's ✕ ([replies.md](replies.md#starting-a-reply), [edit-delete.md](edit-delete.md#deleting), [pins.md](pins.md#pinning-and-unpinning)). Shift counts as it is at the click |
+| Toggle the pins popout | Cmd+P | Done: View > Show Pinned Messages (Hide while open), wherever the header has the pins button; File > Print is gone ([pins.md](pins.md#opening-and-closing)) |
+| Jump to a pinned message and keep the popout open | Shift+click on Jump | Done ([pins.md](pins.md#the-popout)) |
 | A focused message's keys: E edit, R reply, P pin, Backspace delete, + react, F forward, T thread, Cmd+C copy text, Alt+Enter mark unread | on a message with keyboard focus (Tab or the arrows) | Later: Akari's messages take no keyboard focus yet |
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
@@ -71,9 +73,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   nothing, as in the official client (**unverified**); in the message list and a message's
   text AppKit handles it as usual.
 - **Escape with something open.** An edit, a pending reply and the New Thread form take Escape
-  first, as above. The emoji picker, the media viewer, the delete question and the other panels
-  have the keyboard while they show, and Escape closes them and marks nothing read, as in the
-  official client's handler.
+  first, as above. The emoji picker, the media viewer, the delete, pin and unpin questions, the
+  pins popout and the other panels have the keyboard while they show, and Escape closes them and
+  marks nothing read, as in the official client's handler.
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
   give the same keys. In Akari it jumps to the first unread message, as a click on the unread

@@ -93,9 +93,11 @@ The rail and the channel list together form the sidebar.
   Thread | Jump To Top, Open in Split View | Copy Link, Copy Thread ID (observed 2026-10-17).
   *Akari: the channel's name in `interactiveText` at the header's size with the pointing hand,
   the chevron 11 semibold `textMuted`; not measured yet. Of the buttons only Threads (text and
-  announcement channels and their threads, [thread-browser.md](thread-browser.md)) and "…", for
-  threads, with Join Thread or Leave Thread (disabled while the thread is archived); the other
-  items come later. Each is a 32 box, the last 16 from the header's right edge. A join or leave that fails shows Discord's alert: "Cannot join thread" / "This
+  announcement channels and their threads, [thread-browser.md](thread-browser.md)), the pins
+  button with its dot (channels, threads, DMs and group DMs, [pins.md](pins.md)) and "…", for
+  threads, with Join Thread or Leave Thread (disabled while the thread is archived), in that
+  order; the other items come later. Each is a 32 box, 8 apart, the last 16 from the header's
+  right edge. A join or leave that fails shows Discord's alert: "Cannot join thread" / "This
   thread has reached the maximum possible number of members." when it's full, else "Error" /
   "An error occurred, please try again."*
 

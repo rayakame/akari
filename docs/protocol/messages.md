@@ -514,6 +514,122 @@ the newest loaded one (pending and failed sends aren't loaded messages) whose
 `akari-cli edit <channel> <message> <text…>` and `akari-cli delete <channel> <message>` load the
 message, then edit or delete it.
 
+## Pins
+
+`Account::load_pins(channel)`, `load_more_pins(channel)`, `pin(channel, message)`,
+`unpin(channel, message)` and `ack_pins(channel)` (`crates/akari-core/src/account/pins.rs`); the
+list is `Store::pins(channel)` (`state/windows/pins.rs`, `state/apply/pins.rs`). The plan's
+D167 has the newer routes only, the only ones in the official client's bundle.
+
+**Everything here that shapes a request or reads an answer is from the code read of canary
+671549, not observed** (modules 687709 and 218461): the paths, the page size and cursor, the
+answer's shape, the error codes and the ack's tries. No pin, unpin or pins list of the official
+client was looked at in a network tab. Answers are read leniently.
+
+### The requests
+
+- **The list:** `GET /channels/{channel}/messages/pins?limit=25`, and for a later page
+  `&before=` the last pin's time as JavaScript's `toISOString()` writes it (UTC, milliseconds,
+  `Z`; percent-encoded: `2026-10-02T09%3A30%3A00.250Z`). The answer is `{"items": [{"pinned_at":
+  "…", "message": {…}}], "has_more": …}`, the newest pin first. A pin whose message doesn't read
+  is left out, a missing or broken `pinned_at` takes the message's own time, a missing or broken
+  `has_more` is false; an answer that isn't such an object is `UnexpectedResponse`.
+- **Pin:** `PUT /channels/{channel}/messages/pins/{message}`; **unpin:** `DELETE` on the same
+  path. No body, no query; the answer isn't read.
+- **Ack:** `POST /channels/{channel}/pins/ack`, the read state's old path, no body.
+- **Which message:** the one the row shows (a thread's starter row pins the parent's message,
+  as `Store::shown_message` names it), or one only the pins list has.
+- **An archived thread** is opened first (`PATCH /channels/{thread}` with `{"archived":false}`),
+  as before an edit.
+- **Retries:** the list, a pin and an unpin may be repeated, so they follow the rule for such
+  calls ([rate-limits.md](rate-limits.md)): a 429 waited out once, a 502, a 504 or a connection
+  that broke asked once more. *Akari:* the official client's list has its HTTP layer's two
+  retries, its pin and unpin none. The ack goes through the store's own tries
+  ([below](#the-ack)).
+
+### Before asking
+
+- Without `MessageActions::pin` (`unpin`): `PinError::Request(InvalidRequest)`, no request. A
+  message the pins list holds counts as pinned there, whatever an older copy of it says.
+- A pin or an unpin changes nothing in the store (D162): the gateway's MESSAGE_UPDATE flips
+  the message's `pinned` and its place in the list, and CHANNEL_PINS_UPDATE the dot.
+
+| Answer | Official client's alert | `PinError` |
+|---|---|---|
+| 30003 | "The Pin Broke": "…You may have hit the limit of 250 pins in channel #name." (in a DM: "in this channel.") | `TooMany { limit: 250 }` |
+| 50083 | "Invalid Thread Archive State" | `Archived` |
+| 50021 | "Invalid Message Type" | `SystemMessage` |
+| 50019 | "Invalid Channel Type" | `WrongChannel` |
+| 50001; 50013 or another 403 | "No Access"; "The Pin Broke" with Discord's message | `Forbidden` (*Akari:* one for all) |
+| 10008 | "Unknown Message" | `Gone`; for an unpin, done (*Akari*: the pin went with the message) |
+| anything else | "The Pin Broke" with Discord's message, without a code "Error" | `Request(RequestError)` |
+
+The official client's unpin has one alert for every failure ("The Pin Is Stuck!" with Try
+Again); `PinError` tells them apart all the same. 250 is the number the client prints for every
+kind of channel (`PIN_LIMIT`).
+
+### The pins list
+
+- **Its own store**, per channel, beside the windows (D167): `PinsPage { items, has_more,
+  state }`, each item a `PinnedMessage { message, pinned_at }`, the newest pin first.
+  `PinsState` is `NotLoaded`, `Loading`, `Loaded` or `Failed`; `Failed` without items is a
+  first page that failed, never an empty list. *Akari:* the official client shows its empty
+  state for both. `PinsChanged { channel_id }` says to read it again.
+- **`load_pins`** asks for the first page when the list is `NotLoaded`, after its first page
+  failed, or when the channel's `last_pin_timestamp` is newer than any pin time the list placed
+  (a pin whose MESSAGE_UPDATE never came; an empty list has seen the time the channel had when
+  it was asked). Otherwise nothing: a page on its way, or a list that is current. The official
+  client asks again only after a failure or a new connection. **`load_more_pins`** asks for the
+  page after the last pin of this connection while `has_more`, also after a failed one. With no
+  such pin to go on from (no page of this connection landed yet, or all its pins went: a bulk
+  delete, unpins elsewhere) it asks for the first page, which reconciles from the start. A page
+  that leaves out every pin it lists ends the list: the next would be asked from the same pin.
+- **A page takes the place of the pins whose times it covers**: from its last pin's time up to
+  `before` (the first page: up to now), everything older when Discord has no more. A pin listed
+  twice is listed once, as the page has it; a message of another channel is left out; every
+  message of a page is pinned. A pinned reply's `referenced_message` feeds the reply targets,
+  and a pinned message a reply names answers it. The host's message preparer runs on the page
+  before the store has it, as on a history page.
+- **Kept current on every copy of the message** ([dispatches.md](dispatches.md#message-windows)):
+  MESSAGE_UPDATE patches a listed message and `pinned: false` takes it out; deletes and bulk
+  deletes take it out; reactions count on it; the user's own edits and deletes reach it as every
+  copy, and a page loaded while an edit waits shows the saved text, in its pins and the reply
+  lines. `Store::reactions` and `Store::message_actions` answer for a message only the list has.
+- **A new pin** (`pinned: true` for a message the list lacks) goes to the front when a copy the
+  store holds (a window's, a held message, a viewed thread's starter) said it wasn't pinned, or
+  when the list is complete (every page of this connection loaded); else it waits for its page,
+  being an older pin edited on a page not loaded yet, or a message the store has no copy of.
+  *Akari:* the official client puts every pinned update it lacks at the front, an edit of an old
+  pin too. Its time is this device's clock, never before the newest pin, until the channel's
+  newest pin time names it: CHANNEL_PINS_UPDATE before or after the update, a newer time naming
+  the oldest such pin first, as the pins came.
+- **Changes while a page loads** are put over it, like a history page's: an update unless the
+  page has a newer edit, a delete, an unpin, a reaction (a copy that was current, the list's or a
+  window's, gives its counts; else the reaction is applied once). A pin placed by the gateway
+  meanwhile stays when the page lacks it: the page predates it.
+- **A new session** leaves every list shown and `NotLoaded`; a page asked before it is dropped,
+  and the reload reconciles page by page, the pins further down shown until a page reaches them.
+  *Akari:* the official client empties its pins cache on a new connection.
+- **Bounded:** the lists of the 10 channels whose pins were asked for last (`PinsChanged` for one
+  that goes); a deleted channel or a left guild takes its list. Not in the disk cache.
+- **Signed attachment links** are renewed by the image tier whenever one is asked for, so the list
+  isn't reloaded for links that expire within the hour, as the official client's popout does.
+
+### The ack
+
+`ack_pins` acks only while `Store::pins_unread` is true (the official popout's rule: on opening
+and on a new pin while it is open), up to the channel's newest pin. The store has it at once
+(`PinsUnreadChanged`) and keeps it if the request fails, as the official client does. Three tries,
+2 s and then 4 s apart or a longer `retry_after`, for network failures, 5xx answers and rate
+limits; Discord's refusal ends them, and a 401 closes the account. *Akari:* the official client
+tries again after any failure and waits for the network first. Not replayed over a READY prepared
+meanwhile, unlike a message's ack.
+
+### akari-cli
+
+`akari-cli pins <channel>` lists every page, each pin as `pinned <time UTC>` before the message's
+line; `akari-cli pin <channel> <message>` and `unpin` load the message, then pin or unpin it.
+
 ## Live messages
 
 MESSAGE_CREATE, MESSAGE_UPDATE and MESSAGE_DELETE change only windows; see

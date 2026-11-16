@@ -930,6 +930,50 @@ impl From<state::MessageActions> for MessageActions {
     }
 }
 
+/// A channel's pinned messages as loaded: see `Store::pins`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PinsPage {
+    /// The newest pin first.
+    pub items: Vec<PinnedMessage>,
+    /// Discord has pins after `items`, or hasn't said yet in this connection which of the last
+    /// ones are still pinned: `Account::load_more_pins` asks.
+    pub has_more: bool,
+    pub state: PinsState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PinnedMessage {
+    pub message: Message,
+    /// When it was pinned; for a pin the gateway just brought, this device's clock until Discord
+    /// names the time.
+    pub pinned_at: SystemTime,
+}
+
+/// Where a channel's pins list stands in this connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PinsState {
+    /// Not asked for in this connection: `Account::load_pins` asks. Items shown are an earlier
+    /// connection's, kept until the answer replaces them.
+    NotLoaded,
+    /// A page is on its way.
+    Loading,
+    /// As Discord listed them, kept current by the gateway.
+    Loaded,
+    /// The last page failed. Without items it was the first, which isn't an empty list.
+    Failed,
+}
+
+impl From<state::PinsState> for PinsState {
+    fn from(state: state::PinsState) -> Self {
+        match state {
+            state::PinsState::Loading => Self::Loading,
+            state::PinsState::Loaded => Self::Loaded,
+            state::PinsState::Failed => Self::Failed,
+            _ => Self::NotLoaded,
+        }
+    }
+}
+
 /// A forum post's first message, for its card: see `Store::post_preview`.
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]

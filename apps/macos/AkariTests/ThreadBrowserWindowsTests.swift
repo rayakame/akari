@@ -161,8 +161,7 @@ final class ThreadBrowserWindowsTests {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
     }
 
-    // The popout hangs under the Threads button, its right edge on the button's (1084) and its
-    // top 81 from the window's top, 480 wide; the shield covers the whole window.
+    // Its right edge on the Threads button's: 1044, the pins button's 32 and 8 left of its 1084.
     @Test
     func thePopoutIsAKeyPanelOverAShieldOverTheWindow() async throws {
         try await opened(.popout)
@@ -173,7 +172,7 @@ final class ThreadBrowserWindowsTests {
         #expect(!cover.canBecomeKey && !cover.ignoresMouseEvents)
         #expect(browser.canBecomeKey && !browser.canBecomeMain)
         let frame = fromTop(browser.frame)
-        #expect(abs(frame.maxX - 1084) <= 1 && abs(frame.minY - 81) <= 1, "\(frame)")
+        #expect(abs(frame.maxX - 1044) <= 1 && abs(frame.minY - 81) <= 1, "\(frame)")
         #expect(frame.width == 480)
         #expect(keyed.last === browser)
     }
@@ -206,7 +205,8 @@ final class ThreadBrowserWindowsTests {
         for (name, point) in [
             ("channel row", screenPoint(fromTop: 150, 120)),
             ("server rail", screenPoint(fromTop: 36, 120)),
-            ("Threads button", screenPoint(fromTop: 1068, 56)),
+            ("Threads button", screenPoint(fromTop: 1028, 56)),
+            ("pins button", screenPoint(fromTop: 1068, 56)),
             ("composer", screenPoint(fromTop: 1050, 790)),
         ] {
             #expect(topWindow(at: point) === cover, "\(name)")

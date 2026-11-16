@@ -56,8 +56,8 @@ pub use store::{Store, Subscription};
 #[cfg(test)]
 pub(crate) use store::{deadline_reads, deadline_reads_reset};
 pub use types::*;
-pub use windows::MessageWindow;
 pub(crate) use windows::{
     CachedMessages, CachedTargets, CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket,
-    Outgoing, StarterFetch, WindowLimits,
+    Outgoing, PINS_PAGE, PinsAsk, PinsLoad, StarterFetch, WindowLimits,
 };
+pub use windows::{MessageWindow, PinnedMessage, PinsPage, PinsState};

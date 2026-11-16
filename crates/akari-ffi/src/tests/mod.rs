@@ -14,6 +14,7 @@ mod images;
 mod login;
 mod message_data;
 mod messages;
+mod pins;
 mod reactions;
 mod replies;
 mod settings;

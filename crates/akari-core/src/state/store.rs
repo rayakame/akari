@@ -30,8 +30,8 @@ use super::types::{
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
-    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, Outgoing, StarterFetch,
-    WindowLimits,
+    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, Outgoing, PinsAsk, PinsLoad,
+    PinsPage, StarterFetch, WindowLimits,
 };
 use crate::backlog::Backlog;
 use crate::emoji::{EmojiVersion, Query};
@@ -548,6 +548,41 @@ impl Store {
         self.write("older threads", |inner, events| {
             inner.state.abandon_older_threads(parent, page, events);
         });
+    }
+
+    // Read first: a host asks each time its pins popout opens.
+    pub(crate) fn begin_pins(&self, channel: ChannelId, load: PinsLoad) -> Option<PinsAsk> {
+        if !self.read(|inner| inner.state.wants_pins(channel, load)) {
+            return None;
+        }
+        self.write("pins", |inner, events| {
+            inner.state.begin_pins(channel, load, events)
+        })
+    }
+
+    pub(crate) fn finish_pins(&self, ask: PinsAsk, page: model::MessagePins) {
+        self.write("pins", |inner, events| {
+            inner.state.finish_pins(ask, page, events);
+        });
+    }
+
+    pub(crate) fn fail_pins(&self, ask: PinsAsk) {
+        self.write("pins", |inner, events| inner.state.fail_pins(ask, events));
+    }
+
+    pub(crate) fn abandon_pins(&self, ask: PinsAsk) {
+        self.write("pins", |inner, events| {
+            inner.state.abandon_pins(ask, events);
+        });
+    }
+
+    pub(crate) fn ack_pins(&self, channel: ChannelId) -> bool {
+        if !self.pins_unread(channel) {
+            return false;
+        }
+        self.write("pins ack", |inner, events| {
+            inner.state.ack_pins(channel, events)
+        })
     }
 
     // The connection a search is asked in, for `keep_found_threads`.
@@ -1559,12 +1594,13 @@ impl Store {
     /// What the user may do with the message, by the official client's rules: the message's
     /// type, flags and delivery, the user's permissions in its channel (a DM or group DM asks
     /// none, its system DM allows next to nothing), their timeout, and a thread's archived and
-    /// locked state. Nothing for a message the store doesn't have. Read again when the message,
-    /// its channel or the user's permissions change. A viewed thread's starter row (the
-    /// thread's ID and the row's) answers for the message it shows, in that message's channel:
-    /// requests take the IDs of [`Store::shown_message`]. It allows no reply: one sent in the
-    /// thread can't name a message of the parent channel. Its `mark_unread` is the
-    /// thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
+    /// locked state. Nothing for a message the store doesn't have; a message only the pins list
+    /// has answers there, and one the list has is pinned whatever an older copy says. Read
+    /// again when the message, its channel or the user's permissions change. A viewed thread's
+    /// starter row (the thread's ID and the row's) answers for the message it shows, in that
+    /// message's channel: requests take the IDs of [`Store::shown_message`]. It allows no reply:
+    /// one sent in the thread can't name a message of the parent channel. Its `mark_unread` is
+    /// the thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
     /// row's own IDs.
     pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
         let now = self.now_millis();
@@ -1591,7 +1627,7 @@ impl Store {
     }
 
     /// [`Store::message_actions`] for a message the caller holds, which the store may have let
-    /// go of: a pinned message of the pins list, a reply's target, a row a jump trimmed away.
+    /// go of: a reply's target, a row a jump trimmed away.
     pub fn message_actions_of(&self, message: &Message) -> MessageActions {
         let now = self.now_millis();
         self.read(|inner| inner.state.message_actions_of(message, now))
@@ -1684,7 +1720,8 @@ impl Store {
     /// The message's reactions, in Discord's order, new emoji at the end; empty when it has
     /// none or isn't loaded. Read again on `MessageReactionsChanged`, and with the message
     /// itself on `MessageUpdated`. A viewed thread's starter row answers for the message it
-    /// shows, a forum post's ID in both places for its first message.
+    /// shows, a forum post's ID in both places for its first message, and a message only the
+    /// pins list has answers there too (read again on `PinsChanged`).
     pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
         self.read(|inner| inner.state.reactions(channel, message))
     }
@@ -1706,6 +1743,12 @@ impl Store {
     pub fn pins_unread(&self, channel: ChannelId) -> bool {
         let now = Timestamp::from_unix_millis(self.now_millis());
         self.read(|inner| inner.state.pins_unread(channel, now))
+    }
+
+    /// The channel's pinned messages, the newest pin first, a page at a time from
+    /// [`Account::load_pins`](crate::Account::load_pins); read it again on `PinsChanged`.
+    pub fn pins(&self, channel: ChannelId) -> PinsPage {
+        self.read(|inner| inner.state.pins(channel))
     }
 
     /// The message a reply answers, by the IDs [`Message::replied_to`] gives (the target's

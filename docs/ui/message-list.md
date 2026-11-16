@@ -190,7 +190,9 @@ bottom, as far as the list scrolls (the official client centers it, observed 202
 deleted since leaves the next message there. The user's last request places the list, as for the unread bar's jump: a click while
 another jump or the jump to the present loads takes their place, and a second click on the same
 message while it loads asks once. The message flashes ([below](#the-flash)). "pinned messages"
-isn't a link yet: Akari has no pins popout.*
+has the hand and the underline too and toggles the popout of the line's channel, opening that
+channel first where it isn't the open one, as in the official client
+([pins.md](pins.md#opening-and-closing)).*
 
 **Every other kind** is worded as Discord's client words it (its en-US strings and its
 system-message renderer, read 2026-10-20), from what the message carries and what the store

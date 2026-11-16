@@ -213,6 +213,8 @@ fn copies() -> Vec<Copy> {
     held.windows.mark_stale(&mut Vec::new());
     apply(&mut held, "MESSAGE_CREATE", mine(ORIGIN, GENERAL));
     assert_eq!(held.windows.held(id(GENERAL)).len(), 1);
+    let mut pins = ready_state();
+    pinned_only(&mut pins, GENERAL, &[mine(10, GENERAL)]);
 
     let mut target = general();
     apply(&mut target, "MESSAGE_CREATE", reply_to_ten(11));
@@ -282,6 +284,13 @@ fn copies() -> Vec<Copy> {
                 ReplyTarget::Loaded(preview) => preview.content.to_string(),
                 other => panic!("expected a loaded target, got {other:?}"),
             },
+        },
+        Copy {
+            name: "pins list",
+            state: pins,
+            row: (GENERAL, 10),
+            message: (GENERAL, 10),
+            read: |state| state.pins(id(GENERAL)).items[0].message.content.to_string(),
         },
     ]
 }
@@ -353,6 +362,7 @@ fn each_copy_tells_what_shows_it_of_a_save() {
                 "reply target",
                 vec![updated(10), format!("ReplyTargetChanged({GENERAL}, 10)")]
             ),
+            ("pins list", vec![format!("PinsChanged({GENERAL})")]),
         ]
     );
 }
@@ -1144,6 +1154,7 @@ fn a_confirmed_delete_takes_the_message_from_every_copy_at_once() {
                 state.reply_target(id(GENERAL), id(10)),
                 ReplyTarget::Deleted
             ),
+            "pins list" => assert!(state.pins(id(GENERAL)).items.is_empty()),
             _ => unreachable!(),
         }
     }
@@ -1400,4 +1411,28 @@ fn a_page_loaded_while_a_save_waits_shows_the_saved_text_in_its_rows_and_reply_l
     let answered = edited(10, GENERAL, "saved", EARLIER);
     answer(&mut state, GENERAL, 10, Ok(Some(answered)));
     assert_eq!(text(&state, GENERAL, 10), "saved");
+}
+
+#[test]
+fn a_pins_page_loaded_while_a_save_waits_shows_the_saved_text_in_its_pins_and_reply_lines() {
+    let mut state = general();
+    save(&mut state, GENERAL, 10, "saved");
+    asked(&mut state, GENERAL, 10);
+    let mut reply = reply_to_ten(11);
+    reply["referenced_message"] = mine(10, GENERAL);
+
+    pinned_only(&mut state, GENERAL, &[reply, mine(10, GENERAL)]);
+
+    let pinned = state.pins(id(GENERAL));
+    let ten = pinned
+        .items
+        .iter()
+        .find(|item| item.message.id == id(10))
+        .unwrap();
+    assert_eq!(&*ten.message.content, "saved");
+    match state.reply_target(id(GENERAL), id(10)) {
+        ReplyTarget::Loaded(preview) => assert_eq!(&*preview.content, "saved"),
+        other => panic!("expected a loaded target, got {other:?}"),
+    }
+    assert_eq!(edit_of(&state, GENERAL, 10), "pending");
 }

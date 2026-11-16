@@ -732,6 +732,79 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
+    // As the core: nothing while a page loads, else `.loading` at once, then the page
+    // `pinsAfterLoad` (`pinsAfterMore`) held as the call began, else the list as it was; `.failed`
+    // with it after `pinLoadError`.
+    let pinsAfterLoad = Locked<[ChannelId: PinsPage]>([:])
+    let pinsAfterMore = Locked<[ChannelId: PinsPage]>([:])
+    let pinLoadError = Locked<RequestError?>(nil)
+    // While set, each pins load waits for a reply before its answer.
+    let holdPinLoads = Locked(false)
+    let pinLoadReplies = AsyncQueue<Void>()
+    // Pin and unpin change nothing in the store, as the core's; Discord's answer is this.
+    let pinError = Locked<PinError?>(nil)
+    let holdPins = Locked(false)
+    let pinReplies = AsyncQueue<Void>()
+
+    override func loadPins(channelId: ChannelId) async throws {
+        log.append(.loadPins(channelId))
+        try await loadPinsPage(channelId, after: pinsAfterLoad.current[channelId])
+    }
+
+    override func loadMorePins(channelId: ChannelId) async throws {
+        log.append(.loadMorePins(channelId))
+        try await loadPinsPage(channelId, after: pinsAfterMore.current[channelId])
+    }
+
+    private func loadPinsPage(_ channel: ChannelId, after page: PinsPage?) async throws {
+        var before = PinsPage(items: [], hasMore: false, state: .notLoaded)
+        fakeStore.update { state in
+            before = state.pins[channel] ?? before
+            if before.state != .loading {
+                state.pins[channel] = PinsPage(items: before.items, hasMore: before.hasMore, state: .loading)
+            }
+        }
+        guard before.state != .loading else {
+            return
+        }
+        if holdPinLoads.current {
+            _ = await pinLoadReplies.next()
+        }
+        if let error = pinLoadError.current {
+            fakeStore.update { state in
+                let shown = state.pins[channel] ?? PinsPage(items: [], hasMore: false, state: .notLoaded)
+                state.pins[channel] = PinsPage(items: shown.items, hasMore: shown.hasMore, state: .failed)
+            }
+            throw error
+        }
+        fakeStore.update { [before] in $0.pins[channel] = page ?? before }
+    }
+
+    override func pin(channelId: ChannelId, messageId: MessageId) async throws {
+        log.append(.pin(channelId, messageId))
+        try await answerPin()
+    }
+
+    override func unpin(channelId: ChannelId, messageId: MessageId) async throws {
+        log.append(.unpin(channelId, messageId))
+        try await answerPin()
+    }
+
+    private func answerPin() async throws {
+        if holdPins.current {
+            _ = await pinReplies.next()
+        }
+        if let error = pinError.current {
+            throw error
+        }
+    }
+
+    // As the core: the dot goes at once.
+    override func ackPins(channelId: ChannelId) {
+        log.append(.ackPins(channelId))
+        fakeStore.update { _ = $0.unreadPins.remove(channelId) }
+    }
+
     // While set, each cache flush waits for one value here.
     let holdFlushes = Locked(false)
     let flushes = AsyncQueue<Void>()

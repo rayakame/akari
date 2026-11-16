@@ -124,6 +124,7 @@ struct SessionScreen: View {
                     Task { await session.openBeside(thread: thread, from: parent) }
                 },
                 openThreads: { [session] in session.openThreadBrowser(of: $0, as: .modal) },
+                togglePins: { [session] in session.togglePins(of: $0) },
                 messageActions: session.messageActions(for: messages) { text in
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)

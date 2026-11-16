@@ -373,6 +373,55 @@ impl From<akari_core::ReactionError> for ReactionError {
     }
 }
 
+/// Why a pin or an unpin didn't happen. The official client has an alert for each when pinning,
+/// and one for every failure of an unpin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum PinError {
+    /// The channel has as many pins as it may: "The Pin Broke", with `limit`.
+    #[error("the channel has {limit} pins already")]
+    TooMany { limit: u32 },
+    /// The thread is archived and couldn't be opened first.
+    #[error("the thread is archived")]
+    Archived,
+    #[error("system messages can't be pinned")]
+    SystemMessage,
+    /// Messages can't be pinned in this channel.
+    #[error("messages can't be pinned in this channel")]
+    WrongChannel,
+    /// A missing permission or access.
+    #[error("pinning isn't allowed here")]
+    Forbidden,
+    /// The message is gone.
+    #[error("the message is gone")]
+    Gone,
+    /// Anything else, also a refusal before asking (`InvalidRequest`); `Discord` has the message
+    /// the official client's alert shows.
+    #[error("{error}")]
+    Request { error: RequestError },
+}
+
+impl From<akari_core::PinError> for PinError {
+    fn from(err: akari_core::PinError) -> Self {
+        use akari_core::PinError as E;
+
+        match err {
+            E::TooMany { limit } => Self::TooMany { limit },
+            E::Archived => Self::Archived,
+            E::SystemMessage => Self::SystemMessage,
+            E::WrongChannel => Self::WrongChannel,
+            E::Forbidden => Self::Forbidden,
+            E::Gone => Self::Gone,
+            E::Request(error) => Self::Request {
+                error: error.into(),
+            },
+            _ => Self::Request {
+                error: RequestError::UnexpectedResponse,
+            },
+        }
+    }
+}
+
 /// Why Discord didn't take an edit.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 #[uniffi::export(Display)]

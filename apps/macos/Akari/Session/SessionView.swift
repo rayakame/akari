@@ -52,6 +52,21 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlayPreferenceValue(PinsButtonBounds.self) { anchor in
+            GeometryReader { proxy in
+                if let pins = session.pins, let anchor {
+                    let frame = PinsLayout.frame(of: pins, button: proxy[anchor], area: proxy.size)
+                    ChildWindowsHost(
+                        content: AnyView(
+                            PinsPanel(pins: pins, size: frame.size).imageEnvironment(session)),
+                        frame: frame, browser: true, label: PinsModel.title,
+                        onClose: session.closePins, refocus: session.refocusChannel
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .id(ObjectIdentifier(pins))
+                }
+            }
+        }
         .overlay {
             GeometryReader { proxy in
                 if let reactors = session.reactors {
@@ -73,21 +88,14 @@ struct SessionView<MessageArea: View>: View {
         .overlay {
             GeometryReader { proxy in
                 if let question = session.deleteQuestion {
-                    let frame = DeleteLayout.frame(for: question, in: proxy.size)
-                    ChildWindowsHost(
-                        content: AnyView(
-                            DeleteMessagePanel(
-                                question: question, size: frame.size,
-                                maxHeight: max(0, proxy.size.height - 2 * DeleteLayout.margin),
-                                answer: session.answerDeleteQuestion
-                            )
-                            .imageEnvironment(session)),
-                        frame: frame, browser: true, dimmed: true,
-                        label: MessageActionsModel.DeleteQuestion.title, closesOnDeactivate: false,
-                        onClose: { session.answerDeleteQuestion(false) }, refocus: session.refocusChannel
-                    )
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .id(question.id)
+                    ask(question, in: proxy.size, answer: session.answerDeleteQuestion)
+                }
+            }
+        }
+        .overlay {
+            GeometryReader { proxy in
+                if let question = session.pinQuestion {
+                    ask(question, in: proxy.size, answer: session.answerPinQuestion)
                 }
             }
         }
@@ -131,13 +139,31 @@ struct SessionView<MessageArea: View>: View {
                 set: { if !$0 { session.answerMessageConfirmation(false) } }),
             presenting: session.messageConfirmation
         ) { question in
-            Button(question.confirm, role: .destructive) { session.answerMessageConfirmation(true) }
+            Button(question.confirm, role: question.confirmRole) { session.answerMessageConfirmation(true) }
             Button(question.cancel, role: .cancel) { session.answerMessageConfirmation(false) }
         } message: { question in
             Text(question.message)
         }
         // Akari's stand-in for the official client's shake when Discord refuses a reaction.
         .onChange(of: session.refusedReactions) { refusalSound() }
+    }
+
+    private func ask(
+        _ question: some MessageQuestion, in area: CGSize, answer: @escaping (Bool) -> Void
+    ) -> some View {
+        let frame = MessageQuestionLayout.frame(for: question, in: area)
+        return ChildWindowsHost(
+            content: AnyView(
+                MessageQuestionPanel(
+                    question: question, size: frame.size,
+                    maxHeight: max(0, area.height - 2 * MessageQuestionLayout.margin), answer: answer
+                )
+                .imageEnvironment(session)),
+            frame: frame, browser: true, dimmed: true, label: question.words.title,
+            closesOnDeactivate: false, onClose: { answer(false) }, refocus: session.refocusChannel
+        )
+        .frame(width: area.width, height: area.height)
+        .id(question.id)
     }
 
     private var threadMenu: ThreadMenu? {
@@ -189,6 +215,14 @@ struct SessionView<MessageArea: View>: View {
                     session.openThreadBrowser(of: parent, as: .popout)
                 }
             }
+        }
+    }
+
+    private var pinsButton: PinsButton? {
+        session.pinsChannel.map { _ in
+            PinsButton(
+                selected: session.pins != nil, unread: session.pinsUnread,
+                disabled: session.pinsDisabled, toggle: session.togglePins)
         }
     }
 
@@ -393,7 +427,8 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(
                 channel: openChannel, name: openName, parent: openParent,
-                openParent: session.openParent, threads: threadsButton, menu: threadMenu
+                openParent: session.openParent, threads: threadsButton, pins: pinsButton,
+                menu: threadMenu
             ) { item in
                 if let open = openChannel, let menu = threadMenu {
                     act(item, on: open.id, in: menu)
@@ -475,5 +510,11 @@ struct SessionView<MessageArea: View>: View {
             case nil: .guildChannel(.guildText)
             }
         return ChannelName(kind: kind, name: openName)
+    }
+}
+
+extension MessageActionsModel.Confirmation {
+    var confirmRole: ButtonRole? {
+        destructive ? .destructive : nil
     }
 }

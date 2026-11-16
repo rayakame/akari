@@ -67,6 +67,8 @@ public final class SessionModel {
             channels?.setOpen(openChannelId)
             if oldValue?.channelId != messages?.channelId {
                 threadBrowser = nil
+                pins = nil
+                rereadPinsDot()
             }
             syncSplit()
             syncForm()
@@ -129,6 +131,11 @@ public final class SessionModel {
             }
         }
     }
+    /// The open pins popout, under the header's pins button. Opening another channel or the
+    /// Threads browser closes it.
+    public private(set) var pins: PinsModel?
+    /// The dot on the header's pins button: the channel has pins the user hasn't seen.
+    public private(set) var pinsUnread = false
     /// The channel list's "More Active Threads" popout's threads, following the store while
     /// `peek(at:)` names a channel; empty otherwise.
     public private(set) var peekedThreads: [ThreadPeek] = []
@@ -144,6 +151,14 @@ public final class SessionModel {
     /// What Delete asks, with the message, until `answerDeleteQuestion(_:)` or the message's
     /// deletion.
     public private(set) var deleteQuestion: MessageActionsModel.DeleteQuestion?
+    /// What Pin and Unpin ask, with the message, until `answerPinQuestion(_:)`, the message's
+    /// deletion, or a pin or unpin elsewhere that leaves nothing to ask.
+    public private(set) var pinQuestion: MessageActionsModel.PinQuestion?
+    /// Delete, Pin or Unpin waits for its answer: ⌘P neither opens nor closes the pins popout
+    /// meanwhile.
+    public var asksAboutMessage: Bool {
+        deleteQuestion != nil || pinQuestion != nil
+    }
     /// The open reactions window ("View Reactions"); it closes itself when its message has no
     /// reactions left.
     public private(set) var reactors: ReactorsModel?
@@ -890,6 +905,7 @@ public final class SessionModel {
             return
         }
         engage()
+        pins = nil
         threadBrowser = ThreadBrowserModel(
             parentId: parent, presentation: presentation, userId: userId, store: store,
             account: account)
@@ -897,6 +913,75 @@ public final class SessionModel {
 
     public func closeThreadBrowser() {
         threadBrowser = nil
+    }
+
+    /// The channel whose pins the header's button shows: the open message list's, not the system
+    /// DM's; `nil` where the button doesn't show.
+    public var pinsChannel: ChannelId? {
+        guard let open = messages?.channelId else {
+            return nil
+        }
+        let conversation = directMessages.conversations.first { $0.id == open }
+        if conversation?.channel.kind == .dm, conversation?.recipients.first?.system == true {
+            return nil
+        }
+        return open
+    }
+
+    /// The pins button can't be used: its channel waits behind the age gate.
+    public var pinsDisabled: Bool {
+        pinsChannel.map { ageGate(of: $0) != .open } ?? false
+    }
+
+    /// The header's pins button and ⌘P: opens the popout of `pinsChannel` (closing the Threads
+    /// browser) or closes the open one; nothing while `asksAboutMessage`.
+    public func togglePins() {
+        guard !asksAboutMessage else {
+            return
+        }
+        if pins != nil {
+            closePins()
+            return
+        }
+        guard let channel = pinsChannel, !pinsDisabled else {
+            return
+        }
+        engage()
+        threadBrowser = nil
+        pins = PinsModel(
+            channelId: channel, store: store, account: account,
+            jump: { [weak self] message, shift in
+                if !shift {
+                    self?.closePins()
+                }
+                self?.jump(to: message, in: channel)
+            },
+            ask: { [weak self] in self?.askPin($0) },
+            confirm: { [weak self] in self?.messageConfirmation = $0 },
+            failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    /// "pinned messages" in a pin's line: toggles the popout of the line's channel, which opens
+    /// first where it isn't the open one, as in the official client.
+    public func togglePins(of channel: ChannelId) {
+        if messages?.channelId != channel {
+            go(to: channel)
+        }
+        guard messages?.channelId == channel else {
+            return
+        }
+        togglePins()
+    }
+
+    public func closePins() {
+        pins = nil
+    }
+
+    private func rereadPinsDot() {
+        let unread = pinsChannel.map { store.pinsUnread(channelId: $0) } ?? false
+        if unread != pinsUnread {
+            pinsUnread = unread
+        }
     }
 
     /// A row of the Threads browser or the channel list's "More Active Threads": closes the
@@ -1003,7 +1088,22 @@ public final class SessionModel {
             confirm: { [weak self] in self?.messageConfirmation = $0 },
             edit: { [weak list] row in list?.editor.start(row) },
             askDelete: { [weak self] in self?.askDelete($0) },
+            askPin: { [weak self] in self?.askPin($0) },
             failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    /// The answer to `pinQuestion`: its yes pins or unpins the message.
+    public func answerPinQuestion(_ confirmed: Bool) {
+        let asked = pinQuestion
+        pinQuestion = nil
+        if confirmed {
+            asked?.run()
+        }
+    }
+
+    private func askPin(_ question: MessageActionsModel.PinQuestion) {
+        engage()
+        pinQuestion = question
     }
 
     /// The answer to `deleteQuestion`: "Delete" deletes the message.
@@ -1404,6 +1504,17 @@ public final class SessionModel {
             form.apply(batch)
         }
         threadBrowser?.apply(batch)
+        if let shown = pins, ageGate(of: shown.channelId) != .open {
+            closePins()
+        }
+        pins?.apply(batch)
+        if let open = pinsChannel,
+            batch.everythingChanged || batch.pinsUnreadChanged.contains(open)
+                || !batch.guildSettingsChanged.isEmpty
+                || batch.channelsChanged.values.contains(where: { $0.contains(open) })
+        {
+            rereadPinsDot()
+        }
         if let window = reactors {
             window.apply(batch)
             if window.isEmpty {
@@ -1413,6 +1524,9 @@ public final class SessionModel {
         drafts.forget(batch.deletedMessages)
         if let asked = deleteQuestion?.row, deleted(asked, in: batch) {
             deleteQuestion = nil
+        }
+        if let asked = pinQuestion, deleted(asked.row, in: batch) || outlived(asked, in: batch) {
+            pinQuestion = nil
         }
         if let peeked {
             let threads = moreActiveThreads(of: peeked)
@@ -1432,6 +1546,20 @@ public final class SessionModel {
             return false
         }
         return store.starterMessage(threadId: own.channelId) == .unavailable
+    }
+
+    // Pinned or unpinned elsewhere, or gone where only the pins list had it: its yes would fail.
+    private func outlived(_ question: MessageActionsModel.PinQuestion, in batch: EventBatch) -> Bool {
+        let touched = [question.row.message, question.row.shown].contains { message in
+            batch.pinsChanged.contains(message.channelId)
+                || batch.updatedMessages[message.channelId]?.contains(message.id) == true
+        }
+        guard batch.everythingChanged || touched else {
+            return false
+        }
+        let own = question.row.message
+        let actions = store.messageActions(channelId: own.channelId, messageId: own.id)
+        return !(question.pins ? actions.pin : actions.unpin)
     }
 
     private func keepSplits(where keep: (ChannelId, AccountMemory.Split) -> Bool) {

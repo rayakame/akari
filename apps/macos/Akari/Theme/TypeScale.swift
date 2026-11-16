@@ -127,6 +127,10 @@ nonisolated enum TypeScale {
     static let browserLabel = TextStyle(14, .medium)
     static let browserText = TextStyle(14, line: 18)
     static let emptyTitle = TextStyle(20, .semibold, line: 24)
+    static let popoutTitle = TextStyle(20, .semibold, line: 24)
+    static let pinsEmpty = TextStyle(16, .medium, line: 20)
+    static let protip = TextStyle(14, .semibold, line: 18)
+    static let protipText = TextStyle(14, line: 18)
     static let emptyText = TextStyle(16, line: 20)
     // The New Thread form: text-md/medium titles and labels, text-md fields, text-xs notes,
     // text-sm/medium for the starter's error and the small button.
