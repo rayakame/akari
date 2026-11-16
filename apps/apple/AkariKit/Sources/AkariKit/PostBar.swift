@@ -10,12 +10,35 @@ public struct PostBar: Equatable, Sendable {
     /// Whether "Start the conversation!" stands under the bar of a post without replies: the user
     /// may answer and didn't start it.
     public let invites: Bool
+    /// The first message's reactions, in Discord's order; the bar shows as many as fit.
+    public let reactions: [ReactionPill]
+    /// The forum's default reaction, offered alone while the post has no reactions and the
+    /// user may react.
+    public let defaultReaction: ReactionEmoji?
+    /// The user may react with a new emoji: "React to Post", the add button.
+    public let reacts: Bool
+    /// A click on a pill adds or removes the user's reaction.
+    public let toggles: Bool
 
-    public init(post: MessageId, following: Bool, canFollow: Bool, invites: Bool) {
+    public init(
+        post: MessageId, following: Bool, canFollow: Bool, invites: Bool,
+        reactions: [ReactionPill] = [], defaultReaction: ReactionEmoji? = nil, reacts: Bool = false,
+        toggles: Bool = false
+    ) {
         self.post = post
         self.following = following
         self.canFollow = canFollow
         self.invites = invites
+        self.reactions = reactions
+        self.defaultReaction = defaultReaction
+        self.reacts = reacts
+        self.toggles = toggles
+    }
+
+    /// How many pills the bar shows in `width`, as the official client counts them; the rest
+    /// stand behind "+N".
+    public static func pillsShown(width: Double) -> Int {
+        max(0, Int(((width - 280) / 58).rounded(.down)))
     }
 
     public static let follow = "Follow"

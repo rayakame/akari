@@ -3,8 +3,11 @@ import AppKit
 
 /// A message's context menu: the model's groups in their order, a separator between two.
 enum MessageMenu {
+    /// `choices` gives an action its submenu (Add Reaction's emoji, Remove Reactions'): such an
+    /// item runs nothing itself.
     static func items(
-        _ groups: [[MessageActionItem]], run: @escaping (MessageAction) -> Void
+        _ groups: [[MessageActionItem]], choices: (MessageAction) -> [NSMenuItem]? = { _ in nil },
+        run: @escaping (MessageAction) -> Void
     ) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         for group in groups where !group.isEmpty {
@@ -14,6 +17,9 @@ enum MessageMenu {
             for entry in group {
                 let item = item(entry.title) { run(entry.action) }
                 item.isEnabled = entry.enabled
+                if let listed = choices(entry.action) {
+                    item.submenu = menu(listed)
+                }
                 if entry.destructive {
                     item.attributedTitle = NSAttributedString(
                         string: entry.title,
@@ -26,6 +32,27 @@ enum MessageMenu {
             }
         }
         return items
+    }
+
+    /// The emoji a click reacts with, each with the official client's hint; one that is the
+    /// user's already has its checkmark and takes the reaction back.
+    static func reactions(
+        _ quick: [QuickReaction], run: @escaping (QuickReaction) -> Void
+    ) -> [NSMenuItem] {
+        quick.map { reaction in
+            let item = item(reaction.name) { run(reaction) }
+            item.state = reaction.mine ? .on : .off
+            item.toolTip = reaction.hint
+            item.setAccessibilityLabel(reaction.accessibilityLabel)
+            return item
+        }
+    }
+
+    /// "Remove Reactions": one item per emoji of the message.
+    static func removals(
+        _ pills: [ReactionPill], run: @escaping (ReactionPill) -> Void
+    ) -> [NSMenuItem] {
+        pills.map { pill in item("\(pill.name)  \(pill.count)") { run(pill) } }
     }
 
     /// "Copy Text" alone, where a message shows outside a list (the New Thread form).

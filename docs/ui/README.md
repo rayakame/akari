@@ -33,6 +33,9 @@ app can mirror it and Discord users can switch with zero relearning.
   system messages, loading history, the channel's start, jump to present, edits and deletes
 - [replies.md](replies.md): starting a reply, the reply bar and its switch, the line over a
   reply in its states, the spine, the jump to the answered message and the way back, Escape
+- [reactions.md](reactions.md): the pills under a message, a click on one, the count's roll,
+  a pill's tooltip, quick reactions, the reactions window, removing reactions, "Show emoji
+  reactions", and a forum post's reactions
 - [message-actions.md](message-actions.md): what the user may do with a message: reply, edit,
   delete, pin, react, mark unread, copy its link, create or view its thread, and by which rule;
   the hover bar (size, place, buttons in order, with Shift), the message menu's groups, Mark

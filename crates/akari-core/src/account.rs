@@ -27,6 +27,7 @@ use crate::state::{
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 pub use acks::MarkOutcome;
 use acks::{AckSender, Echo, Pace, Refusal};
+pub use reactions::{REACTORS_PAGE, ReactionError, ReactionKind, ReactionLocation, ReactorsPage};
 
 const REFRESH_LIMIT: u8 = 100;
 // Discord's limit for a thread's name, in code points, and the archive time its client picks
@@ -295,6 +296,7 @@ pub(crate) struct Shared {
     forum_unreads_wait: Duration,
     // Wakes the post-data task when cards want their posts' first messages.
     previews: Arc<previews::Wake>,
+    wishes: reactions::Wishes,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -1480,6 +1482,7 @@ impl Account {
                 lookup_timeout,
                 forum_unreads_wait,
                 previews: Arc::default(),
+                wishes: reactions::Wishes::default(),
             }
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -2326,6 +2329,7 @@ mod acks;
 mod deadlines;
 mod expressions;
 mod previews;
+mod reactions;
 mod scans;
 
 #[cfg(test)]

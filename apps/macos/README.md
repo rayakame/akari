@@ -28,7 +28,7 @@ composer (a locked thread's banner), avatars and icons in every place (`docs/ui/
 message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
 embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
 (`EmbedView.swift`, `docs/ui/embeds.md`), and the media viewer (`Viewer/`, `docs/ui/viewer.md`).
-Reactions, replies, voice, notifications and settings come later.
+Voice, notifications and settings come later.
 
 ## Images
 
@@ -102,6 +102,21 @@ Reactions, replies, voice, notifications and settings come later.
   relative time in the line is one more date for the list's timer, which rebuilds that line
   alone. A failed reply's "Not sent" line names the deleted message only for a row with
   `replyRefused`.
+- **Reactions** (`docs/ui/reactions.md`): `ReactionRowView` is the row of pills under a message
+  or a system line, `ReactionPillButton` one pill (the emoji drawn by `EmojiGlyphView` or a
+  custom one's `ImageLayerView`, the count as a layer that rolls) and `ReactionAddButton` the
+  button at its end; all are buttons the list's pointer authority lights, with the not-allowed
+  cursor over pills that only show. The row's frames come from the counts alone, so its height
+  is known before the cell exists. A row whose reactions alone changed keeps its cell
+  (`TimelineChanges.reacted`): the pills change in place and the row's height is noted inside
+  the same update that keeps the reader's place or the bottom. The hover bar has the quick
+  reactions before its buttons (`QuickReactionButton`); Add Reaction, in the bar, at a row's
+  end and in a post's bar, opens them as a menu until there is an emoji picker; the message's
+  menu has them as Add Reaction's submenu, with View Reactions and the two removals, whose
+  question is an alert of the session's window. `ReactorsPanel` is the reactions window, a key
+  panel over a dimmed window like the Threads modal. A forum post's bar (`PostBarCell`) has
+  its reactions at its left, and a card its one reaction as a chip over the card
+  (`ForumCardReaction`). A reaction Discord refuses without words plays the alert sound.
 - **History:** older pages load before the top is reached and newer ones near the bottom while
   older messages are shown; the text being read never moves when a page lands, an edit
   changes a message's height or a message is deleted. A bar above the composer jumps to the

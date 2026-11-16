@@ -216,6 +216,9 @@ final class MessageListBridge: MessageListActions {
         self.messageActions = messageActions
         self.expressions = expressions
         follow = followPost
+        messages.reactions.tooltipChanged = { [weak link] message, _ in
+            link?.controller?.reactionNamesArrived(for: message)
+        }
     }
 
     func followPost(_ follows: Bool) {
@@ -390,5 +393,43 @@ final class MessageListBridge: MessageListActions {
 
     func markUnread(from row: MessageListModel.Row) {
         Task { [messageActions] in await messageActions?.markUnread(from: row) }
+    }
+
+    func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] {
+        messageActions?.quickReactions(for: row, shift: shift) ?? []
+    }
+
+    func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {
+        Task { [messageActions] in await messageActions?.react(quick, on: row, from: location) }
+    }
+
+    func toggleReaction(
+        _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation
+    ) {
+        Task { [messages] in await messages.reactions.toggle(emoji, on: row, from: location) }
+    }
+
+    func removableReactions(for row: MessageListModel.Row) -> [ReactionPill] {
+        messageActions?.removableReactions(for: row) ?? []
+    }
+
+    func removeReactions(of pill: ReactionPill?, on row: MessageListModel.Row, shift: Bool) {
+        messageActions?.removeReactions(of: pill, on: row, shift: shift)
+    }
+
+    func reactionTooltip(of pill: ReactionPill, on row: MessageListModel.Row) -> String? {
+        messages.reactions.tooltip(of: pill, on: row)
+    }
+
+    func reactionHovered(_ pill: ReactionPill?, on row: MessageListModel.Row?) {
+        if let pill, let row {
+            messages.reactions.pointerEntered(pill, on: row)
+        } else {
+            messages.reactions.pointerLeft()
+        }
+    }
+
+    func viewReactions(of row: MessageListModel.Row) {
+        messageActions?.perform(.viewReactions, on: row)
     }
 }

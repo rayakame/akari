@@ -206,6 +206,8 @@ pub struct DisplaySettings {
     /// Play GIFs while the app is focused.
     pub gif_auto_play: bool,
     pub render_embeds: bool,
+    /// Show messages' reactions and the ways to react ("Show emoji reactions").
+    pub render_reactions: bool,
     pub animate_emoji: bool,
     pub animate_stickers: StickerAnimation,
     pub explicit_content_filter: ExplicitContentFilter,
@@ -277,6 +279,7 @@ impl From<state::DisplaySettings> for DisplaySettings {
             inline_embed_media: display.inline_embed_media,
             gif_auto_play: display.gif_auto_play,
             render_embeds: display.render_embeds,
+            render_reactions: display.render_reactions,
             animate_emoji: display.animate_emoji,
             animate_stickers: match display.animate_stickers {
                 state::StickerAnimation::OnInteraction => StickerAnimation::OnInteraction,
@@ -786,6 +789,32 @@ pub struct ReactionEmoji {
     pub animated: bool,
     /// A custom emoji's image, animated when `animated` says so.
     pub key: Option<ImageKey>,
+}
+
+impl From<ReactionEmoji> for state::ReactionEmoji {
+    fn from(emoji: ReactionEmoji) -> Self {
+        match emoji.id {
+            Some(id) => Self::custom(id, emoji.name.as_deref(), emoji.animated),
+            None => Self::unicode(emoji.name.as_deref().unwrap_or_default()),
+        }
+    }
+}
+
+/// A page of the users who reacted with an emoji, in Discord's order.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReactorsPage {
+    pub users: Vec<User>,
+    /// Discord filled the page: ask on with the last user's ID as `after`.
+    pub has_more: bool,
+}
+
+impl From<akari_core::ReactorsPage> for ReactorsPage {
+    fn from(page: akari_core::ReactorsPage) -> Self {
+        Self {
+            users: page.users.iter().map(|user| User::from(&**user)).collect(),
+            has_more: page.has_more,
+        }
+    }
 }
 
 impl From<&state::Reaction> for Reaction {
