@@ -102,6 +102,39 @@ struct PinQuestionTests {
         #expect(pin.confirm.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == .white)
     }
 
+    // As the window draws them, from the button's layer.
+    func drawn(_ button: PanelButton) -> CGColor? {
+        button.displayIfNeeded()
+        return button.layer?.backgroundColor
+    }
+
+    func resolved(_ color: NSColor, in button: NSView) -> CGColor? {
+        var cg: CGColor?
+        button.effectiveAppearance.performAsCurrentDrawingAppearance { cg = color.cgColor }
+        return cg
+    }
+
+    // A view that asked Unpin draws Pin's yes in the brand's color, which the pointer lightens.
+    @Test
+    func pinsYesIsDrawnInTheBrandsColorAndLightensUnderThePointer() throws {
+        let (view, _) = shown(pins: false)
+        #expect(drawn(view.confirm) == resolved(Palette.danger, in: view.confirm))
+
+        view.show(
+            MessageActionsModel.PinQuestion(row: message, pins: true, channelName: "new") {}, images: nil,
+            maxHeight: 800)
+        #expect(drawn(view.confirm) == resolved(Palette.brand, in: view.confirm))
+
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+        view.confirm.mouseEntered(with: event)
+        #expect(drawn(view.confirm) == resolved(Palette.brandHover, in: view.confirm))
+        view.confirm.mouseExited(with: event)
+        #expect(drawn(view.confirm) == resolved(Palette.brand, in: view.confirm))
+    }
+
     // One view shows one question after another, as SwiftUI keeps it.
     @Test
     func aViewShowsTheNextQuestionsWords() {
