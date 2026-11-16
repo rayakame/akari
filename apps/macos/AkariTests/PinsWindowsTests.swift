@@ -190,3 +190,171 @@ final class PinsWindowsTests {
         session.answerPinQuestion(false)
     }
 }
+
+// Pin's and Unpin's window as the session shows it: over the dimmed session, its yes pins, and
+// Cancel, Escape and every way of closing it answer no; it stays while another app is active.
+@MainActor
+struct PinQuestionWindowTests {
+    let fake = FakeBrowserStore()
+    let session: SessionModel
+    let view: ShownView
+
+    init() {
+        fake.lines = true
+        fake.pinsLines = true
+        session = fake.session()
+        session.open(channel: FakeBrowserStore.parent)
+        view = ShownView(SessionScreen(session: session, splitWidth: SplitWidth()), size: NSSize(width: 1100, height: 700))
+    }
+
+    var shield: ShieldWindow? {
+        view.window.childWindows?.compactMap { $0 as? ShieldWindow }.first
+    }
+
+    var panel: ContainerPanel? {
+        shield?.childWindows?.compactMap { $0 as? ContainerPanel }.first
+    }
+
+    var pinCalls: [String] {
+        (fake.account?.pinCalls.withLock { $0 } ?? []).filter { $0.hasPrefix("pin ") }
+    }
+
+    func rows() throws -> (MessageListModel.Row, MessageListModel.Row) {
+        let rows = try #require(session.messages?.rows)
+        return (try #require(rows.first), try #require(rows.last))
+    }
+
+    func ask(_ row: MessageListModel.Row) async throws -> ContainerPanel {
+        let list = try #require(session.messages)
+        session.messageActions(for: list) { _ in }.perform(.pin, on: row, shift: false, from: .menu)
+        try await view.waitUntil("the question") { panel?.isVisible == true }
+        return try #require(panel)
+    }
+
+    func question(in panel: ContainerPanel) throws -> MessageQuestionView {
+        let content = try #require(panel.contentView)
+        return try #require(MessageMenuAreaTests.views(MessageQuestionView.self, in: content).first)
+    }
+
+    // Whatever an earlier answer started reaches the account before this pin does.
+    func pinAfterwards(_ row: MessageListModel.Row) async throws {
+        try question(in: try await ask(row)).confirm.performClick(nil)
+        try await view.waitUntil("the pin") { pinCalls.contains("pin \(row.message.id.rawValue)") }
+    }
+
+    @Test
+    func theQuestionShowsOverTheDimmedSessionAndItsYesPins() async throws {
+        let (row, _) = try rows()
+
+        let panel = try await ask(row)
+        #expect((shield?.backgroundColor.alphaComponent ?? 0) > 0.5)
+        try question(in: panel).confirm.performClick(nil)
+
+        try await view.waitUntil("the pin") { !pinCalls.isEmpty }
+        #expect(pinCalls == ["pin \(row.message.id.rawValue)"])
+        #expect(session.pinQuestion == nil)
+    }
+
+    enum Closing: CaseIterable {
+        case cancel, escape, commandW, pressOutside, miniaturize
+    }
+
+    @Test(arguments: Closing.allCases)
+    func everyOtherWayOutPinsNothing(_ closing: Closing) async throws {
+        let (row, other) = try rows()
+        let panel = try await ask(row)
+
+        switch closing {
+        case .cancel:
+            try question(in: panel).cancel.performClick(nil)
+        case .escape:
+            panel.sendEvent(
+                try #require(
+                    NSEvent.keyEvent(
+                        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                        windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}",
+                        charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)))
+        case .commandW:
+            panel.performClose(nil)
+        case .pressOutside:
+            try #require(shield).onPress()
+        case .miniaturize:
+            NotificationCenter.default.post(name: NSWindow.willMiniaturizeNotification, object: view.window)
+        }
+
+        try await view.waitUntil("closed") { session.pinQuestion == nil && self.panel == nil }
+        try await pinAfterwards(other)
+        #expect(pinCalls == ["pin \(other.message.id.rawValue)"])
+    }
+
+    @Test
+    func theQuestionStaysWhileAnotherAppIsActive() async throws {
+        let (row, _) = try rows()
+        let panel = try await ask(row)
+
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+
+        #expect(session.pinQuestion != nil)
+        #expect(self.panel === panel && panel.isVisible)
+        session.answerPinQuestion(false)
+    }
+
+    @Test
+    func aNewQuestionHasAWindowOfItsOwn() async throws {
+        let (row, other) = try rows()
+        let first = try await ask(row)
+        let list = try #require(session.messages)
+
+        session.messageActions(for: list) { _ in }.perform(.pin, on: other, shift: false, from: .menu)
+
+        try await view.waitUntil("the new window") { panel !== first && panel?.isVisible == true }
+        #expect(!first.isVisible)
+        session.answerPinQuestion(false)
+    }
+}
+
+// "pinned messages" in a pin's line, through the app's wiring: the bridge, the message area and
+// the session screen.
+@MainActor
+struct PinLineWiringTests {
+    @Test
+    func theBridgeHandsTheLinesChannelOn() throws {
+        let fake = FakeBrowserStore()
+        fake.lines = true
+        let session = fake.session()
+        session.open(channel: FakeBrowserStore.parent)
+        let messages = try #require(session.messages)
+        var toggled: [ChannelId] = []
+        let bridge = MessageListBridge(
+            messages: messages, link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in },
+            togglePins: { toggled.append($0) }, markServerRead: {})
+
+        bridge.togglePins(of: FakeBrowserStore.parent)
+
+        #expect(toggled == [FakeBrowserStore.parent])
+    }
+
+    @Test
+    func pinnedMessagesInTheListOpensThePopout() async throws {
+        let fake = FakeBrowserStore()
+        fake.lines = true
+        fake.pins = 1
+        fake.pinLine = true
+        let session = fake.session()
+        session.open(channel: FakeBrowserStore.parent)
+        let view = ShownView(SessionScreen(session: session, splitWidth: SplitWidth()), size: NSSize(width: 1100, height: 700))
+        var line: MessageTextView?
+        try await view.waitUntil("the pin's line") {
+            line = MessageMenuAreaTests.views(MessageTextView.self, in: view.host)
+                .first { $0.string.contains("pinned messages") }
+            return line != nil
+        }
+        let text = try #require(line)
+        let link = try #require(try attribute(.link, of: "pinned messages", in: text))
+
+        text.clicked(onLink: link, at: try index(of: "pinned messages", in: text))
+
+        try await view.waitUntil("the popout") { session.pins?.channelId == FakeBrowserStore.parent }
+    }
+}

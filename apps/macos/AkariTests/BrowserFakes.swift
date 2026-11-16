@@ -34,6 +34,10 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var pinsState = PinsState.loaded
     var pinsMore = false
     var pinsDot = false
+    var pinsLines = false
+    var unpinnable = true
+    // The second line is Ray's pin of the first pin.
+    var pinLine = false
     private(set) var account: BrowserAccount?
 
     @MainActor
@@ -44,7 +48,7 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
             firstLineEmoji: firstLineEmoji,
             pins: PinsPage(
                 items: (0..<pins).map(Self.pinned), hasMore: pinsMore, state: pinsState),
-            pinsDot: pinsDot)
+            pinsDot: pinsDot, pinsLines: pinsLines, unpinnable: unpinnable, pinLine: pinLine)
         let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
@@ -186,6 +190,9 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let joined: [ChannelId]
     private let pinsPage: PinsPage
     private let pinsDot: Bool
+    private let pinsLines: Bool
+    private let unpinnable: Bool
+    private let pinLine: Bool
     static let lineIds = (1...3).map {
         MessageId(rawValue: FakeBrowserStore.snowflake(FakeBrowserStore.now - 3600) + $0)
     }
@@ -194,10 +201,14 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
         empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false,
         creation: ThreadCreation = ThreadCreation(public: false, private: false),
         threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1, firstLineEmoji: Bool = false,
-        pins: PinsPage = PinsPage(items: [], hasMore: false, state: .loaded), pinsDot: Bool = false
+        pins: PinsPage = PinsPage(items: [], hasMore: false, state: .loaded), pinsDot: Bool = false,
+        pinsLines: Bool = false, unpinnable: Bool = true, pinLine: Bool = false
     ) {
         pinsPage = pins
         self.pinsDot = pinsDot
+        self.pinsLines = pinsLines
+        self.unpinnable = unpinnable
+        self.pinLine = pinLine
         self.longFirstLine = longFirstLine
         self.firstLineEmoji = firstLineEmoji
         self.empty = empty
@@ -247,7 +258,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
         testMessageActions(
             createThread: canStartThread(channelId: channelId, messageId: messageId),
-            unpin: pinsPage.items.contains { $0.message.id == messageId })
+            pin: pinsLines && Self.lineIds.contains(messageId),
+            unpin: unpinnable && pinsPage.items.contains { $0.message.id == messageId })
     }
 
     override func pins(channelId: ChannelId) -> PinsPage {
@@ -336,6 +348,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                         Array(repeating: "hello", count: longFirstLine).joined(separator: "\n")
                             + (firstLineEmoji ? " <:pog:5>" : "")
                     )
+                case 1 where pinLine: (FakeBrowserStore.ray, .channelPinnedMessage, "")
                 case 1: (FakeBrowserStore.ray, .threadCreated, "b1")
                 default: (FakeBrowserStore.me, .default, "test")
                 }
@@ -349,7 +362,11 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 reference: kind == .threadCreated
                     ? MessageReference(
                         messageId: nil, channelId: joined.first, guildId: FakeBrowserStore.guild)
-                    : nil,
+                    : kind == .channelPinnedMessage
+                        ? MessageReference(
+                            messageId: pinsPage.items.first?.message.id, channelId: channelId,
+                            guildId: FakeBrowserStore.guild)
+                        : nil,
                 hasThread: false, mentions: [], call: nil, roleSubscription: nil,
                 purchasedProduct: nil, actor: nil, applicationName: nil, embedFields: [])
         }
