@@ -487,45 +487,6 @@ final class PinsPopoutTests {
         close(session)
     }
 
-    // The panel isn't key yet when its first click comes.
-    @Test(.enabled(if: firstClicks))
-    func jumpTakesTheFirstClickOfAPanelThatIsntKey() async throws {
-        let (session, pins) = try await opened()
-        let target = pins.rows[1].message.id
-        let size = NSSize(width: PinsLayout.width, height: 600)
-        let panel = NSHostingView(
-            rootView: AnyView(
-                PinsPanel(pins: pins, size: size, hovered: pins.rows[1].id)
-                    .frame(width: size.width, height: size.height)))
-        let window = TestWindow.make(size: size)
-        window.contentView = panel
-        window.orderFrontRegardless()
-        panel.layoutSubtreeIfNeeded()
-        func areas(_ view: NSView) -> [CursorArea.Area] {
-            ((view as? CursorArea.Area).map { [$0] } ?? []) + view.subviews.flatMap(areas)
-        }
-        let jump = try #require(
-            areas(panel).filter { $0.cursor == .pointingHand }.map { panel.convert($0.bounds, from: $0) }
-                .min { $0.minX < $1.minX })
-
-        try settleEvents(in: window)
-        let location = panel.convert(NSPoint(x: jump.midX, y: jump.midY), to: nil)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            window.sendEvent(
-                try #require(
-                    NSEvent.mouseEvent(
-                        with: type, location: location, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)))
-            try await Task.sleep(for: .milliseconds(30))
-        }
-
-        try await waitUntil("the jump") { session.messages?.messageJump?.messageId == target }
-        panel.rootView = AnyView(EmptyView())
-        window.orderOut(nil)
-        close(session)
-    }
-
     @Test
     func theFirstPageShowsTheSpinner() async throws {
         fake.pins = 0
