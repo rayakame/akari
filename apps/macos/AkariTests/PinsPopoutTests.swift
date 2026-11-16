@@ -109,6 +109,7 @@ final class PinsPopoutTests {
     let fake = FakeBrowserStore()
     var shift = false
     private var shown: ShownView?
+    let windows = ShownWindows()
 
     init() {
         fake.lines = true
@@ -130,6 +131,7 @@ final class PinsPopoutTests {
             PinsPanel(pins: pins, size: size, hovered: hovered)
                 .environment(\.clickModifiers) { [unowned self] in shift ? .shift : [] },
             size: size)
+        shown?.close()
         shown = view
         return view
     }
@@ -168,6 +170,15 @@ final class PinsPopoutTests {
         }
     }
 
+    // Each test closes what it opened, as the app does: a list or a spinner left in a window keeps
+    // the main thread busy beside every suite after it.
+    func close(_ session: SessionModel) {
+        shown?.close()
+        shown = nil
+        session.close()
+        windows.expectNoneLeft()
+    }
+
     func waitUntil(
         _ what: String = "", _ condition: () throws -> Bool,
         sourceLocation: SourceLocation = #_sourceLocation
@@ -185,7 +196,7 @@ final class PinsPopoutTests {
 
     @Test
     func theCardsShowThePinnedMessagesNewestPinFirstAndTakeNoPointer() async throws {
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         let view = host(pins)
 
         let shown = previews(in: view)
@@ -197,12 +208,13 @@ final class PinsPopoutTests {
             let middle = NSPoint(x: preview.bounds.midX, y: preview.bounds.midY)
             #expect(preview.hitTest(preview.convert(middle, to: preview.superview)) == nil)
         }
+        close(session)
     }
 
     // Jump 8 from the card's top and right, the ✕ after it, each 32 high.
     @Test
     func jumpAndTheCrossShowOnlyOverTheirCardAtItsTopRight() async throws {
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         #expect(host(pins).hands().isEmpty)
 
         let view = host(pins, hovered: pins.rows[1].id)
@@ -217,17 +229,20 @@ final class PinsPopoutTests {
         #expect(abs(cross.minY - (card.minY + 1 + 8)) <= 0.5, "\(cross) in \(card)")
         #expect(cross.width == 32 && cross.height == 32)
         #expect(jump.height == 32 && abs(cross.minX - jump.maxX - 8) <= 0.5)
+        close(session)
     }
 
     @Test
     func aCardWithoutUnpinHasJumpAlone() async throws {
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         let row = try #require(pins.rows.first)
         let view = ShownView(
             PinnedCard(row: row, unpins: false, busy: false, hoveredLook: true, jump: { _ in }, unpin: { _ in }),
             size: NSSize(width: PinsLayout.cardWidth, height: PinsLayout.cardHeight(row)))
 
         #expect(view.hands().count == 1)
+        view.close()
+        close(session)
     }
 
     @Test(arguments: [false, true])
@@ -242,6 +257,7 @@ final class PinsPopoutTests {
 
         try await waitUntil("the jump") { session.messages?.messageJump?.messageId == target }
         #expect((session.pins != nil) == shift)
+        close(session)
     }
 
     @Test(arguments: [false, true])
@@ -266,13 +282,14 @@ final class PinsPopoutTests {
             #expect(fake.account?.pinCalls.withLock { $0 }.contains("unpin \(target.rawValue)") == false)
         }
         #expect(session.pins != nil)
+        close(session)
     }
 
     // The protip's label in the official client's green, on the footer's band at the bottom.
     @Test
     func theEmptyStateEndsInItsProtip() async throws {
         fake.pins = 0
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         #expect(pins.phase == .empty)
         let height = PinsLayout.height(content: PinsLayout.contentHeight(pins, upTo: 800), window: 1000)
         let size = NSSize(width: PinsLayout.width, height: height)
@@ -300,6 +317,7 @@ final class PinsPopoutTests {
         }
         #expect(greens > 0, "Protip: in green")
         #expect(previews(in: host(pins)).isEmpty)
+        close(session)
     }
 
     // Akari: the official client shows a failed first page as an empty channel.
@@ -307,7 +325,7 @@ final class PinsPopoutTests {
     func aFailedFirstPageOffersToTryAgain() async throws {
         fake.pins = 0
         fake.pinsState = .failed
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         #expect(pins.phase == .failed)
         let view = host(pins)
         let loads = { self.fake.account?.pinCalls.withLock { $0 }.filter { $0 == "load" }.count ?? 0 }
@@ -318,12 +336,13 @@ final class PinsPopoutTests {
         try await click(retry, in: view)
 
         try await waitUntil("asked again") { loads() == 3 }
+        close(session)
     }
 
     @Test
     func loadMoreAsksForTheNextPageWhileDiscordHasMore() async throws {
         fake.pinsMore = true
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         let height = PinsLayout.contentHeight(pins, upTo: 2000) + PinsLayout.headerHeight
         let view = host(pins, height: height)
         let more = try #require(view.hands().first)
@@ -334,17 +353,19 @@ final class PinsPopoutTests {
         try await waitUntil("the next page") {
             fake.account?.pinCalls.withLock { $0 }.contains("more") == true
         }
+        close(session)
     }
 
     @Test
     func theFirstPageShowsTheSpinner() async throws {
         fake.pins = 0
         fake.pinsState = .loading
-        let (_, pins) = try await opened()
+        let (session, pins) = try await opened()
         let view = host(pins)
 
         #expect(pins.phase == .loading)
         #expect(all(view.host).contains { $0 is NSProgressIndicator })
+        close(session)
     }
 }
 
@@ -352,6 +373,8 @@ final class PinsPopoutTests {
 // the hand behind the age gate, no tooltip while its popout is open.
 @MainActor
 struct PinsButtonTests {
+    let windows = ShownWindows()
+
     func rendered(unread: Bool, disabled: Bool = false, theme: NSAppearance.Name = .darkAqua) throws -> Rendered {
         try Rendered(
             PinsButton(selected: false, unread: unread, disabled: disabled) {}
@@ -405,8 +428,13 @@ struct PinsButtonTests {
         let share = ink(disabled) / ink(enabled)
         #expect(share > 0.4 && share < 0.7, "\(share)")
         let size = NSSize(width: 48, height: 48)
-        #expect(ShownView(PinsButton(selected: false, unread: false) {}, size: size).hands().count == 1)
-        #expect(ShownView(PinsButton(selected: false, unread: false, disabled: true) {}, size: size).hands().isEmpty)
+        let shown = ShownView(PinsButton(selected: false, unread: false) {}, size: size)
+        let gated = ShownView(PinsButton(selected: false, unread: false, disabled: true) {}, size: size)
+        #expect(shown.hands().count == 1)
+        #expect(gated.hands().isEmpty)
+        shown.close()
+        gated.close()
+        windows.expectNoneLeft()
     }
 
     @Test

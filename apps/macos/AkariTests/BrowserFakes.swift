@@ -112,6 +112,7 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
     }
 
     override func store() -> Store { browserStore }
+    override func close() {}
     override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
         async throws -> LoadReport?
     {

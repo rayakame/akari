@@ -216,6 +216,16 @@ final class ShownView {
         }
     }
 
+    /// Takes the view out of its window and the window and its children off the screen at once.
+    func close() {
+        host.rootView = AnyView(EmptyView())
+        host.layoutSubtreeIfNeeded()
+        for child in window.childWindows ?? [] {
+            child.orderOut(nil)
+        }
+        window.orderOut(nil)
+    }
+
     /// The places that show the hand, from the view's top left.
     func hands(_ cursor: NSCursor = .pointingHand) -> [NSRect] {
         func areas(_ view: NSView) -> [CursorArea.Area] {

@@ -14,6 +14,7 @@ final class PinsWindowsTests {
     let window: ThreadBrowserWindowsTests.KeyWindow
     let host: NSHostingView<AnyView>
     var keyed: [NSWindow] = []
+    let windows = ShownWindows()
 
     init() {
         fake.lines = true
@@ -76,6 +77,23 @@ final class PinsWindowsTests {
 
     var pinsPanel: ContainerPanel? { panel(PinsModel.title) }
 
+    // Each test closes what it opened, as the app does: a popout or a question left in a window keeps
+    // the main thread busy beside every suite after it.
+    func close() {
+        if session.pinQuestion != nil {
+            session.answerPinQuestion(false)
+        }
+        session.closePins()
+        session.close()
+        host.rootView = AnyView(EmptyView())
+        host.layoutSubtreeIfNeeded()
+        for child in window.childWindows ?? [] {
+            child.orderOut(nil)
+        }
+        window.orderOut(nil)
+        windows.expectNoneLeft()
+    }
+
     func fromTop(_ rect: NSRect) -> NSRect {
         NSRect(
             x: rect.minX - window.frame.minX, y: window.frame.maxY - rect.maxY,
@@ -115,6 +133,7 @@ final class PinsWindowsTests {
         #expect(cover.frame == window.frame)
         #expect(cover.backgroundColor.alphaComponent == 0)
         #expect(keyed.last === pins)
+        close()
     }
 
     // The button: the popout opens; a second press lands on the shield and closes it.
@@ -133,6 +152,7 @@ final class PinsWindowsTests {
 
         try await waitUntil("closed") { session.pins == nil && (window.childWindows ?? []).isEmpty }
         #expect(keyed.last === window)
+        close()
     }
 
     @Test
@@ -150,6 +170,7 @@ final class PinsWindowsTests {
         try await waitUntil("closed") { session.pins == nil && (window.childWindows ?? []).isEmpty }
         #expect(keyed.last === window)
         try await waitUntil("the composer's focus") { window.firstResponder is ComposerTextView }
+        close()
     }
 
     // The question takes the key over the popout and gives it back to the popout, not the window.
@@ -172,6 +193,7 @@ final class PinsWindowsTests {
         try await waitUntil("the question's windows go") { panel("Unpin Message") == nil }
         #expect(keyed.last === pins)
         #expect(session.pins != nil && pins.isVisible)
+        close()
     }
 
     @Test
@@ -188,6 +210,7 @@ final class PinsWindowsTests {
         #expect(keyed.last === question)
         #expect(session.pinQuestion != nil)
         session.answerPinQuestion(false)
+        close()
     }
 }
 
@@ -196,6 +219,7 @@ final class PinsWindowsTests {
 @MainActor
 struct PinQuestionWindowTests {
     let fake = FakeBrowserStore()
+    let windows = ShownWindows()
     let session: SessionModel
     let view: ShownView
 
@@ -236,6 +260,15 @@ struct PinQuestionWindowTests {
         return try #require(MessageMenuAreaTests.views(MessageQuestionView.self, in: content).first)
     }
 
+    func close() {
+        if session.pinQuestion != nil {
+            session.answerPinQuestion(false)
+        }
+        session.close()
+        view.close()
+        windows.expectNoneLeft()
+    }
+
     // Whatever an earlier answer started reaches the account before this pin does.
     func pinAfterwards(_ row: MessageListModel.Row) async throws {
         try question(in: try await ask(row)).confirm.performClick(nil)
@@ -253,6 +286,7 @@ struct PinQuestionWindowTests {
         try await view.waitUntil("the pin") { !pinCalls.isEmpty }
         #expect(pinCalls == ["pin \(row.message.id.rawValue)"])
         #expect(session.pinQuestion == nil)
+        close()
     }
 
     enum Closing: CaseIterable {
@@ -285,6 +319,7 @@ struct PinQuestionWindowTests {
         try await view.waitUntil("closed") { session.pinQuestion == nil && self.panel == nil }
         try await pinAfterwards(other)
         #expect(pinCalls == ["pin \(other.message.id.rawValue)"])
+        close()
     }
 
     @Test
@@ -297,6 +332,7 @@ struct PinQuestionWindowTests {
         #expect(session.pinQuestion != nil)
         #expect(self.panel === panel && panel.isVisible)
         session.answerPinQuestion(false)
+        close()
     }
 
     @Test
@@ -310,6 +346,7 @@ struct PinQuestionWindowTests {
         try await view.waitUntil("the new window") { panel !== first && panel?.isVisible == true }
         #expect(!first.isVisible)
         session.answerPinQuestion(false)
+        close()
     }
 }
 
@@ -317,6 +354,8 @@ struct PinQuestionWindowTests {
 // the session screen.
 @MainActor
 struct PinLineWiringTests {
+    let windows = ShownWindows()
+
     @Test
     func theBridgeHandsTheLinesChannelOn() throws {
         let fake = FakeBrowserStore()
@@ -356,5 +395,9 @@ struct PinLineWiringTests {
         text.clicked(onLink: link, at: try index(of: "pinned messages", in: text))
 
         try await view.waitUntil("the popout") { session.pins?.channelId == FakeBrowserStore.parent }
+        session.closePins()
+        session.close()
+        view.close()
+        windows.expectNoneLeft()
     }
 }

@@ -289,3 +289,19 @@ nonisolated func testMessageActions(
         pin: pin, unpin: unpin, react: false, toggleReaction: false, removeReactions: false,
         markUnread: true, copyLink: true, createThread: createThread, viewThread: viewThread)
 }
+
+// The windows on screen as a test starts; at its end none it showed may be left there, nor
+// anything they hold that keeps laying out or animating beside the suites after it.
+@MainActor
+struct ShownWindows {
+    private let before = Self.visible()
+
+    static func visible() -> Set<ObjectIdentifier> {
+        Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+    }
+
+    func expectNoneLeft(sourceLocation: SourceLocation = #_sourceLocation) {
+        let left = Self.visible().subtracting(before)
+        #expect(left.isEmpty, "\(left.count) of the test's windows left on screen", sourceLocation: sourceLocation)
+    }
+}
