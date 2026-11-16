@@ -1504,6 +1504,9 @@ public final class SessionModel {
             form.apply(batch)
         }
         threadBrowser?.apply(batch)
+        if let shown = pins, ageGate(of: shown.channelId) != .open {
+            closePins()
+        }
         pins?.apply(batch)
         if let open = pinsChannel,
             batch.everythingChanged || batch.pinsUnreadChanged.contains(open)

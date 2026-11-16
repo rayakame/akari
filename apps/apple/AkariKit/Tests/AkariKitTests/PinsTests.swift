@@ -755,6 +755,19 @@ final class PinsButtonTests {
         session.close()
     }
 
+    // As the list goes behind the gate, the popout over it goes too.
+    @Test
+    func thePopoutClosesWhenItsChannelGoesBehindTheAgeGate() {
+        session.togglePins()
+        #expect(session.pins != nil)
+
+        store.update { $0.ageGates[id(11)] = .ask(server: false) }
+        session.apply(EventBatch([.channelUpdated(channelId: id(11), guildId: id(1))]))
+
+        #expect(session.pins == nil)
+        session.close()
+    }
+
     @Test
     func thePinsAndTheThreadsPopoutsTakeEachOthersPlace() {
         session.openThreadBrowser(of: id(11), as: .popout)
