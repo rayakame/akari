@@ -847,8 +847,10 @@ mod tests {
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
     use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use wiremock::matchers::{method, path, query_param, query_param_is_missing};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
     use super::*;
 
@@ -1535,7 +1537,7 @@ mod tests {
     async fn pins_answered(
         server: &MockServer,
         channel: u64,
-        answer: ResponseTemplate,
+        answer: impl Respond + 'static,
     ) -> Result<Vec<String>, String> {
         Mock::given(method("GET"))
             .and(path(format!("/api/v9/channels/{GENERAL}/messages/pins")))
@@ -1563,6 +1565,47 @@ mod tests {
             lines[0].starts_with("pinned 2026-10-02 09:30  "),
             "{lines:?}"
         );
+    }
+
+    // One pin a page, as when Discord lists pins Akari can't read: `brings(page)` is the message
+    // page `page` lists and whether Discord has more after it.
+    fn one_a_page(brings: impl Fn(u64) -> (u64, bool) + Send + Sync + 'static) -> impl Respond {
+        let asked = AtomicU64::new(0);
+        move |_: &wiremock::Request| {
+            let page = asked.fetch_add(1, Ordering::SeqCst);
+            let (id, more) = brings(page);
+            let at = format!("2026-10-02T09:{:02}:00+00:00", 59 - page.min(59));
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": [pinned(id, &at)], "has_more": more}))
+        }
+    }
+
+    #[tokio::test]
+    async fn every_page_is_listed_while_discord_has_more() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, one_a_page(|page| (100 + page, page < 11)))
+            .await
+            .unwrap();
+
+        assert_eq!(lines.len(), 12, "{lines:?}");
+    }
+
+    #[tokio::test]
+    async fn a_page_that_adds_no_pin_ends_the_listing() {
+        let server = MockServer::start().await;
+
+        let lines = pins_answered(&server, GENERAL, one_a_page(|_| (100, true)))
+            .await
+            .unwrap();
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let received = server.received_requests().await.unwrap();
+        let pages = received
+            .iter()
+            .filter(|request| request.url.path().ends_with("/pins"))
+            .count();
+        assert_eq!(pages, 2);
     }
 
     #[tokio::test]

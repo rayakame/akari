@@ -8,9 +8,6 @@ use crate::messages::{line, utc_minute};
 use crate::reactions::hold;
 use crate::report;
 
-// 250 pins at 25 a page.
-const MAX_PAGES: usize = 10;
-
 fn pin_line(pinned_at_millis: i64, message: &str) -> String {
     format!("pinned {}  {message}", utc_minute(pinned_at_millis))
 }
@@ -39,11 +36,16 @@ pub(crate) async fn lines(account: &Account, channel: ChannelId) -> Result<Vec<S
     let failed = |err: RequestError| format!("Couldn't load the pins: {}", report(&err));
     account.load_pins(channel).await.map_err(failed)?;
     let store = account.store();
-    for _ in 1..MAX_PAGES {
-        if !store.pins(channel).has_more {
+    loop {
+        let page = store.pins(channel);
+        if !page.has_more {
             break;
         }
         account.load_more_pins(channel).await.map_err(failed)?;
+        // Discord may list pins Akari can't read: a page short of 25 isn't the end.
+        if store.pins(channel).items.len() == page.items.len() {
+            break;
+        }
     }
     let page = store.pins(channel);
     if page.state != PinsState::Loaded {
