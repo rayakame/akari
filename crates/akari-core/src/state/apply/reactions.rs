@@ -294,6 +294,7 @@ impl State {
         if emoji.name.is_none() {
             emoji.name.clone_from(&asked.name);
         }
+        self.name_custom_emoji(&mut emoji);
         let taken = change.taken(had);
         let changed = taken.map_or(!had.any(), |burst| had.has(burst));
         let open = self
@@ -316,6 +317,9 @@ impl State {
                 self.reacting.push(own);
             }
             _ => {}
+        }
+        if changed && change == OwnChange::React {
+            self.note_reaction(&emoji, now_millis);
         }
         if changed {
             let change = match taken {

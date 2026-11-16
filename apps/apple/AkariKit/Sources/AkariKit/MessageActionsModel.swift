@@ -176,6 +176,11 @@ public final class MessageActionsModel {
         shift ? [] : reactions?.quick(for: row) ?? []
     }
 
+    /// Add Reaction's submenu in the menu: up to twelve emoji, each a reaction in one click.
+    public func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] {
+        reactions?.menu(for: row) ?? []
+    }
+
     /// What "Remove Reactions" lists: the message's emoji, each removable for everyone.
     public func removableReactions(for row: MessageListModel.Row) -> [ReactionPill] {
         let own = row.message

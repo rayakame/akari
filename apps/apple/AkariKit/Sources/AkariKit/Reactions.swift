@@ -35,11 +35,26 @@ public struct ReactionPill: Equatable, Sendable, Identifiable {
     public var id: ID { ID(emoji) }
     public var count: UInt32 { normal + burst }
 
-    /// The emoji as text names it: itself, or a custom one's `:name:`.
+    /// The emoji's name as the official client shows it: `:thumbsup:`, a custom one's `:name:`.
     public var name: String { Self.name(of: emoji) }
 
+    /// A Unicode emoji without a short name (©) is named by itself.
     public static func name(of emoji: ReactionEmoji) -> String {
-        emoji.id == nil ? emoji.name ?? "" : ":\(emoji.name ?? "emoji"):"
+        if emoji.id != nil {
+            return ":\(emoji.name ?? "emoji"):"
+        }
+        let glyph = emoji.name ?? ""
+        return emojiShortcode(emoji: glyph).map { ":\($0):" } ?? glyph
+    }
+
+    /// The name as VoiceOver reads it: without its colons, underscores as spaces.
+    public static func spokenName(of emoji: ReactionEmoji) -> String {
+        spoken(name(of: emoji))
+    }
+
+    static func spoken(_ name: String) -> String {
+        name.replacingOccurrences(of: ":", with: " ")
+            .replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
     }
 
     /// The official client's words for a pill, as VoiceOver reads it.
@@ -47,8 +62,7 @@ public struct ReactionPill: Equatable, Sendable, Identifiable {
 
     /// Without the press where the pill only shows.
     public func accessibilityLabel(toggles: Bool) -> String {
-        let spoken = name.replacingOccurrences(of: ":", with: " ")
-            .replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
+        let spoken = Self.spokenName(of: emoji)
         let reactions = count == 1 ? "1 reaction" : "\(count) reactions"
         guard toggles else {
             return "\(spoken), \(reactions)"
@@ -102,7 +116,8 @@ public struct QuickReaction: Equatable, Sendable, Identifiable {
     /// The official client's tooltip under the emoji's name.
     public var hint: String { mine ? "Click to remove" : "Click to react" }
     public var accessibilityLabel: String {
-        mine ? "Click to remove \(name)" : "Click to react with \(name)"
+        let spoken = ReactionPill.spokenName(of: emoji)
+        return mine ? "Click to remove \(spoken)" : "Click to react with \(spoken)"
     }
 }
 
@@ -110,6 +125,8 @@ public struct QuickReaction: Equatable, Sendable, Identifiable {
 public enum ReactionWords {
     public static let add = "Add Reaction"
     public static let reactToPost = "React to Post"
+    /// Add Reaction's submenu's last item: the emoji picker.
+    public static let viewMore = "View More"
     public static let window = "Reactions"
     public static let remove = "Remove Reaction"
     public static let tooManyTitle = "We appreciate the enthusiasm, but..."
@@ -151,7 +168,7 @@ public enum ReactionWords {
 
     /// A tab of the reactions window, as VoiceOver reads it.
     public static func tab(_ pill: ReactionPill) -> String {
-        "\(pill.name) \(pill.count == 1 ? "1 reaction" : "\(pill.count) reactions")"
+        "\(ReactionPill.spokenName(of: pill.emoji)) \(pill.count == 1 ? "1 reaction" : "\(pill.count) reactions")"
     }
 }
 

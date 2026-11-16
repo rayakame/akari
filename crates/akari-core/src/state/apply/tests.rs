@@ -84,6 +84,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::MessageInserted(message) => format!("MessageInserted({})", message.id.get()),
         StoreEvent::MessageUpdated(message) => format!("MessageUpdated({})", message.id.get()),
         StoreEvent::AgeGateChanged { guild_id } => format!("AgeGateChanged({})", guild_id.get()),
+        StoreEvent::GuildEmojisChanged { guild_id } => {
+            format!("GuildEmojisChanged({})", guild_id.get())
+        }
         StoreEvent::MessageDeleted { message_id, .. } => {
             format!("MessageDeleted({})", message_id.get())
         }
@@ -1153,6 +1156,7 @@ mod embeds;
 mod expressions;
 mod forum;
 mod media;
+mod picker;
 mod pins;
 mod reactions;
 mod read_states;

@@ -193,12 +193,17 @@ is the list's `ReactionsModel`: `toggle(_:on:from:)` adds the user's reaction or
 through the core, which changes the store at once and undoes a refusal itself; a refusal for
 too many reactions is the official alert in `messageActionFailure`, a blocked or forbidden one
 counts in `SessionModel.refusedReactions` (the host's stand-in for the official client's
-shake), the rest stay quiet. `quick(for:)` are the three quick reactions (💯, 😆, 💖 until
-Akari reads the user's own), with whether each is the user's already. `tooltip(of:on:)` is a
+shake), the rest stay quiet. `quick(for:)` are the three quick reactions (the core's
+`quickReactions`: the recently used ones the user may use there, filled from 💯, 😆 and 💖),
+and `menu(for:)` Add Reaction's submenu (up to twelve: the usable recently used, then the quick
+ones), each with whether it is the user's already. A pill's, a quick reaction's and a tab's
+`name` is the emoji's short name (`:thumbsup:`, from akari-markdown's `emoji_shortcode`; a custom
+one's `:name:`), and `ReactionPill.spokenName(of:)` the same for VoiceOver ("thumbsup"). `tooltip(of:on:)` is a
 pill's tooltip in the official client's words; `pointerEntered(_:on:)` asks for its three names
 after half a second, once per message and emoji, `tooltipChanged` says when they arrived, and a
 change of the message's reactions or a new session drops them. `MessageActionsModel` offers Add
-Reaction (the host lists `quickReactions(for:shift:)`), View Reactions and, where the core
+Reaction (the host lists `quickReactions(for:shift:)` in the bar and `menuReactions(for:)` in
+its submenu), View Reactions and, where the core
 allows removing others' reactions, Remove Reactions (`removableReactions(for:)`,
 `removeReactions(of:on:shift:)`) and Remove All Reactions; a removal waits in
 `SessionModel.messageConfirmation` for `answerMessageConfirmation(_:)` unless Shift was held.
@@ -209,6 +214,21 @@ change, closed by the session once the message has none. A forum post's bar carr
 message's reactions (`PostBar.reactions`, `defaultReaction`, `reacts`, `toggles`,
 `pillsShown(width:)`), and a forum card its one reaction (`ForumModel.Card.reaction`,
 `ForumModel.react(_:on:)`).
+`ReactionsModel.openPicker(for:from:)` opens the emoji picker on a row's message (`nil` where
+Add Reaction isn't offered; one at a time), an `EmojiPickerModel`: its `sections` (Frequently
+Used from the core's `recentReactions`, each of the user's servers from `customEmojiSections`
+with its icon, and `EmojiCatalog.groups`, Unicode's nine groups with an SF Symbol each), the
+`selection` the arrow keys `move(_:)` over a grid of `columns` (9), `select(_:)` for the
+pointer, `jump(to:)` for a section's button, `search(_:)` per keystroke (the core's
+`searchEmoji` on Akari's runtime; the newest answer wins), `pick(_:keepOpen:)` (reacts through
+`ReactionsModel.add`, which never takes a reaction back, from where it was opened, and closes
+unless Shift was held; a locked item is never picked), `detail(of:)` for the footer, and
+`onChange` (lay out again, or reveal the selection) and `onClose`. It closes itself when its
+message, channel or server goes or reactions stop showing, and reads its sections again, the
+selection kept, when a server's emoji (`EventBatch.emojisChanged`), the servers, a member, the
+user or its channel change. `EmojiCatalog.newest` is the newest emoji version this Mac's emoji
+font draws whole (15.0, what macOS 14 draws, and each later version Core Text draws as one
+picture each), the `newest` every core read of Unicode emoji takes.
 A row's `reply` (`ReplyLine`, `nil` unless its shown message answers one) is what the line over
 a reply shows: the answered message's state (`ReplyTarget`), `author` for the small avatar,
 `name` with its "@" when the reply mentions them, `content` (the one-line `RichText` with

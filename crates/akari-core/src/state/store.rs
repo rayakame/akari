@@ -15,6 +15,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
+use super::picker::{self, EmojiAccess, EmojiSection, PickerEmoji};
 use super::reactions::{Reaction, ReactionEmoji};
 use super::read_states::{Ack, ReadState};
 use super::replies::{ReplyTarget, ReplyTo};
@@ -32,6 +33,7 @@ use super::windows::{
     WindowLimits,
 };
 use crate::backlog::Backlog;
+use crate::emoji::{EmojiVersion, Query};
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -369,12 +371,12 @@ impl Store {
     }
 
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
-        self.prepare(self.begin_ready(), ready)
+        self.prepare(self.begin_ready(ready.user.user.id), ready)
     }
 
     // From here until the swap, local acks also go into READY's journal.
-    pub(crate) fn begin_ready(&self) -> Preparing {
-        self.write("READY", |inner, _| inner.state.begin_journal());
+    pub(crate) fn begin_ready(&self, user: UserId) -> Preparing {
+        self.write("READY", |inner, _| inner.state.begin_journal(user));
         Preparing {
             store: self.clone(),
             swapped: false,
@@ -786,18 +788,22 @@ impl Store {
         });
     }
 
-    // The emoji as the message the row shows has it, which knows a custom emoji's name.
+    // The emoji as the message the row shows has it, which knows a custom emoji's name, else as
+    // the user's server has it.
     pub(crate) fn reaction_emoji(
         &self,
         channel: ChannelId,
         row: MessageId,
         emoji: &ReactionEmoji,
     ) -> ReactionEmoji {
-        self.reactions(channel, row)
+        let mut named = self
+            .reactions(channel, row)
             .iter()
             .find(|known| known.emoji.same(emoji))
             .map_or(emoji, |known| &known.emoji)
-            .clone()
+            .clone();
+        self.read(|inner| inner.state.name_custom_emoji(&mut named));
+        named
     }
 
     // The store's own record of each user it knows unchanged.
@@ -1314,6 +1320,63 @@ impl Store {
             .filter(|channel| !channel.message_request && !channel.spam)
             .collect();
         order::private_channel_order(listed)
+    }
+
+    /// The user's servers' custom emoji as the picker lists them for reacting in `channel`: the
+    /// channel's own server first, then the rest in the rail's order, each server's emoji by ID.
+    /// Left out, as in Discord's picker: another server's emoji where the channel doesn't allow
+    /// external emoji, emoji for roles the user lacks, and servers left without any. Empty for a
+    /// channel the store doesn't know. Read again on `GuildEmojisChanged`.
+    pub fn custom_emoji_sections(&self, channel: ChannelId) -> Vec<EmojiSection> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.custom_emoji_sections(channel, now))
+    }
+
+    /// Whether the user may react with the custom emoji in `channel`; `None` for an emoji none of
+    /// the user's servers has, or a channel the store doesn't know.
+    pub fn emoji_access(&self, channel: ChannelId, emoji: EmojiId) -> Option<EmojiAccess> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.emoji_access(channel, emoji, now))
+    }
+
+    /// The user's recently used reactions as the picker's Frequently Used lists them in
+    /// `channel`, best first: Akari's own count of the emoji the user reacted with (at most
+    /// [`RECENT_REACTIONS`](super::RECENT_REACTIONS)), without what the picker leaves out there,
+    /// custom emoji none of the user's servers has, and Unicode emoji newer than `newest` (what
+    /// the host's font draws). No event: read it when the picker opens.
+    pub fn recent_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.recent_reactions(channel, newest, now))
+    }
+
+    /// The hover bar's three quick reactions in `channel`: the recently used ones the user may
+    /// use there, filled from 💯, 😆 and 💖 as Discord's client does, none newer than `newest`.
+    /// No event: read it when the bar shows.
+    pub fn quick_reactions(&self, channel: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.quick_reactions(channel, newest, now))
+    }
+
+    /// The emoji whose names match `query` (a Unicode emoji's short name, other short codes and
+    /// Unicode's name; a custom emoji's name; any case, colons around left out), at most `limit`,
+    /// as the picker lists them in `channel`: those the user may use first, then by how well
+    /// they match (the whole name, its start, a word's start, anywhere), then the channel's own
+    /// server, Unicode, the other servers. Unicode emoji newer than `newest` are left out. The
+    /// store's lock is held for the custom emoji only.
+    pub fn search_emoji(
+        &self,
+        channel: ChannelId,
+        query: &str,
+        newest: EmojiVersion,
+        limit: usize,
+    ) -> Vec<PickerEmoji> {
+        let Some(query) = Query::new(query) else {
+            return Vec::new();
+        };
+        let now = self.now_millis();
+        let mut found = self.read(|inner| inner.state.custom_matches(channel, &query, now));
+        found.extend(picker::unicode_matches(&query, newest));
+        picker::ranked(found, limit)
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

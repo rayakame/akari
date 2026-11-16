@@ -54,10 +54,10 @@ final class ReactorsTests {
 
         let model = window()
 
-        #expect(model.tabs.map(\.name) == ["🎉", "👀", "👍"])
+        #expect(model.tabs.map(\.emoji.name) == ["🎉", "👀", "👍"])
         #expect(model.tabs.map(\.count) == [4, 3, 1])
         #expect(model.selected == ReactionPill.ID(.unicode("🎉")))
-        #expect(ReactionWords.tab(model.tabs[2]) == "👍 1 reaction")
+        #expect(ReactionWords.tab(model.tabs[2]) == "thumbsup 1 reaction")
     }
 
     @Test
@@ -542,7 +542,7 @@ final class ReactorsTests {
 
         model.apply(EventBatch([.messageUpdated(channelId: here, messageId: it)]))
 
-        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+        #expect(model.tabs.map(\.name) == [":tada:", ":thumbsup:"])
     }
 
     @Test
@@ -553,7 +553,7 @@ final class ReactorsTests {
 
         model.apply(EventBatch([.ready]))
 
-        #expect(model.tabs.map(\.name) == ["🎉", "👍"])
+        #expect(model.tabs.map(\.name) == [":tada:", ":thumbsup:"])
     }
 
     @Test
@@ -813,7 +813,7 @@ final class ReactorsTests {
 
         model.apply(EventBatch([.ready]))
 
-        #expect(model.tabs.map(\.name) == ["👍", "🎉"])
+        #expect(model.tabs.map(\.emoji.name) == ["👍", "🎉"])
         #expect(ids(model) == [2, 3])
         #expect(calls.isEmpty)
 
@@ -979,7 +979,7 @@ final class SessionReactionsTests {
 
         #expect(session.reactors?.channelId == id(31))
         #expect(session.reactors?.messageId == id(31))
-        #expect(session.reactors?.tabs.map(\.name) == ["👀"])
+        #expect(session.reactors?.tabs.map(\.name) == [":eyes:"])
         session.close()
     }
 

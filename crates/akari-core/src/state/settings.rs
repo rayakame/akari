@@ -340,6 +340,8 @@ pub(crate) struct UserSettings {
     pub(crate) unreadable: bool,
     // Akari's own, kept across READY: guilds whose age-restricted channels the user agreed to see.
     pub(crate) age_agreements: Arc<super::media::AgeAgreements>,
+    // Akari's own, kept across READY: the emoji the user reacts with.
+    pub(crate) reaction_uses: Arc<super::recent::ReactionUses>,
 }
 
 impl UserSettings {

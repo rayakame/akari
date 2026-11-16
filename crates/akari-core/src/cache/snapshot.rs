@@ -155,6 +155,10 @@ fn settings_changes(
         writer.put_age_agreements(&new.age_agreements)?;
         counts.0 += 1;
     }
+    if old.reaction_uses != new.reaction_uses {
+        writer.put_reaction_uses(&new.reaction_uses)?;
+        counts.0 += 1;
+    }
     Ok(counts)
 }
 

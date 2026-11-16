@@ -22,7 +22,8 @@ final class BarList {
 
     /// With `timers`, relative times change when the test fires them, at the clock's time.
     init(
-        scale: CGFloat? = nil, height: CGFloat = 400, table: MessageTableView = MessageTableView(),
+        scale: CGFloat? = nil, width: CGFloat = 600, height: CGFloat = 400,
+        table: MessageTableView = MessageTableView(),
         clock: TimeRefreshTests.Clock? = nil, timers: TimeRefreshTests.Timers? = nil
     ) {
         controller = MessageTableController(
@@ -35,8 +36,8 @@ final class BarList {
             onScreen: { timers != nil || MessageTableController.isOnScreen($0) })
         window =
             scale.map { ScaledWindow.make(scale: $0) }
-            ?? TestWindow.make(size: NSSize(width: 600, height: height), style: [.titled, .resizable])
-        window.setContentSize(NSSize(width: 600, height: height))
+            ?? TestWindow.make(size: NSSize(width: width, height: height), style: [.titled, .resizable])
+        window.setContentSize(NSSize(width: width, height: height))
         window.contentView = controller.scrollView
         controller.actions = actions
         controller.modifiers = { [unowned self] in shift ? .shift : [] }
@@ -1641,10 +1642,12 @@ struct MessageBridgeTests {
     func shiftTakesTheQuickReactionsAwayAndSkipsTheRemovalsQuestion() async throws {
         let reacting = try Reacting()
         let bridge = reacting.bridge
-        #expect(bridge.quickReactions(for: message, shift: false).map(\.name) == ["💯", "😆", "💖"])
+        #expect(
+            bridge.quickReactions(for: message, shift: false).map(\.name)
+                == [":100:", ":laughing:", ":sparkling_heart:"])
         #expect(bridge.quickReactions(for: message, shift: true).isEmpty)
         let removable = bridge.removableReactions(for: message)
-        #expect(removable.map(\.name) == ["👍"])
+        #expect(removable.map(\.name) == [":thumbsup:"])
 
         bridge.removeReactions(of: removable[0], on: message, shift: false)
         #expect(reacting.session.messageConfirmation?.title == "Remove Reactions for Emoji")
@@ -1653,6 +1656,26 @@ struct MessageBridgeTests {
 
         #expect(reacting.session.messageConfirmation == nil)
         try await eventually { reacting.calls == ["remove 👍 of 2"] }
+        reacting.session.close()
+    }
+
+    @Test
+    func theBridgeListsTheMenusEmojiAndOpensThePickerFromWhereTheClickWas() throws {
+        let reacting = try Reacting()
+        let bridge = reacting.bridge
+        reacting.account.formattedStore.recent.withLock { $0 = [pickerEmoji("🔥")] }
+
+        #expect(
+            bridge.menuReactions(for: message).map(\.name) == [":fire:", ":100:", ":laughing:", ":sparkling_heart:"])
+        #expect(
+            bridge.quickReactions(for: message, shift: false).map(\.name)
+                == [":100:", ":laughing:", ":sparkling_heart:"])
+        let picker = try #require(bridge.emojiPicker(for: message, from: .inlineButton))
+
+        #expect(picker.messageId == message.message.id)
+        #expect(picker.location == .inlineButton)
+        #expect(picker.isOpen)
+        picker.close()
         reacting.session.close()
     }
 
@@ -1675,11 +1698,11 @@ struct MessageBridgeTests {
         list.controller.actions = reacting.bridge
         list.show([message.reacting(reactions(pill("👍")))])
         let thumbs = try #require(try list.cell(of: 2) as? MessageCell).reactions?.pills.first
-        #expect(thumbs?.toolTip == "👍 reacted by 1 person")
+        #expect(thumbs?.toolTip == ":thumbsup: reacted by 1 person")
 
         reacting.bridge.reactionHovered(pill("👍"), on: message)
 
-        try await eventually { thumbs?.toolTip == "👍 reacted by Ann" }
+        try await eventually { thumbs?.toolTip == ":thumbsup: reacted by Ann" }
         #expect(reacting.calls == ["reactors 👍"])
         reacting.session.close()
     }

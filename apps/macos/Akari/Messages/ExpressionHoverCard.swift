@@ -13,7 +13,7 @@ final class ExpressionHoverCard {
     var focused = false
     private(set) var shown: ExpressionCard?
     private(set) var panel: NSPanel?
-    private var pending: (target: ExpressionTarget, rect: NSRect)?
+    private(set) var pending: (target: ExpressionTarget, rect: NSRect)?
     private var presented: (motion: MotionPolicy, focused: Bool)?
     private var waiting: Task<Void, Never>?
     // Between the arrow's tip and the item, as measured in the official client.

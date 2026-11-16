@@ -172,7 +172,9 @@ Sources: [guild object](https://docs.discord.food/resources/guild#guild-structur
   needs; missing counts as `true`), `managed` and `roles` (the roles that may use it; empty
   for everyone). Only `id` is required; a field in another shape is its default, an entry
   without an ID is skipped. `require_colons` and `user` aren't read. From the reference and
-  the code read of canary 671549, not observed.
+  the code read of canary 671549, not observed. The store keeps every emoji with a name
+  (`state::GuildEmoji`, sorted by ID on its guild); a nameless one is a deleted emoji and is
+  left out.
 - Not modeled: stickers, soundboard sounds, verification and MFA levels, the
   explicit content filter, system channel flags, member `avatar_decoration_data`,
   `collectibles`, `display_name_styles`, `bio`, `unusual_dm_activity_until`, `permissions`.

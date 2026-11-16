@@ -442,8 +442,10 @@ Discord (canary 649848's calls):
 
 - The user's servers carry their custom emoji in READY and GUILD_CREATE (`emojis`) and
   GUILD_EMOJIS_UPDATE (the whole list); akari-core decodes them with their names and
-  availability ([models.md](models.md)) and keeps each server's emoji IDs, sorted
-  (`Store::emoji_guild`), in memory and in the disk cache's guild row.
+  availability ([models.md](models.md)) and keeps each server's emoji (name, animated,
+  available, managed, roles), sorted by ID (`Guild::emojis`, `Store::emoji_guild`), in memory
+  and in the disk cache's guild row. The emoji picker reads them too
+  ([emoji-picker.md](emoji-picker.md)).
 - `GET /emojis/{emoji.id}/source` (`Account::emoji_source`): `{type: "GUILD" | "APPLICATION",
   guild, application}`. A guild is answered only while it's discoverable; its object has `id`,
   `name`, `icon`, `features` (DISCOVERABLE, VERIFIED, PARTNERED), `emojis` and

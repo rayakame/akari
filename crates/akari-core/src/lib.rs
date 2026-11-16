@@ -6,6 +6,7 @@ mod backlog;
 mod backoff;
 mod cache;
 mod client;
+pub mod emoji;
 mod error;
 pub mod gateway;
 mod heartbeat;

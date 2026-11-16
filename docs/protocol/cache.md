@@ -43,13 +43,16 @@ every other target builds rusqlite's bundled copy.
   deleted row's text is overwritten in the file, not left in a free page), `auto_vacuum =
   INCREMENTAL` (set before the first table), 2 MiB of page cache, a 500 ms busy timeout.
 - **Tables:** `meta` (the owner's user ID), `current_user`, `users` (DM recipients), `guilds`
-  (with their roles), `unavailable_guilds`, `members` (the current user's, per guild),
+  (with their roles and custom emoji: name, animated, available, managed, roles),
+  `unavailable_guilds`, `members` (the current user's, per guild),
   `channels`, `windows` (a cached channel and when it was last viewed), `messages` (per
   channel and ID), `guild_settings` (per guild; `guild_id` 0 holds the DM settings),
   `user_settings` (per key: `folders`, absent when the settings proto had none,
-  `notification_flags`, `display` and `age_agreements`, the servers whose age-restricted
-  channels the user agreed to see; READY doesn't carry them, so every READY keeps the store's,
-  and one that came before the restore takes the cached ones in too), `read_states` (per channel: the acknowledged message and the
+  `notification_flags`, `display`, `age_agreements`, the servers whose age-restricted
+  channels the user agreed to see, and `reaction_uses`, the emoji the user reacted with (per
+  emoji how often and when last, at most 42); READY carries neither of the last two, so every
+  READY keeps the store's, and one that came before the restore takes the cached ones in too,
+  the uses added up), `read_states` (per channel: the acknowledged message and the
   mention count) and `pin_acks` (per channel: the pin time the user acknowledged, for the pins
   dot; a channel's newest pin's time is in its `channels` row). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
@@ -66,8 +69,9 @@ every other target builds rusqlite's bundled copy.
   messages did. What a thread started from isn't kept: it is fetched, or comes with the page.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 8 since messages keep their reactions and a reply what
-  it answers, and the pin times are kept; 7 since embeds keep their flags and the version of
+- **Version:** `PRAGMA user_version`, 9 since a server's custom emoji keep their names,
+  availability and roles for the emoji picker (a version 8 file has their IDs only); 8 since
+  messages keep their reactions and a reply what it answers, and the pin times are kept; 7 since embeds keep their flags and the version of
   Discord's content scan, and their media its flags and placeholder; 6 did the same for
   attachments; 5 brought a thread member's join time, which orders the channel
   list; 4 the membership (its mute and level) instead of `joined`; 3 the read states. Older
@@ -155,7 +159,9 @@ messages aren't held back behind it).
 The host names the account (it keys the token store by it), but READY decides. If READY's
 user differs, a host bug, the cache moves to that user's file and leaves the other one as it
 was. Nothing is read from the other file once the session's user is known: neither its
-entities (`cache not used reason=other_user`) nor its windows.
+entities (`cache not used reason=other_user`) nor its windows. Its age agreements and reaction
+uses, Akari's own, never reach READY's account, whether the file was restored before READY, read
+after it or while it was prepared.
 
 ## Deleting
 

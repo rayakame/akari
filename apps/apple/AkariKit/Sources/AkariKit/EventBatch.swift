@@ -11,6 +11,8 @@ struct EventBatch {
     var guildListChanged = false
     var displaySettingsChanged = false
     var ageGatesChanged = false
+    // Guilds whose custom emoji changed.
+    var emojisChanged: Set<GuildId> = []
     var membersChanged: Set<GuildId> = []
     // The `nil` guild holds the DM settings.
     var guildSettingsChanged: Set<GuildId?> = []
@@ -79,6 +81,8 @@ struct EventBatch {
                 displaySettingsChanged = true
             case .ageGateChanged:
                 ageGatesChanged = true
+            case .guildEmojisChanged(let guild):
+                emojisChanged.insert(guild)
             case .guildSettingsChanged(let guild):
                 guildSettingsChanged.insert(guild)
             case .badgeChanged(let channel, let guild):

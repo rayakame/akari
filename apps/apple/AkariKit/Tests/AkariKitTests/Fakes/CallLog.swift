@@ -39,6 +39,7 @@ final class CallLog: Sendable {
         case loadOlderPosts(ChannelId, ForumView)
         case searchPosts(ChannelId, String, ForumView)
         case requestPostPreviews(ChannelId, [ChannelId])
+        case searchEmoji(ChannelId, String, EmojiVersion, limit: UInt32)
         case flushCache
     }
 
@@ -87,6 +88,9 @@ final class CallLog: Sendable {
         case unreadPosts([ChannelId])
         case newPosts([ChannelId])
         case postNewCounts([ChannelId])
+        case customEmojiSections(ChannelId)
+        case recentReactions(ChannelId, EmojiVersion)
+        case quickReactions(ChannelId, EmojiVersion)
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

@@ -44,7 +44,11 @@ impl Account {
 impl Account {
     /// The account's state; it stays readable after the account is closed.
     pub fn store(&self) -> Arc<Store> {
-        Store::new(self.core.store().clone(), self.contents.clone())
+        Store::new(
+            self.core.store().clone(),
+            self.contents.clone(),
+            self.runtime,
+        )
     }
 
     /// Connects, or resumes after `disconnect()`. Fails with `Closed` after `close()`.

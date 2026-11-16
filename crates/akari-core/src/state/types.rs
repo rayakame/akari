@@ -115,14 +115,38 @@ pub struct Guild {
     pub default_message_notifications: NotificationLevel,
     /// A community server, where the user can choose its channels ("Channels & Roles").
     pub community: bool,
-    /// Its custom emoji, sorted: which server an emoji in a message is from.
-    pub emojis: Box<[EmojiId]>,
+    /// Its custom emoji by ID: the picker's and which server an emoji in a message is from.
+    pub emojis: Arc<[GuildEmoji]>,
     /// Its owner marked it explicit or age-restricted: every channel is behind the age gate.
     pub age_restricted: bool,
 }
 
+/// A server's custom emoji.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GuildEmoji {
+    pub id: EmojiId,
+    pub name: Box<str>,
+    pub animated: bool,
+    /// `false` while the server lacks the boosts the emoji needs: nobody can use it.
+    pub available: bool,
+    /// An integration's, such as a Twitch subscription's.
+    pub managed: bool,
+    /// The roles that may use it; empty for everyone.
+    pub roles: Box<[RoleId]>,
+}
+
+impl GuildEmoji {
+    pub fn image_key(&self) -> ImageKey {
+        ImageKey::Emoji {
+            id: self.id,
+            animated: self.animated,
+        }
+    }
+}
+
 impl Guild {
-    /// Equal in all a host shows: its emoji list aside, which nothing shows.
+    /// Equal in all a host shows as the guild: its emoji list has an event of its own.
     pub(crate) fn shows_the_same(&self, other: &Self) -> bool {
         let Self {
             id,
@@ -1187,7 +1211,7 @@ mod tests {
             large: false,
             default_message_notifications: NotificationLevel::AllMessages,
             community: false,
-            emojis: Box::new([]),
+            emojis: Arc::new([]),
             age_restricted: false,
         };
         assert_eq!(
