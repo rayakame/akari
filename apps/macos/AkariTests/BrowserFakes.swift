@@ -38,6 +38,10 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var unpinnable = true
     // The second line is Ray's pin of the first pin.
     var pinLine = false
+    // The first pin answers Ray's "hello".
+    var pinnedReply = false
+    var holdsUnpins = false
+    var ageGated = false
     private(set) var account: BrowserAccount?
 
     @MainActor
@@ -47,9 +51,11 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
             threadSlowmode: threadSlowmode, longFirstLine: longFirstLine,
             firstLineEmoji: firstLineEmoji,
             pins: PinsPage(
-                items: (0..<pins).map(Self.pinned), hasMore: pinsMore, state: pinsState),
-            pinsDot: pinsDot, pinsLines: pinsLines, unpinnable: unpinnable, pinLine: pinLine)
-        let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
+                items: (0..<pins).map { Self.pinned($0, replying: pinnedReply && $0 == 0) },
+                hasMore: pinsMore, state: pinsState),
+            pinsDot: pinsDot, pinsLines: pinsLines, unpinnable: unpinnable, pinLine: pinLine,
+            ageGated: ageGated)
+        let account = BrowserAccount(store: store, holdsLoads: holdsLoads, holdsUnpins: holdsUnpins)
         self.account = account
         let session = SessionModel(
             userId: Self.me, account: account,
@@ -66,13 +72,13 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     ]
 
     // Each a day older than the one before; Ray's but the second.
-    nonisolated static func pinned(_ index: Int) -> PinnedMessage {
+    nonisolated static func pinned(_ index: Int, replying: Bool = false) -> PinnedMessage {
         let date = now - TimeInterval(86_400 * (index + 1))
         let id = MessageId(rawValue: snowflake(date))
         let author = index == 1 ? me : ray
         let name = author == me ? "rayakame" : "Ray"
         let content = index < pinTexts.count ? pinTexts[index] : "Pinned message \(index + 1)"
-        let message = Message(
+        var message = Message(
             id: id, channelId: parent, kind: .default,
             author: User(
                 id: author, username: name, globalName: nil, displayName: name, bot: false,
@@ -82,6 +88,10 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
             delivery: .sent, formatted: formattedText(content: content), mentionsMe: false,
             reference: nil, hasThread: false, mentions: [], call: nil, roleSubscription: nil,
             purchasedProduct: nil, actor: nil, applicationName: nil, embedFields: [])
+        if replying {
+            message.kind = .reply
+            message.repliedTo = RepliedTo(channelId: parent, messageId: BrowserStore.lineIds[0], mentionsAuthor: false)
+        }
         return PinnedMessage(message: message, pinnedAt: date)
     }
 
@@ -100,10 +110,12 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 
     private let browserStore: BrowserStore
     private let holdsLoads: Bool
+    private let holdsUnpins: Bool
 
-    init(store: BrowserStore, holdsLoads: Bool = false) {
+    init(store: BrowserStore, holdsLoads: Bool = false, holdsUnpins: Bool = false) {
         browserStore = store
         self.holdsLoads = holdsLoads
+        self.holdsUnpins = holdsUnpins
         super.init(noHandle: NoHandle())
     }
 
@@ -171,6 +183,9 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 
     override func unpin(channelId: ChannelId, messageId: MessageId) async throws {
         pinCalls.withLock { $0.append("unpin \(messageId.rawValue)") }
+        if holdsUnpins {
+            try await Task.sleep(for: .seconds(60))
+        }
     }
 }
 
@@ -178,7 +193,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
     override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
     override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
-    override func ageGate(channelId: ChannelId) -> AgeGate { .open }
+    override func ageGate(channelId: ChannelId) -> AgeGate { ageGated ? .ask(server: false) : .open }
 
     private let empty: Bool
     private let more: Bool
@@ -194,6 +209,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let pinsLines: Bool
     private let unpinnable: Bool
     private let pinLine: Bool
+    private let ageGated: Bool
     static let lineIds = (1...3).map {
         MessageId(rawValue: FakeBrowserStore.snowflake(FakeBrowserStore.now - 3600) + $0)
     }
@@ -203,8 +219,9 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
         creation: ThreadCreation = ThreadCreation(public: false, private: false),
         threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1, firstLineEmoji: Bool = false,
         pins: PinsPage = PinsPage(items: [], hasMore: false, state: .loaded), pinsDot: Bool = false,
-        pinsLines: Bool = false, unpinnable: Bool = true, pinLine: Bool = false
+        pinsLines: Bool = false, unpinnable: Bool = true, pinLine: Bool = false, ageGated: Bool = false
     ) {
+        self.ageGated = ageGated
         pinsPage = pins
         self.pinsDot = pinsDot
         self.pinsLines = pinsLines
@@ -271,6 +288,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     override func pinsUnread(channelId: ChannelId) -> Bool {
         pinsDot && channelId == FakeBrowserStore.parent
     }
+
+    override func replyTarget(channelId: ChannelId, targetId: MessageId) -> ReplyTarget { .notLoaded }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
         creation.public && messageId == Self.lineIds[0]
