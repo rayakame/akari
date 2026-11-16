@@ -9,6 +9,7 @@ import Testing
 // message" and "pinned messages" white and medium, the rest gray; "a message" jumps to the pin,
 // "pinned messages" opens the channel's pins.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinnedMessageLineTests {
     let list = MessageTableTests()
     let noon = berlinTime(2026, 10, 10, 12, 0)
@@ -134,6 +135,7 @@ struct PinnedMessageLineTests {
 
 // The model's jump lands; the table puts the message where the unread bar's jump puts its line.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct MessageJumpScrollTests {
     let list = MessageTableTests()
     let actions = MessageTableTests.RecordingActions()
@@ -248,6 +250,7 @@ struct MessageJumpScrollTests {
 
 // Through the app's bridge: the first channel's newest message pins its fifth.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinnedMessageLineScreenTests {
     let screens = SessionScreenTests()
     let account = FormattedAccount(contents: ["test"], pinned: 5)

@@ -218,6 +218,7 @@ final class ShownView {
 
     /// Takes the view out of its window and the window and its children off the screen at once.
     func close() {
+        Releases.watch(window)
         host.rootView = AnyView(EmptyView())
         host.layoutSubtreeIfNeeded()
         for child in window.childWindows ?? [] {

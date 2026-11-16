@@ -8,6 +8,7 @@ import Testing
 // Pin's and Unpin's questions: the official words, the message in its box, Unpin's protip and
 // the colors of the yes.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinQuestionTests {
     let message = row(1, at: berlinTime(2026, 10, 10, 12, 0), content: "The release is on Friday.")
 
@@ -152,6 +153,7 @@ struct PinQuestionTests {
 // Pin and Unpin from the list: the Shift-held bar's button and the menu's item, as the model
 // lists them, reach the list's actions with Shift as it was at the click.
 @MainActor
+@Suite(.releasesWhatItShows)
 final class PinActionsInTheListTests {
     nonisolated final class PinStore: Store, @unchecked Sendable {
         init() {

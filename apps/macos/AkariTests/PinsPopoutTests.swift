@@ -8,6 +8,7 @@ import Testing
 // Discord's stylesheet (canary 671549): 420 wide under the button, as tall as what it shows
 // between 200 and 80% of the window; cards with their message 16 inside, shifted 4 left.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinsLayoutTests {
     @Test
     func thePopoutHangsUnderTheButtonWithItsRightEdgeOnTheButtons() {
@@ -105,6 +106,7 @@ struct PinsLayoutTests {
 
 // The popout's content, hosted as its panel hosts it; its buttons found by their hand.
 @MainActor
+@Suite(.releasesWhatItShows)
 final class PinsPopoutTests {
     let fake = FakeBrowserStore()
     var shift = false
@@ -503,6 +505,7 @@ final class PinsPopoutTests {
 // The header's button: its dot while the channel has pins the user hasn't seen, dimmed and without
 // the hand behind the age gate, no tooltip while its popout is open.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinsButtonTests {
     let windows = ShownWindows()
 

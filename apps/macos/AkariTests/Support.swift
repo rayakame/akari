@@ -184,6 +184,7 @@ struct Rendered {
         rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: rep)
         scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        Releases.watch(window)
     }
 
     var width: CGFloat { CGFloat(rep.pixelsWide) / scale }

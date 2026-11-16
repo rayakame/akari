@@ -8,6 +8,7 @@ import Testing
 // The pins popout in windows of its own over the session's, as the Threads popout: a clear
 // shield and the popout's key panel; the unpin question over both.
 @MainActor
+@Suite(.releasesWhatItShows)
 final class PinsWindowsTests {
     let fake = FakeBrowserStore()
     let session: SessionModel
@@ -70,9 +71,12 @@ final class PinsWindowsTests {
         window.childWindows?.compactMap { $0 as? ShieldWindow } ?? []
     }
 
+    // Every panel a test looks at must be released once it closes.
     func panel(_ label: String) -> ContainerPanel? {
-        shields.lazy.compactMap { $0.childWindows?.compactMap { $0 as? ContainerPanel }.first }
+        let found = shields.lazy.compactMap { $0.childWindows?.compactMap { $0 as? ContainerPanel }.first }
             .first { $0.accessibilityLabel() == label }
+        Releases.watch(found)
+        return found
     }
 
     var pinsPanel: ContainerPanel? { panel(PinsModel.title) }
@@ -80,6 +84,7 @@ final class PinsWindowsTests {
     // Each test closes what it opened, as the app does: a popout or a question left in a window keeps
     // the main thread busy beside every suite after it.
     func close() {
+        Releases.watch(window)
         if session.pinQuestion != nil {
             session.answerPinQuestion(false)
         }
@@ -302,6 +307,7 @@ final class PinsWindowsTests {
 // Pin's and Unpin's window as the session shows it: over the dimmed session, its yes pins, and
 // Cancel, Escape and every way of closing it answer no; it stays while another app is active.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinQuestionWindowTests {
     let fake = FakeBrowserStore()
     let windows = ShownWindows()
@@ -320,8 +326,11 @@ struct PinQuestionWindowTests {
         view.window.childWindows?.compactMap { $0 as? ShieldWindow }.first
     }
 
+    // Every question's panel must be released once it closes.
     var panel: ContainerPanel? {
-        shield?.childWindows?.compactMap { $0 as? ContainerPanel }.first
+        let found = shield?.childWindows?.compactMap { $0 as? ContainerPanel }.first
+        Releases.watch(found)
+        return found
     }
 
     var pinCalls: [String] {
@@ -346,6 +355,7 @@ struct PinQuestionWindowTests {
     }
 
     func close() {
+        Releases.watch(childrenOf: view.window)
         if session.pinQuestion != nil {
             session.answerPinQuestion(false)
         }
@@ -438,6 +448,7 @@ struct PinQuestionWindowTests {
 // "pinned messages" in a pin's line, through the app's wiring: the bridge, the message area and
 // the session screen.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinLineWiringTests {
     let windows = ShownWindows()
 
@@ -480,6 +491,7 @@ struct PinLineWiringTests {
         text.clicked(onLink: link, at: try index(of: "pinned messages", in: text))
 
         try await view.waitUntil("the popout") { session.pins?.channelId == FakeBrowserStore.parent }
+        Releases.watch(childrenOf: view.window)
         session.closePins()
         session.close()
         view.close()
@@ -490,6 +502,7 @@ struct PinLineWiringTests {
 // The header's pins button as the session shows it: its dot, selected while the popout is open,
 // and without the hand behind the age gate.
 @MainActor
+@Suite(.releasesWhatItShows)
 struct PinsButtonInTheHeaderTests {
     let windows = ShownWindows()
 
@@ -535,6 +548,7 @@ struct PinsButtonInTheHeaderTests {
     }
 
     func close(_ session: SessionModel, _ view: ShownView) {
+        Releases.watch(childrenOf: view.window)
         session.closePins()
         session.close()
         view.close()
@@ -583,4 +597,101 @@ struct PinsButtonInTheHeaderTests {
         #expect(!gate.hands().contains { $0.intersects(box) })
         close(gated, gate)
     }
+}
+
+// Outside the main actor: Swift 6.3's @TaskLocal gives `$current` the enclosing type's isolation.
+nonisolated enum ReleasesScope {
+    @TaskLocal static var current: Releases?
+}
+
+// What a test's windows held, by weak reference, must be gone once it is over: one kept alive
+// keeps laying out and taking frame notifications beside every suite after it.
+@MainActor
+final class Releases {
+
+    private final class Held {
+        weak var object: AnyObject?
+        let name: String
+
+        init(_ object: AnyObject) {
+            self.object = object
+            name = String(describing: type(of: object)).components(separatedBy: "<").first ?? ""
+        }
+    }
+
+    private var held: [ObjectIdentifier: Held] = [:]
+
+    private static func kept(_ view: NSView) -> Bool {
+        view is NSScrollView || view is NSTextView || view is MessagePreviewView || view is MessagePreviewBox
+            || view is MessageQuestionView || view is NSProgressIndicator
+            || String(describing: type(of: view)).contains("HostingView")
+    }
+
+    /// Watches the window, its children and their views as they are now.
+    static func watch(_ window: NSWindow?) {
+        ReleasesScope.current?.watch(window)
+    }
+
+    static func watch(childrenOf window: NSWindow) {
+        for child in window.childWindows ?? [] {
+            ReleasesScope.current?.watch(child)
+        }
+    }
+
+    private func watch(_ window: NSWindow?) {
+        guard let window else {
+            return
+        }
+        held[ObjectIdentifier(window)] = Held(window)
+        var views = window.contentView.map { [$0] } ?? []
+        while let view = views.popLast() {
+            if Self.kept(view) {
+                held[ObjectIdentifier(view)] = Held(view)
+            }
+            views += view.subviews
+        }
+        for child in window.childWindows ?? [] {
+            watch(child)
+        }
+    }
+
+    func expectReleased() async throws {
+        // A window still alive now shows what it keeps.
+        for window in held.values.compactMap({ $0.object as? NSWindow }) {
+            watch(window)
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline, held.values.contains(where: { $0.object != nil }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        var alive: [String: Int] = [:]
+        for kept in held.values where kept.object != nil {
+            alive[kept.name, default: 0] += 1
+        }
+        let named = alive.sorted { $0.key < $1.key }.map { "\($0.key) × \($0.value)" }
+        #expect(alive.isEmpty, "still alive 5 s after the test: \(named.joined(separator: ", "))")
+    }
+}
+
+// Checks each test once it is over, its suite and locals gone, for what it watched.
+nonisolated struct ReleasesWhatItShows: TestTrait, SuiteTrait, TestScoping {
+    var isRecursive: Bool { true }
+
+    func scopeProvider(for test: Test, testCase: Test.Case?) -> Self? {
+        testCase == nil ? nil : self
+    }
+
+    @concurrent func provideScope(
+        for test: Test, testCase: Test.Case?, performing function: @concurrent @Sendable () async throws -> Void
+    ) async throws {
+        let releases = await Releases()
+        try await ReleasesScope.$current.withValue(releases) {
+            try await function()
+        }
+        try await releases.expectReleased()
+    }
+}
+
+extension Trait where Self == ReleasesWhatItShows {
+    static var releasesWhatItShows: Self { Self() }
 }
