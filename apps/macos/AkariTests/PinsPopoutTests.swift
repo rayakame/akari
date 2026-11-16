@@ -422,15 +422,15 @@ final class PinsPopoutTests {
     }
 
     // While its unpin is on its way the ✕ is a spinner without the hand; Jump keeps its own.
+    // The ✕'s action, not a click: AppKit drops a press while another test's is still held.
     @Test
     func theCrossIsASpinnerWhileItsUnpinIsOnItsWay() async throws {
         fake.holdsUnpins = true
         let (session, pins) = try await opened()
-        shift = true
         let view = host(pins, hovered: pins.rows[0].id)
         let cross = try #require(view.hands().max { $0.minX < $1.minX })
 
-        try await click(cross, in: view)
+        pins.unpin(pins.rows[0], shift: true)
 
         try await waitUntil("busy") { pins.unpinning.contains(pins.rows[0].message.id) }
         var spinner: NSView?
