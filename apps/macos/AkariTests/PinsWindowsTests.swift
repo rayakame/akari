@@ -196,6 +196,91 @@ final class PinsWindowsTests {
         close()
     }
 
+    func escape(in panel: NSWindow) throws {
+        panel.sendEvent(
+            try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}",
+                    charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)))
+    }
+
+    func attached<W: NSWindow>(_ panel: W, to parent: NSWindow) -> W {
+        panel.setFrame(NSRect(x: 0, y: 0, width: 100, height: 100), display: false)
+        let hidden = TestWindow.hide(panel)
+        parent.addChildWindow(hidden, ordered: .above)
+        return hidden
+    }
+
+    // The key goes back past a panel of another kind, one that never takes the key and another
+    // window's: to the session's window.
+    @Test
+    func theKeyGoesBackOnlyToTheSessionsOwnKeyPanels() async throws {
+        let pins = try await opened()
+        let other = TestWindow.make(size: NSSize(width: 100, height: 100))
+        other.orderFrontRegardless()
+        let decoys = [
+            attached(TestWindow.panel(size: NSSize(width: 100, height: 100), style: [.titled]), to: window),
+            attached(ContainerPanel(keyable: false), to: window),
+            attached(ContainerPanel(keyable: true), to: other),
+        ]
+
+        try escape(in: pins)
+
+        try await waitUntil("closed") { session.pins == nil }
+        #expect(keyed.last === window)
+        for decoy in decoys {
+            decoy.parent?.removeChildWindow(decoy)
+            decoy.orderOut(nil)
+        }
+        other.orderOut(nil)
+        close()
+    }
+
+    @Test
+    func theKeyGoesBackToTheFrontmostOfTwoPanels() async throws {
+        _ = try await opened()
+        let front = attached(ContainerPanel(keyable: true), to: window)
+        let model = try #require(session.pins)
+        model.unpin(try #require(model.rows.first), shift: false)
+        try await waitUntil("the question") { panel("Unpin Message")?.isVisible == true }
+
+        session.answerPinQuestion(false)
+
+        try await waitUntil("the question's windows go") { panel("Unpin Message") == nil }
+        #expect(keyed.last === front)
+        window.removeChildWindow(front)
+        front.orderOut(nil)
+        close()
+    }
+
+    @Test
+    func theCardsDrawWithTheSessionsImages() async throws {
+        let pins = try await opened()
+        let content = try #require(pins.contentView)
+
+        let previews = MessageMenuAreaTests.views(MessagePreviewView.self, in: content)
+
+        #expect(!previews.isEmpty)
+        #expect(previews.allSatisfy { $0.cell.images === session.images })
+        close()
+    }
+
+    // The line of a thread's pin opens the thread's own popout in a window of its own.
+    @Test
+    func anotherChannelsPopoutHasItsOwnWindow() async throws {
+        let first = try await opened()
+        let thread = ChannelId(rawValue: 1_000)
+
+        session.togglePins(of: thread)
+
+        try await waitUntil("the thread's popout") {
+            session.pins?.channelId == thread && pinsPanel !== first && pinsPanel?.isVisible == true
+        }
+        #expect(!first.isVisible)
+        close()
+    }
+
     @Test
     func closingThePopoutUnderTheQuestionLeavesTheQuestionTheKey() async throws {
         _ = try await opened()
@@ -399,5 +484,103 @@ struct PinLineWiringTests {
         session.close()
         view.close()
         windows.expectNoneLeft()
+    }
+}
+
+// The header's pins button as the session shows it: its dot, selected while the popout is open,
+// and without the hand behind the age gate.
+@MainActor
+struct PinsButtonInTheHeaderTests {
+    let windows = ShownWindows()
+
+    func screen(_ configure: (FakeBrowserStore) -> Void = { _ in }) -> (SessionModel, ShownView) {
+        let fake = FakeBrowserStore()
+        fake.lines = true
+        fake.pins = 1
+        configure(fake)
+        let session = fake.session()
+        session.open(channel: FakeBrowserStore.parent)
+        let view = ShownView(SessionScreen(session: session, splitWidth: SplitWidth()), size: NSSize(width: 1100, height: 700))
+        view.window.appearance = NSAppearance(named: .darkAqua)
+        return (session, view)
+    }
+
+    // The rightmost 32 box with the hand in the header.
+    func button(in view: ShownView) async throws -> NSRect {
+        var found: NSRect?
+        try await view.waitUntil("the header's buttons") {
+            found = view.hands().filter { $0.width == 32 && $0.minY < 100 }.max { $0.minX < $1.minX }
+            return found != nil
+        }
+        return try #require(found)
+    }
+
+    func drawn(_ view: ShownView) throws -> (NSPoint) -> NSColor? {
+        view.host.layoutSubtreeIfNeeded()
+        let rep = try #require(view.host.bitmapImageRepForCachingDisplay(in: view.host.bounds))
+        view.host.cacheDisplay(in: view.host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.host.bounds.width
+        return { rep.colorAt(x: Int($0.x * scale), y: Int($0.y * scale))?.usingColorSpace(.sRGB) }
+    }
+
+    // The brightest of the pin's 20 box, in the 32 box's middle.
+    func ink(_ color: (NSPoint) -> NSColor?, in box: NSRect) -> CGFloat {
+        var most: CGFloat = 0
+        for x in stride(from: box.minX + 6, to: box.minX + 26, by: 0.5) {
+            for y in stride(from: box.minY + 6, to: box.minY + 26, by: 0.5) {
+                most = max(most, color(NSPoint(x: x, y: y))?.brightnessComponent ?? 0)
+            }
+        }
+        return most
+    }
+
+    func close(_ session: SessionModel, _ view: ShownView) {
+        session.closePins()
+        session.close()
+        view.close()
+        windows.expectNoneLeft()
+    }
+
+    @Test
+    func theDotShowsWhileTheChannelHasPinsTheUserHasntSeen() async throws {
+        let (session, view) = screen { $0.pinsDot = true }
+        let box = try await button(in: view)
+
+        let dot = try drawn(view)(NSPoint(x: box.minX + 23, y: box.minY + 23))
+
+        let red = dot?.redComponent ?? 0
+        #expect(red > 0.75 && red - (dot?.greenComponent ?? 1) > 0.35 && red - (dot?.blueComponent ?? 1) > 0.35, "\(String(describing: dot))")
+        close(session, view)
+    }
+
+    @Test
+    func itIsSelectedWhileThePopoutIsOpen() async throws {
+        let (session, view) = screen()
+        let box = try await button(in: view)
+        let rest = ink(try drawn(view), in: box)
+
+        session.togglePins()
+
+        var open = rest
+        try await view.waitUntil("selected") {
+            open = ink(try drawn(view), in: box)
+            return open > rest + 0.1
+        }
+        #expect(open > rest + 0.1, "\(open) against \(rest)")
+        close(session, view)
+    }
+
+    @Test
+    func behindTheAgeGateItHasNoHand() async throws {
+        let (session, view) = screen()
+        let box = try await button(in: view)
+        close(session, view)
+
+        let (gated, gate) = screen { $0.ageGated = true }
+        try await gate.waitUntil("the header") { !gate.hands().isEmpty }
+
+        #expect(gated.pinsDisabled)
+        #expect(!gate.hands().contains { $0.intersects(box) })
+        close(gated, gate)
     }
 }
