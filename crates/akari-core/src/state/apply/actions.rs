@@ -55,6 +55,7 @@ impl State {
         now_millis: i64,
     ) -> Option<Arc<Message>> {
         self.message(channel, target)
+            .or_else(|| self.windows.pinned(channel, target))
             .filter(|message| self.message_actions_of(message, now_millis).reply)
     }
 

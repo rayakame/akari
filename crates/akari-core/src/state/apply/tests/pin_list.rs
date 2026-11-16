@@ -883,6 +883,20 @@ fn a_pinned_message_outside_the_window_has_its_actions_and_reactions() {
     );
 }
 
+// As its actions allow, and without letting go of the reply held before.
+#[test]
+fn a_pinned_message_outside_the_window_takes_a_reply() {
+    let mut state = three_pins();
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    let now = state.now_millis();
+    assert!(state.hold_reply(id(GENERAL), id(10), now, &mut Vec::new()));
+    assert!(state.message_actions(id(GENERAL), id(2), now).reply);
+
+    assert!(state.hold_reply(id(GENERAL), id(2), now, &mut Vec::new()));
+    assert_eq!(state.held_reply(id(GENERAL)), Some(id(2)));
+}
+
 #[test]
 fn acking_pins_takes_the_dot_only_while_it_shows() {
     let mut state = ready_state();
