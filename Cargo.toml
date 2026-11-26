@@ -40,7 +40,7 @@ time = { version = "0.3", default-features = false, features = ["std", "parsing"
 zstd = { version = "0.14", default-features = false }
 # Without default features: "cargo-metadata" would make the library itself depend on
 # cargo_metadata. akari-bindgen turns on what the bindings generator needs.
-uniffi = { version = "0.32", default-features = false }
+uniffi = { version = "0.33", default-features = false }
 thiserror = "2"
 tracing = "0.1"
 wiremock = "0.6"

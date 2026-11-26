@@ -19,7 +19,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-uniffi.workspace = true
+# The export macros generate the scaffolding only with this feature (a default one).
+uniffi = { workspace = true, features = ["macro-scaffolding"] }
 
 [dev-dependencies]
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
