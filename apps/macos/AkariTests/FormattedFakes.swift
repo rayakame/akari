@@ -38,6 +38,7 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     }
 
     override func connect() throws {}
+    override func close() {}
 
     override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
         async throws -> LoadReport?
@@ -47,6 +48,8 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
     }
@@ -268,6 +271,10 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     // Both kinds in the text channels; no message starts one, no cooldown.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: true, private: true)
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }

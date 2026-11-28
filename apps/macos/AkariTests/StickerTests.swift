@@ -236,6 +236,7 @@ final class StickerTests {
     // a right-click still opens the message's menu.
     @Test
     func aStickerShowsTheHandAndKeepsTheRowsMenu() throws {
+        list.controller.actions = MessageTableTests.RecordingActions()
         list.show(state(rows(["wave"]), cache: ImageCache(source: FakeImageSource.stalling())))
         let sticker = try #require(stickerViews(try cell()).first)
         let over = sticker.convert(NSPoint(x: 80, y: 80), to: nil)

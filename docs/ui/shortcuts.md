@@ -13,6 +13,10 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Edit the last message | Up arrow in an empty composer | Reserved: the key is taken, editing comes later |
 | Mark the channel read, or cancel an edit or reply | Escape | Marks the channel read and jumps to the present (below) |
 | Mark the server read | Shift+Escape | Done |
+| Mark unread from a message | Alt+click on it | Done: Option-click anywhere in the message's box but on its buttons ([message-actions.md](message-actions.md#mark-unread)) |
+| The longer hover bar | Shift held over a message | Done: Copy Link and Mark Unread come first; the bar changes while the pointer rests |
+| An action without its question, a reply without its ping | Shift+click on Delete, Pin, Reply | Later, with each feature; Shift counts as it is at the click |
+| A focused message's keys: E edit, R reply, P pin, Backspace delete, + react, F forward, T thread, Cmd+C copy text, Alt+Enter mark unread | on a message with keyboard focus (Tab or the arrows) | Later: Akari's messages take no keyboard focus yet |
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
@@ -68,5 +72,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   bar does ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)), from
   the message list, a message's selected text and the composer, whenever the list has a new
   messages line, and does nothing otherwise. In the composer it never extends the selection.
+- **A message's keys.** From the code read of canary 671549 (the row's key handler), not
+  observed: they act on the message with keyboard focus, never on the hovered one, and the
+  official client's list says so ("These shortcuts work when focused on a message."). Akari
+  binds none of them to the hovered message.
 - **No shortcut for "jump to present"** is documented for the official client; its bar at
   the bottom of the list is clicked ([message-list.md](message-list.md#jump-to-present)).

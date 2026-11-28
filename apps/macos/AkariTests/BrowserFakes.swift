@@ -109,6 +109,8 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
     override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
 }
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
@@ -177,6 +179,10 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
 
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         parentId == FakeBrowserStore.parent ? creation : ThreadCreation(public: false, private: false)
+    }
+
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
     }
 
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {

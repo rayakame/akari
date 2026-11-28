@@ -14,7 +14,8 @@ client on 2026-10-10; colors in [theme.md](theme.md).
   bounce included, the list never moves on its own, and a position past the bottom counts as
   being at the bottom. A message that arrives during a gesture at the bottom keeps the list
   there: it scrolls to the new bottom once the gesture ends, unless the user scrolled up in
-  the meantime.
+  the meantime. A row that changes its height meanwhile (a relative time ticking over) waits
+  the same way.
 - Each message has 2 of vertical padding and 16 on the right. Its content starts 72 from the
   left: 16 margin, a 40 avatar column, 16 gap.
 - Text is 16 on a 22 line height. Sizes of every text style are in
@@ -24,6 +25,10 @@ client on 2026-10-10; colors in [theme.md](theme.md).
   right edge where the official client keeps its scrollbar. Under macOS's legacy scrollers the
   scroller has a gutter of its own, and the box runs up to it. Hovering the space before a group
   or the scrollbar's gutter hovers no message (observed 2026-10-14).
+- The hovered message has its hover bar over its top right corner, and a row whose menu is open
+  stays tinted, with its bar, until the menu closes
+  ([message-actions.md](message-actions.md#the-hover-bar)). A system line has the bar and the
+  menu too, without a tint.
 
 ## Groups
 
@@ -281,7 +286,9 @@ set no cursor of their own (NSTextView's own cursor area is dropped; its tooltip
 the bars over the list it shows what they say: the pointing hand over the unread bar and the jump
 bar's button, which click, the arrow over the locked banner and the status strip, which don't
 (Chris, 2026-10-23: anything clickable shows the hand). Hover follows the same authority: the row,
-the box and a link's underline. Over a window above the list (the Threads browser's shield, More
+the box, a link's underline, and the hover bar with the button under the pointer; the bar is the
+authority's own view over the rows, and the pointer over it, where it lies over the row above
+too, belongs to the bar's row. Over a window above the list (the Threads browser's shield, More
 Active Threads) the list does nothing.* A click on a link follows it even when the link is inside
 a selection (a double click on it selects its word), where a text view would start dragging the
 selection.

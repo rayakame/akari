@@ -1,0 +1,1598 @@
+import AkariKit
+import AppKit
+import Testing
+import os
+
+@testable import Akari
+
+// A message list with a pointer and modifier keys of the test's own, its actions recorded.
+@MainActor
+final class BarList {
+    let pointer = MessageTableTests.Pointer()
+    let actions = MessageTableTests.RecordingActions()
+    let controller: MessageTableController
+    let window: NSWindow
+    let noon = berlinTime(2026, 10, 10, 12, 0)
+    var shift = false
+    var popped: [(titles: [String], view: NSView, point: NSPoint, moreSelected: Bool)] = []
+    private(set) var rows: [MessageListModel.Row] = []
+
+    static let plain: [MessageAction] = [.createThread, .more]
+    static let shifted: [MessageAction] = [.copyLink, .markUnread, .createThread, .more]
+
+    /// With `timers`, relative times change when the test fires them, at the clock's time.
+    init(
+        scale: CGFloat? = nil, height: CGFloat = 400, table: MessageTableView = MessageTableView(),
+        clock: TimeRefreshTests.Clock? = nil, timers: TimeRefreshTests.Timers? = nil
+    ) {
+        controller = MessageTableController(
+            tableView: table, calendar: { berlin },
+            now: { clock?.now ?? berlinTime(2026, 10, 10, 15, 0) },
+            pointer: { [pointer] in pointer.location },
+            schedule: { date, fire in
+                timers?.schedule(date, fire) ?? MessageTableController.timer(date, fire)
+            },
+            onScreen: { timers != nil || MessageTableController.isOnScreen($0) })
+        window =
+            scale.map { ScaledWindow.make(scale: $0) }
+            ?? TestWindow.make(size: NSSize(width: 600, height: height), style: [.titled, .resizable])
+        window.setContentSize(NSSize(width: 600, height: height))
+        window.contentView = controller.scrollView
+        controller.actions = actions
+        controller.modifiers = { [unowned self] in shift ? .shift : [] }
+        controller.popUp = { [unowned self] menu, point, view in
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+            popped.append(
+                (menu.items.map(\.title), view, point, controller.hoverBar.button(.more)?.isSelected == true))
+            NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        }
+        window.layoutIfNeeded()
+    }
+
+    var table: MessageTableView { controller.tableView }
+    var bar: MessageHoverBar { controller.hoverBar }
+    var clip: NSClipView { controller.scrollView.contentView }
+
+    // Every message gets the same bar unless the test says otherwise.
+    func show(_ rows: [MessageListModel.Row], bars: Bool = true) {
+        self.rows = rows
+        if bars {
+            for row in rows where actions.bars[row.id.rawValue] == nil {
+                actions.bars[row.id.rawValue] = (Self.plain, Self.shifted)
+            }
+        }
+        controller.show(MessageTableState(rows: rows, reachedOldest: true))
+        window.layoutIfNeeded()
+    }
+
+    // Ray's group of three, Mira's reply, a join line, a failed send.
+    func showGroups() {
+        actions.bars[6] = ([.retry, .delete], [.retry, .delete])
+        show([
+            row(1, by: author(2, "Ray"), at: noon, content: "first"),
+            row(2, by: author(2, "Ray"), at: noon + 10, content: "second"),
+            row(3, by: author(2, "Ray"), at: noon + 20, content: "third"),
+            row(4, by: author(3), at: noon + 600, kind: .reply, content: "a reply"),
+            row(5, by: author(4, "Kim"), at: noon + 700, kind: .userJoin),
+            row(6, at: noon + 800, delivery: .failed),
+        ])
+    }
+
+    func many(_ count: Int, longText: Bool = false) -> [MessageListModel.Row] {
+        (1...UInt64(count)).map { raw in
+            row(
+                raw, by: author(raw % 3 == 0 ? 2 : 1), at: noon + Double(raw) * 120,
+                content: longText ? String(repeating: "words that wrap ", count: 12) : nil)
+        }
+    }
+
+    func index(of raw: UInt64) -> Int {
+        controller.timeline.items.firstIndex { $0.id == .message(MessageId(rawValue: raw)) } ?? -1
+    }
+
+    func cell(of raw: UInt64) throws -> NSView & MessageMenuRow {
+        let cell = try #require(
+            table.view(atColumn: 0, row: index(of: raw), makeIfNecessary: true) as? (NSView & MessageMenuRow))
+        cell.layoutSubtreeIfNeeded()
+        return cell
+    }
+
+    /// The message's box in the table's coordinates.
+    func box(of raw: UInt64) throws -> NSRect {
+        let cell = try cell(of: raw)
+        return table.convert(cell.box, from: cell)
+    }
+
+    /// The pointer goes to a point of the table.
+    func move(to point: NSPoint) {
+        pointer.location = table.convert(point, to: nil)
+        controller.pointerMoved()
+    }
+
+    func hover(_ raw: UInt64) throws {
+        let box = try box(of: raw)
+        move(to: NSPoint(x: box.minX + 100, y: box.midY))
+    }
+
+    /// The message whose row is tinted, and the one the bar's click would act on.
+    var hovered: [UInt64] {
+        let rows = table.rows(in: table.visibleRect)
+        return (rows.location..<NSMaxRange(rows)).compactMap { row -> UInt64? in
+            guard (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageCell)?.isHovered == true,
+                case .message(let item, _) = controller.timeline.items[row]
+            else {
+                return nil
+            }
+            return item.id.rawValue
+        }
+    }
+
+    /// The message the bar acts on: its first button's click names it.
+    func barOwner() throws -> UInt64? {
+        guard !bar.isHidden, let button = bar.buttons.first else {
+            return nil
+        }
+        actions.calls = []
+        button.performClick(nil)
+        let call = try #require(actions.calls.last)
+        return call.split(separator: " ").compactMap { UInt64($0) }.first
+    }
+
+    /// How far the bar's top lies above the message's box: less over a group's first message.
+    func overhang(of raw: UInt64) throws -> CGFloat {
+        guard case .message(let row, let startsGroup) = controller.timeline.items[index(of: raw)] else {
+            return 25
+        }
+        let notice = try cell(of: raw) is NoticeCell
+        let header = startsGroup && !notice && row.shown.kind != .reply
+        return header ? 16 : 25
+    }
+
+    func scroll(to y: CGFloat) {
+        clip.scroll(to: NSPoint(x: 0, y: y))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+    }
+
+    func menuEvent(on raw: UInt64) throws -> NSEvent {
+        let cell = try cell(of: raw)
+        return try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: cell.convert(NSPoint(x: cell.box.midX, y: cell.box.midY), to: nil),
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+
+    func click(_ flags: NSEvent.ModifierFlags, at point: NSPoint) throws -> NSEvent {
+        try mouse(.leftMouseDown, flags, at: point)
+    }
+
+    func mouse(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags, at point: NSPoint) throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: type, location: table.convert(point, to: nil), modifierFlags: flags,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+    }
+}
+
+// The hover bar: one view of the list's controller, over the hovered message's top right corner
+// as the official client's (34 high, 28 a button, 14 from the row's right edge, its top 25 above
+// the row's, 16 over a group's first message).
+@MainActor
+struct HoverBarTests {
+    @Test(arguments: [CGFloat(1), 2])
+    func theBarSitsOverItsRowsTopRightCorner(scale: CGFloat) throws {
+        let list = BarList(scale: scale)
+        list.showGroups()
+
+        // 25 above a follow-up, a reply at a group's start and a system line; 16 above a group's
+        // first message.
+        for (raw, overhang): (UInt64, CGFloat) in [(2, 25), (3, 25), (1, 16), (4, 25), (5, 25)] {
+            try list.hover(raw)
+            let box = try list.box(of: raw)
+            let frame = list.bar.frame
+
+            #expect(!list.bar.isHidden, "message \(raw)")
+            #expect(frame.height == 34)
+            #expect(frame.width == 62)
+            #expect(abs(frame.maxX - (box.maxX - 14)) < 1 / scale, "message \(raw)")
+            #expect(abs(frame.minY - (box.minY - overhang)) < 1 / scale, "message \(raw): \(frame) over \(box)")
+            #expect((frame.minY * scale).rounded() == frame.minY * scale)
+            #expect((frame.minX * scale).rounded() == frame.minX * scale)
+        }
+        #expect(
+            list.bar.buttons.map(\.frame)
+                == [NSRect(x: 3, y: 3, width: 28, height: 28), NSRect(x: 31, y: 3, width: 28, height: 28)])
+    }
+
+    @Test
+    func theBarGrowsWithItsButtons() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let right = list.bar.frame.maxX
+
+        list.shift = true
+        list.controller.pointerMoved()
+
+        #expect(list.bar.frame.width == 118)
+        #expect(list.bar.frame.maxX == right)
+    }
+
+    // The part of the bar that lies over the row above is its own row's.
+    @Test
+    func thePointerOverTheOverhangKeepsTheBarsRowHovered() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(3)
+        let bar = list.bar.frame
+        let above = try list.box(of: 2)
+        #expect(bar.minY < above.maxY - 20, "the bar overhangs message 2")
+
+        var y = try list.box(of: 3).midY
+        while y > bar.minY {
+            list.move(to: NSPoint(x: bar.midX, y: y))
+            #expect(list.hovered == [3], "at \(y)")
+            #expect(list.bar.frame == bar, "at \(y)")
+            #expect(try list.barOwner() == 3)
+            y -= 1
+        }
+
+        // Beside the bar, at the same height, the row above is hovered and the bar is its own.
+        list.move(to: NSPoint(x: bar.minX - 40, y: bar.minY + 4))
+        #expect(list.hovered == [2])
+        #expect(try list.barOwner() == 2)
+        #expect(list.bar.frame.minY < bar.minY)
+    }
+
+    @Test
+    func aClickOnTheOverhangReachesTheBarNotTheRowUnderIt() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(3)
+        let content = try #require(list.window.contentView)
+        let button = try #require(list.bar.buttons.first)
+        let point = button.convert(NSPoint(x: 14, y: 6), to: nil)
+        #expect(try list.box(of: 2).contains(list.table.convert(point, from: nil)))
+
+        #expect(content.hitTest(content.superview?.convert(point, from: nil) ?? point) === button)
+        #expect(list.controller.cursor(at: point) == .pointingHand)
+        let beside = list.bar.convert(NSPoint(x: 1, y: 1), to: nil)
+        #expect(content.hitTest(content.superview?.convert(beside, from: nil) ?? beside) === list.bar)
+        #expect(list.bar.menu(for: try list.menuEvent(on: 2)) == nil)
+    }
+
+    // The table adds row views as it scrolls, over whatever it holds already.
+    @Test
+    func aRowViewAddedOverTheBarDoesNotTakeItsClicks() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(3)
+        let content = try #require(list.window.contentView)
+        let button = try #require(list.bar.buttons.first)
+        let point = button.convert(NSPoint(x: 14, y: 14), to: nil)
+
+        list.table.addSubview(NSView(frame: list.bar.frame.insetBy(dx: -20, dy: -20)))
+
+        #expect(content.hitTest(content.superview?.convert(point, from: nil) ?? point) === button)
+        list.controller.pointerMoved()
+        #expect(list.table.subviews.last === list.bar)
+    }
+
+    final class ClickedTable: MessageTableView {
+        var clicks: [NSEvent.EventType] = []
+
+        override func mouseDown(with event: NSEvent) {
+            clicks.append(event.type)
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            clicks.append(event.type)
+        }
+    }
+
+    // The bar's border and the space between it and its buttons belong to no row.
+    @Test
+    func aClickBesideTheBarsButtonsStopsAtTheBar() throws {
+        let table = ClickedTable()
+        let list = BarList(table: table)
+        list.showGroups()
+        try list.hover(3)
+        let beside = list.table.convert(NSPoint(x: 1, y: 1), from: list.bar)
+        let menus = OSAllocatedUnfairLock(initialState: 0)
+        let opened = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
+        ) { _ in menus.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(opened) }
+
+        list.bar.mouseDown(with: try list.mouse(.leftMouseDown, [], at: beside))
+        list.bar.rightMouseDown(with: try list.mouse(.rightMouseDown, [], at: beside))
+        #expect(table.clicks.isEmpty)
+        #expect(menus.withLock { $0 } == 0, "AppKit opens no menu of its own either")
+
+        let cell = try list.cell(of: 3)
+        cell.mouseDown(with: try list.mouse(.leftMouseDown, [], at: beside))
+        #expect(table.clicks == [.leftMouseDown], "a row's own click does reach the table")
+    }
+
+    // AppKit can leave the list between two pixels: the bar's edges still fall on whole ones.
+    @Test(arguments: [CGFloat(1), 2])
+    func theBarLandsOnWholePixelsAtAnyScrollOffset(scale: CGFloat) throws {
+        let list = BarList(scale: scale)
+        list.show(list.many(80))
+        let top = list.table.rect(ofRow: list.index(of: 40)).minY
+
+        for fraction in [CGFloat(0.3), 0.75, 0.9] {
+            list.scroll(to: top + fraction)
+            try list.hover(44)
+            let offset = list.table.convert(NSPoint.zero, to: nil).y * scale
+            #expect(offset.rounded() != offset, "the list rests between two pixels")
+
+            let box = try list.box(of: 44)
+            let wanted = NSRect(
+                x: box.maxX - 14 - 62, y: box.minY - (try list.overhang(of: 44)), width: 62, height: 34)
+            let onScreen = list.table.convert(list.bar.frame, to: nil)
+            for edge in [onScreen.minX, onScreen.maxX, onScreen.minY, onScreen.maxY] {
+                #expect(abs(edge * scale - (edge * scale).rounded()) < 0.001, "\(onScreen) at \(fraction)")
+            }
+            #expect(abs(list.bar.frame.minY - wanted.minY) <= 0.5 / scale + 0.001, "\(list.bar.frame) for \(wanted)")
+            #expect(abs(list.bar.frame.minX - wanted.minX) <= 0.5 / scale + 0.001)
+            #expect(abs(list.bar.frame.height - 34) <= 1 / scale && abs(list.bar.frame.width - 62) <= 1 / scale)
+        }
+    }
+
+    // AppKit tracks a button's press in a loop of its own: the release is waiting in the queue.
+    @Test
+    func aPressedButtonIsFilledUntilItIsReleased() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let button = try #require(list.bar.buttons.first)
+        let inside = list.table.convert(NSPoint(x: 14, y: 14), from: button)
+        var pressed: [Bool] = []
+        var fill: [CGFloat] = []
+        list.bar.onAction = { _, button in
+            pressed.append(button.isPressed)
+            fill = HoverBarTests.parts(button.layer?.backgroundColor)
+        }
+        var expected = CGColor.clear
+        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+            expected = Palette.interactiveBackgroundActive.cgColor
+        }
+
+        #expect(!button.isPressed && button.layer?.backgroundColor == nil)
+        NSApp.postEvent(try list.mouse(.leftMouseUp, [], at: inside), atStart: false)
+        button.mouseDown(with: try list.mouse(.leftMouseDown, [], at: inside))
+
+        #expect(pressed == [true])
+        #expect(fill == HoverBarTests.parts(expected))
+        #expect(!button.isPressed && button.layer?.backgroundColor == nil)
+    }
+
+    @Test
+    func aButtonThatIsOffIsDimmedAndOpensNoMenu() throws {
+        let off = HoverBarButton(
+            MessageActionItem(action: .pin, title: "Pin Message", symbol: "pin", enabled: false, destructive: false))
+        let on = HoverBarButton(MessageTableTests.RecordingActions.item(.more, "More"))
+        let list = BarList()
+        list.showGroups()
+
+        #expect(!off.isEnabled && off.alphaValue == 0.5)
+        #expect(on.isEnabled && on.alphaValue == 1)
+        off.isHovered = true
+        #expect(off.layer?.backgroundColor == nil && off.contentTintColor == Palette.interactiveText)
+        #expect(on.menu(for: try list.menuEvent(on: 2)) == nil)
+    }
+
+    // A message without buttons hides the bar where it last lay: the place is the rows' again.
+    @Test
+    func aHiddenBarsLastPlaceBelongsToTheRowUnderIt() throws {
+        let list = BarList()
+        list.actions.bars[3] = ([], [])
+        list.showGroups()
+        try list.hover(2)
+        let place = list.bar.frame
+        try list.hover(3)
+        #expect(list.bar.isHidden)
+        #expect(list.hovered == [3])
+
+        let point = NSPoint(x: place.midX, y: place.maxY - 1)
+        #expect(try list.box(of: 2).contains(point))
+        list.move(to: point)
+
+        #expect(list.hovered == [2])
+        #expect(try list.barOwner() == 2)
+    }
+
+    // The official client cuts the bar off at the list's top; Akari keeps it inside.
+    @Test
+    func aRowAtTheListsTopKeepsItsBarInSight() throws {
+        let list = BarList()
+        list.show(list.many(80))
+        let row = list.table.rect(ofRow: list.index(of: 40))
+        list.clip.scroll(to: NSPoint(x: 0, y: row.minY + 2))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        list.window.layoutIfNeeded()
+
+        list.move(to: NSPoint(x: 200, y: row.maxY - 4))
+
+        #expect(list.hovered == [40])
+        #expect(list.bar.frame.minY == list.table.visibleRect.minY + 4)
+        #expect(list.table.visibleRect.contains(list.bar.frame))
+    }
+
+    @Test
+    func theControllerLightsTheButtonUnderThePointer() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let (first, more) = (list.bar.buttons[0], list.bar.buttons[1])
+        #expect(!first.isHovered && !more.isHovered && !list.bar.isPointerInside)
+
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(more.isHovered && !first.isHovered && list.bar.isPointerInside)
+        #expect(more.contentTintColor == Palette.interactiveTextActive)
+        #expect(first.contentTintColor == Palette.interactiveText)
+
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: first))
+        #expect(first.isHovered && !more.isHovered)
+
+        try list.hover(2)
+        #expect(!first.isHovered && !more.isHovered && !list.bar.isPointerInside)
+        let own = (first.trackingAreas + list.bar.trackingAreas).filter { $0.owner === first || $0.owner === list.bar }
+        #expect(own.isEmpty, "\((first.trackingAreas + list.bar.trackingAreas).map { String(describing: $0.owner) })")
+    }
+
+    // Rows with the same buttons share the bar's views: a lit one mustn't travel with the bar.
+    @Test
+    func aLitButtonGoesOutWhenTheBarMovesToAnotherRow() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(more.isHovered)
+
+        try list.hover(3)
+
+        #expect(list.bar.button(.more) === more, "the same buttons")
+        #expect(!list.bar.buttons.contains { $0.isHovered })
+        #expect(more.contentTintColor == Palette.interactiveText)
+        #expect(try list.barOwner() == 3)
+    }
+
+    // The list scrolls under a still pointer and the bar goes to the row that comes under it:
+    // only a button the pointer is over is lit, wherever the bar lands.
+    @Test
+    func aScrollLightsOnlyTheButtonUnderThePointer() throws {
+        let list = BarList(height: 300)
+        list.show(list.many(40))
+        try list.hover(39)
+        let more = try #require(list.bar.button(.more))
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(more.isHovered)
+        var owners: Set<UInt64> = []
+        var away = 0
+
+        for _ in 1...12 {
+            list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY - 17))
+            list.controller.scrollView.reflectScrolledClipView(list.clip)
+            list.controller.pointerMoved()
+
+            let point = list.table.convert(try #require(list.pointer.location), from: nil)
+            let under = list.bar.buttons.filter { list.table.convert($0.bounds, from: $0).contains(point) }
+            #expect(list.bar.buttons.filter(\.isHovered) == under)
+            #expect(list.bar.isPointerInside == list.bar.frame.contains(point))
+            away += under.isEmpty ? 1 : 0
+            if let owner = try list.barOwner() {
+                owners.insert(owner)
+            }
+        }
+
+        #expect(owners.count > 1, "the bar changed rows")
+        #expect(away > 0, "and lay away from the pointer")
+    }
+
+    @Test
+    func aRowWithoutButtonsHasNoBar() throws {
+        let list = BarList()
+        list.show(
+            [row(1, at: list.noon), row(2, at: list.noon + 10, delivery: .pending)], bars: false)
+        list.actions.bars[1] = (BarList.plain, BarList.shifted)
+
+        try list.hover(2)
+        #expect(list.bar.isHidden)
+        try list.hover(1)
+        #expect(!list.bar.isHidden)
+        try list.hover(2)
+        #expect(list.bar.isHidden)
+    }
+
+    @Test
+    func noPointerNoBar() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        #expect(!list.bar.isHidden)
+
+        // The window isn't key, or another window lies over the list.
+        list.pointer.location = nil
+        list.controller.pointerMoved()
+
+        #expect(list.bar.isHidden)
+        #expect(list.hovered.isEmpty)
+    }
+
+    @Test
+    func theSpaceBeforeAGroupAndADayDividerHaveNoBar() throws {
+        let list = BarList()
+        list.showGroups()
+        let reply = try list.box(of: 4)
+
+        list.move(to: NSPoint(x: 200, y: reply.minY - 8))
+        #expect(list.bar.isHidden)
+        let join = try list.box(of: 5)
+        #expect(list.table.rect(ofRow: list.index(of: 5)).minY < join.minY - 4, "a system line has its space too")
+        list.move(to: NSPoint(x: 200, y: join.minY - 4))
+        #expect(list.bar.isHidden)
+        #expect(list.hovered.isEmpty)
+        list.move(to: NSPoint(x: 200, y: list.table.rect(ofRow: 0).midY))
+        #expect(list.bar.isHidden)
+    }
+
+    @Test
+    func aFailedSendsBarRetriesAndDeletes() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(6)
+
+        #expect(list.bar.items.map(\.action) == [.retry, .delete])
+        list.actions.calls = []
+        list.bar.buttons[0].performClick(nil)
+        list.bar.buttons[1].performClick(nil)
+        #expect(list.actions.calls == ["retry 6", "delete 6"])
+
+        // The line under the message keeps its own links.
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        let line = buttons(try list.cell(of: 6))
+        list.actions.calls = []
+        try #require(line.first { $0.title == "Retry" }).performClick(nil)
+        try #require(line.first { $0.title == "Delete" }).performClick(nil)
+        #expect(list.actions.calls == ["retry 6", "delete 6"])
+    }
+
+    @Test
+    func eachButtonReachesTheActionsWithShiftAsItIsAtTheClick() throws {
+        let list = BarList()
+        list.showGroups()
+        list.shift = true
+        try list.hover(2)
+        #expect(list.bar.items.map(\.action) == BarList.shifted)
+
+        list.actions.calls = []
+        for button in list.bar.buttons.dropLast() {
+            button.performClick(nil)
+        }
+        #expect(list.actions.calls == ["copyLink 2 shift", "markUnread 2 shift", "create thread from 2 shift"])
+
+        // The bar was read with Shift; the click reads the key again.
+        list.shift = false
+        list.actions.calls = []
+        list.bar.buttons[0].performClick(nil)
+        #expect(list.actions.calls == ["copyLink 2"])
+    }
+
+    @Test
+    func shiftSwitchesTheBarWhileThePointerRests() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        #expect(list.bar.buttons.map(\.toolTip) == ["createThread", "more"])
+        let flags = try #require(
+            NSEvent.keyEvent(
+                with: .flagsChanged, location: .zero, modifierFlags: .shift, timestamp: 0,
+                windowNumber: list.window.windowNumber, context: nil, characters: "",
+                charactersIgnoringModifiers: "", isARepeat: false, keyCode: 56))
+
+        list.shift = true
+        #expect(!list.controller.monitored(flags))
+        #expect(list.bar.buttons.map(\.toolTip) == ["copyLink", "markUnread", "createThread", "more"])
+        #expect(list.bar.buttons.map { $0.accessibilityLabel() } == ["copyLink", "markUnread", "createThread", "more"])
+
+        list.shift = false
+        #expect(!list.controller.monitored(flags))
+        #expect(list.bar.items.map(\.action) == BarList.plain)
+        #expect(list.hovered == [2])
+    }
+
+    @Test
+    func theBarIsAGroupOfLabelledButtons() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+
+        #expect(list.bar.accessibilityRole() == .group)
+        #expect(list.bar.accessibilityLabel() == "Message Actions")
+        #expect(list.bar.buttons.allSatisfy { $0.accessibilityLabel() == $0.item.title && $0.toolTip == $0.item.title })
+        #expect(list.bar.buttons.allSatisfy { $0.image != nil && $0.refusesFirstResponder })
+    }
+
+    @Test
+    func theBarFollowsItsRowOnEveryScroll() throws {
+        let list = BarList()
+        list.show(list.many(80, longText: true))
+        list.pointer.location = NSPoint(x: 200, y: 200)
+        list.controller.pointerMoved()
+        var owners: Set<UInt64> = []
+
+        for step in 0..<100 {
+            list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY - 7))
+            list.controller.scrollView.reflectScrolledClipView(list.clip)
+            list.window.layoutIfNeeded()
+            let hovered = list.hovered
+            guard let raw = hovered.first else {
+                #expect(list.bar.isHidden, "step \(step)")
+                continue
+            }
+            let box = try list.box(of: raw)
+            #expect(!list.bar.isHidden, "step \(step)")
+            #expect(list.bar.frame.maxX == box.maxX - 14, "step \(step)")
+            let top = max(box.minY - (try list.overhang(of: raw)), list.table.visibleRect.minY + 4)
+            #expect(abs(list.bar.frame.minY - top) <= 0.5, "step \(step), message \(raw)")
+            #expect(try list.barOwner() == raw, "step \(step)")
+            owners.insert(raw)
+        }
+        #expect(owners.count > 3, "the pointer saw several rows")
+        #expect(Set(try owners.map { try list.overhang(of: $0) }) == [16, 25], "group starts and follow-ups")
+    }
+
+    // A reused cell never brings another row's bar: the bar isn't the cell's.
+    @Test
+    func aRowScrolledAwayTakesItsBarWithIt() throws {
+        let list = BarList()
+        list.show(list.many(120))
+        try list.hover(118)
+        #expect(try list.barOwner() == 118)
+
+        // Message 5 comes under the still pointer.
+        let pointer = list.table.convert(try #require(list.pointer.location), from: nil)
+        list.scroll(to: try list.box(of: 5).midY - (pointer.y - list.clip.bounds.minY))
+
+        #expect(try list.barOwner() == 5)
+        #expect(list.hovered == [5])
+        let box = try list.box(of: 5)
+        #expect(list.bar.frame.minY == box.minY - (try list.overhang(of: 5)))
+        #expect(list.bar.frame.maxX == box.maxX - 14)
+        #expect(list.table.visibleRect.contains(list.bar.frame))
+    }
+
+    @Test
+    func aReloadOfTheHoveredRowReadsItsBarAgain() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        list.actions.calls = []
+        list.controller.pointerMoved()
+        #expect(list.actions.calls.isEmpty, "a move inside the row reads nothing")
+
+        var rows = list.rows
+        rows[1] = row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second, edited")
+        list.actions.bars[2] = ([.viewThread, .more], BarList.shifted)
+        list.show(rows)
+
+        #expect(list.actions.calls.contains("bar of 2"))
+        #expect(list.bar.items.map(\.action) == [.viewThread, .more])
+        #expect(list.hovered == [2])
+        let box = try list.box(of: 2)
+        #expect(list.bar.frame.minY == box.minY - 25 && list.bar.frame.maxX == box.maxX - 14)
+        #expect(list.table.subviews.last === list.bar)
+    }
+
+    @Test
+    func aRowGrowingAboveTheReaderMovesTheBarWithItsRow() throws {
+        let list = BarList()
+        var rows = list.many(100)
+        list.show(rows)
+        list.clip.scroll(to: NSPoint(x: 0, y: list.table.rect(ofRow: list.index(of: 50)).minY))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        list.window.layoutIfNeeded()
+        try list.hover(56)
+        let offset = list.bar.frame.minY - list.clip.bounds.minY
+        let height = list.table.rect(ofRow: list.index(of: 40)).height
+
+        rows[39] = row(
+            40, by: rows[39].message.author, at: rows[39].message.timestamp,
+            content: String(repeating: "words that wrap ", count: 40))
+        list.show(rows)
+
+        #expect(list.table.rect(ofRow: list.index(of: 40)).height > height)
+        #expect(list.hovered == [56])
+        #expect(try list.barOwner() == 56)
+        let box = try list.box(of: 56)
+        #expect(abs(list.bar.frame.minY - (box.minY - 25)) <= 0.5)
+        #expect(abs(list.bar.frame.minY - list.clip.bounds.minY - offset) <= 0.5, "the bar stays on screen where it was")
+    }
+
+    @Test
+    func theHoveredRowGrowingKeepsItsBarAtItsTop() throws {
+        let list = BarList()
+        var rows = list.many(100)
+        list.show(rows)
+        try list.hover(99)
+
+        rows[98] = row(
+            99, by: rows[98].message.author, at: rows[98].message.timestamp,
+            content: String(repeating: "words that wrap ", count: 40))
+        let height = try list.box(of: 99).height
+        list.show(rows)
+
+        // The list is pinned: the row grows upward, under the still pointer.
+        let box = try list.box(of: 99)
+        #expect(box.height > height + 100)
+        #expect(list.hovered == [99])
+        #expect(try list.barOwner() == 99)
+        #expect(list.bar.frame.maxX == box.maxX - 14)
+        #expect(box.minY - 16 > list.table.visibleRect.minY + 4, "the row's top shows")
+        #expect(abs(list.bar.frame.minY - (box.minY - 16)) <= 0.5, "\(list.bar.frame) over \(box)")
+    }
+
+    @Test
+    func aHoveredRowThatGoesLeavesNoBarBehind() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(3)
+        var rows = list.rows
+
+        rows.remove(at: 2)
+        list.show(rows)
+
+        let owner = try list.barOwner()
+        #expect(owner != 3)
+        #expect(list.hovered == (owner.map { [$0] } ?? []))
+
+        list.show([])
+        #expect(list.bar.isHidden)
+        list.controller.pointerMoved()
+        #expect(list.bar.isHidden)
+    }
+
+    @Test
+    func theRowStaysLitWhileItsMenuIsOpen() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let frame = list.bar.frame
+        let menu = try #require(try list.cell(of: 2).menu(for: try list.menuEvent(on: 2)))
+
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        try list.hover(4)
+        list.shift = true
+        list.controller.pointerMoved()
+
+        #expect(list.hovered == [2])
+        #expect(list.bar.frame == frame)
+        #expect(list.bar.items.map(\.action) == BarList.plain, "Shift doesn't expand the bar under a menu")
+        #expect(list.bar.button(.more)?.isSelected == false, "the menu isn't More's")
+        #expect(try list.barOwner() == 2)
+
+        list.shift = false
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+
+        #expect(list.hovered == [4])
+        #expect(try list.barOwner() == 4)
+    }
+
+    @Test
+    func aMenuOpenedWithoutThePointerLightsItsRow() throws {
+        let list = BarList()
+        list.showGroups()
+        let menu = try #require(try list.cell(of: 2).menu(for: try list.menuEvent(on: 2)))
+
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        #expect(list.hovered == [2])
+        #expect(!list.bar.isHidden)
+
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        #expect(list.hovered.isEmpty)
+        #expect(list.bar.isHidden)
+    }
+
+    @Test
+    func anotherListsMenuOrAnyOtherMenuLocksNothing() throws {
+        let list = BarList()
+        let other = BarList()
+        list.showGroups()
+        other.showGroups()
+        try list.hover(2)
+        let menu = try #require(try other.cell(of: 3).menu(for: try other.menuEvent(on: 3)))
+
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())
+        try list.hover(4)
+
+        #expect(list.hovered == [4])
+        #expect(other.hovered == [3])
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        #expect(other.hovered.isEmpty)
+    }
+
+    @Test
+    func aRowRemovedUnderItsOpenMenuLetsGo() throws {
+        let list = BarList()
+        list.actions.startsThreads = [3]
+        list.showGroups()
+        try list.hover(3)
+        let menu = try #require(try list.cell(of: 3).menu(for: try list.menuEvent(on: 3)))
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        var rows = list.rows
+
+        rows.remove(at: 2)
+        list.show(rows)
+
+        #expect(try list.barOwner() != 3)
+        try list.hover(4)
+        #expect(list.hovered == [4], "the hover is the pointer's again")
+        #expect(try list.barOwner() == 4)
+        list.actions.calls = []
+        menu.performActionForItem(at: 0)
+        #expect(list.actions.calls == ["create thread from 3"], "the item still names its message")
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
+    }
+
+    // More's menu is open when its row goes: the button of the next bar isn't the one that opened it.
+    @Test
+    func aRowRemovedUnderMoresMenuLeavesMoreUnlit() throws {
+        let list = BarList()
+        list.showGroups()
+        var open: NSMenu?
+        list.controller.popUp = { menu, _, _ in
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+            open = menu
+        }
+        try list.hover(2)
+        try #require(list.bar.button(.more)).performClick(nil)
+        #expect(list.bar.button(.more)?.isSelected == true)
+        var rows = list.rows
+
+        rows.remove(at: 1)
+        list.show(rows)
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: try #require(open))
+        try list.hover(3)
+
+        #expect(try list.barOwner() == 3)
+        #expect(list.bar.button(.more)?.isSelected == false)
+    }
+
+    // The row is reloaded under More's open menu and gets new buttons: the new More is the lit one.
+    @Test
+    func aReloadUnderMoresOpenMenuKeepsMoreLit() throws {
+        let list = BarList()
+        list.showGroups()
+        var open: NSMenu?
+        list.controller.popUp = { menu, _, _ in
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+            open = menu
+        }
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+        more.performClick(nil)
+        var rows = list.rows
+
+        rows[1] = row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second, edited")
+        list.actions.bars[2] = ([.viewThread, .more], BarList.shifted)
+        list.show(rows)
+
+        let rebuilt = try #require(list.bar.button(.more))
+        #expect(rebuilt !== more)
+        #expect(rebuilt.isSelected)
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: try #require(open))
+        #expect(!rebuilt.isSelected)
+    }
+
+    // The item was made for the row as it was when the menu opened; the message was edited since.
+    @Test
+    func aMenuItemActsOnItsRowAsItIsNow() throws {
+        let list = BarList()
+        list.showGroups()
+        let menu = try #require(try list.cell(of: 2).menu(for: try list.menuEvent(on: 2)))
+        var rows = list.rows
+
+        rows[1] = row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second, edited")
+        list.show(rows)
+        menu.performActionForItem(at: 0)
+
+        #expect(list.actions.calls.last == "copyText 2")
+        #expect(list.actions.performed.last?.message.content == "second, edited")
+    }
+
+    // A revealed spoiler reloads its row: what the message allows may have changed since.
+    @Test
+    func aRevealOfTheHoveredRowReadsItsBarAgain() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        #expect(list.bar.items.map(\.action) == BarList.plain)
+
+        list.actions.bars[2] = ([.viewThread, .more], BarList.shifted)
+        list.controller.show(
+            MessageTableState(
+                rows: list.rows, reachedOldest: true,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 2), index: 0)]))
+
+        #expect(list.bar.items.map(\.action) == [.viewThread, .more])
+        #expect(list.hovered == [2])
+        #expect(try list.barOwner() == 2)
+    }
+
+    // A relative time that changes reloads its row and may move the rows under a still pointer.
+    @Test
+    func aTimeRefreshReadsTheHoveredRowsBarAgain() throws {
+        let clock = TimeRefreshTests.Clock()
+        let timers = TimeRefreshTests.Timers()
+        let list = BarList(clock: clock, timers: timers)
+        let due = Int64(clock.now.timeIntervalSince1970) + 61
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(2, "Ray"), at: list.noon + 10, content: "soon <t:\(due):R>"),
+            row(3, by: author(2, "Ray"), at: list.noon + 20, content: "third"),
+        ])
+        try list.hover(2)
+        #expect(list.bar.items.map(\.action) == BarList.plain)
+        #expect(!timers.active.isEmpty)
+
+        list.actions.bars[2] = ([.viewThread, .more], BarList.shifted)
+        clock.now += 2
+        timers.fire()
+
+        #expect(MessageListFixture.messageText(in: try list.cell(of: 2))?.string.contains("in 59 seconds") == true)
+        #expect(list.bar.items.map(\.action) == [.viewThread, .more])
+        #expect(list.hovered == [2], "the row's new view is lit")
+        #expect(try list.barOwner() == 2)
+    }
+
+    // Midnight reloads every row: the views under the pointer are new.
+    @Test
+    func aDayChangeKeepsTheRowUnderThePointerLit() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+
+        list.controller.refreshTimes()
+
+        #expect(list.hovered == [2])
+        #expect(try list.barOwner() == 2)
+        let box = try list.box(of: 2)
+        #expect(list.bar.frame.minY == box.minY - 25 && list.bar.frame.maxX == box.maxX - 14)
+    }
+
+    // Times worded anew can rewrap a row: the rows after it move under a still pointer, and
+    // the reader's place is kept without a scroll.
+    @Test
+    func aDayChangeThatMovesTheRowsLightsTheRowNowUnderThePointer() throws {
+        let clock = TimeRefreshTests.Clock()
+        let start = clock.now
+        let list = BarList(clock: clock)
+        var rows = list.many(80)
+        let due = Int64(start.timeIntervalSince1970) + 61
+        let height = { list.table.rect(ofRow: list.index(of: 40)).height }
+        let grows = (1...160).contains { count in
+            clock.now = start
+            rows[39] = row(
+                40, by: rows[39].message.author, at: rows[39].message.timestamp,
+                content: "x" + String(repeating: "a", count: count) + " <t:\(due):R>")
+            list.show(rows)
+            let before = height()
+            clock.now = start + 2
+            list.controller.refreshTimes()
+            return height() > before + 10
+        }
+        try #require(grows, "no text wraps when its time turns to seconds")
+        clock.now = start
+        list.controller.refreshTimes()
+        list.scroll(to: list.table.rect(ofRow: list.index(of: 38)).minY)
+        let box = try list.box(of: 41)
+        list.move(to: NSPoint(x: box.minX + 100, y: box.minY + 2))
+        #expect(list.hovered == [41])
+        let y = list.clip.bounds.minY
+
+        clock.now = start + 2
+        list.controller.refreshTimes()
+
+        #expect(list.clip.bounds.minY == y)
+        #expect(try list.box(of: 41).minY > box.minY + 10)
+        #expect(list.hovered == [40])
+        #expect(try list.barOwner() == 40)
+    }
+
+    // The split view: two lists in one window under one pointer, each with its own bar.
+    @Test
+    func eachPaneHasItsOwnBar() throws {
+        let pointer = MessageTableTests.Pointer()
+        let noon = berlinTime(2026, 10, 10, 12, 0)
+        let window = TestWindow.make(size: NSSize(width: 900, height: 400), style: [.titled, .resizable])
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 400))
+        window.contentView = container
+        let panes = (0..<2).map { index -> (MessageTableController, MessageTableTests.RecordingActions) in
+            let controller = MessageTableController(
+                calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { pointer.location })
+            let actions = MessageTableTests.RecordingActions()
+            for raw in 1...3 as ClosedRange<UInt64> {
+                actions.bars[raw] = (BarList.plain, BarList.shifted)
+            }
+            controller.actions = actions
+            controller.modifiers = { [] }
+            controller.scrollView.frame = NSRect(x: CGFloat(index) * 450, y: 0, width: 450, height: 400)
+            container.addSubview(controller.scrollView)
+            controller.show(
+                MessageTableState(
+                    rows: (1...3).map { row(UInt64($0), by: author(2, "Ray"), at: noon + Double($0) * 10) },
+                    reachedOldest: true))
+            return (controller, actions)
+        }
+        window.layoutIfNeeded()
+        let (channel, thread) = (panes[0].0, panes[1].0)
+
+        for (over, other) in [(thread, channel), (channel, thread)] {
+            let row = over.tableView.rect(ofRow: over.tableView.numberOfRows - 1)
+            pointer.location = over.tableView.convert(NSPoint(x: 100, y: row.midY), to: nil)
+            channel.pointerMoved()
+            thread.pointerMoved()
+
+            #expect(!over.hoverBar.isHidden)
+            #expect(other.hoverBar.isHidden)
+            #expect(over.hoverBar.superview === over.tableView)
+            #expect(over.tableView.visibleRect.contains(over.hoverBar.frame))
+        }
+        panes[0].1.calls = []
+        channel.hoverBar.buttons[0].performClick(nil)
+        #expect(panes[0].1.calls == ["create thread from 3"])
+        #expect(!panes[1].1.calls.contains { $0.hasPrefix("create") })
+    }
+
+    @Test
+    func moreOpensTheRowsMenuUnderTheButton() throws {
+        let list = BarList()
+        list.actions.startsThreads = [2]
+        list.actions.marksUnread = [2]
+        list.showGroups()
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+        let context = try #require(try list.cell(of: 2).menu(for: try list.menuEvent(on: 2)))
+
+        more.performClick(nil)
+
+        let popped = try #require(list.popped.first)
+        #expect(popped.titles == ["Create Thread", "", "Copy Text", "Mark Unread"])
+        #expect(popped.titles == context.items.map(\.title))
+        #expect(popped.view === more)
+        #expect(popped.point == NSPoint(x: 0, y: more.bounds.maxY + 4))
+        #expect(popped.moreSelected, "More is lit while its menu is open")
+        #expect(!more.isSelected)
+        #expect(list.hovered == [2])
+        #expect(!list.actions.calls.contains { $0.hasPrefix("more") })
+    }
+
+    @Test
+    func theMenusItemsRunTheirActions() throws {
+        let list = BarList()
+        list.actions.startsThreads = [2]
+        list.actions.marksUnread = [2]
+        list.showGroups()
+        let menu = try #require(try list.cell(of: 2).menu(for: try list.menuEvent(on: 2)))
+
+        list.actions.calls = []
+        for index in [0, 2, 3] {
+            menu.performActionForItem(at: index)
+        }
+
+        #expect(list.actions.calls == ["create thread from 2", "copyText 2", "markUnread 2"])
+    }
+
+    // A system line has the same menu and bar as a message.
+    @Test
+    func aNoticeHasItsMenuAndBar() throws {
+        let list = BarList()
+        list.actions.marksUnread = [5]
+        list.showGroups()
+
+        let menu = try #require(try list.cell(of: 5).menu(for: try list.menuEvent(on: 5)))
+        #expect(menu.items.map(\.title).contains("Mark Unread"))
+        try list.hover(5)
+        #expect(try list.barOwner() == 5)
+    }
+
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theBarTakesTheThemesColors(_ name: NSAppearance.Name) throws {
+        let list = BarList()
+        list.window.appearance = NSAppearance(named: name)
+        list.showGroups()
+        try list.hover(2)
+        let layer = try #require(list.bar.layer)
+        func resolved(_ color: NSColor) -> [CGFloat] {
+            var cg = CGColor.clear
+            list.bar.effectiveAppearance.performAsCurrentDrawingAppearance { cg = color.cgColor }
+            return Self.parts(cg)
+        }
+
+        #expect(Self.parts(layer.backgroundColor) == resolved(Palette.surfaceHigh))
+        #expect(Self.parts(layer.borderColor) == resolved(Palette.borderMuted))
+        #expect(layer.borderWidth == 1 && layer.cornerRadius == 8)
+        #expect(layer.shadowOpacity == (name == .darkAqua ? 0.14 : 0.08))
+        #expect(layer.shadowRadius == 2 && layer.shadowOffset == CGSize(width: 0, height: -1))
+
+        let more = try #require(list.bar.button(.more))
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(Self.parts(layer.borderColor) == resolved(Palette.borderSubtle))
+        #expect(layer.shadowOpacity == (name == .darkAqua ? 0.16 : 0.08))
+        #expect(layer.shadowRadius == 4 && layer.shadowOffset == CGSize(width: 0, height: -4))
+        #expect(Self.parts(more.layer?.backgroundColor) == resolved(Palette.hoverBackground))
+        #expect(more.layer?.cornerRadius == 6)
+        more.isSelected = true
+        #expect(Self.parts(more.layer?.backgroundColor) == resolved(Palette.selectedBackground))
+
+        // Its menu is open and the pointer is in the menu.
+        try list.hover(2)
+        #expect(!more.isHovered)
+        #expect(more.contentTintColor == Palette.interactiveTextActive)
+        #expect(Self.parts(more.layer?.backgroundColor) == resolved(Palette.selectedBackground))
+        more.isSelected = false
+        #expect(more.contentTintColor == Palette.interactiveText && more.layer?.backgroundColor == nil)
+    }
+
+    static func parts(_ color: CGColor?) -> [CGFloat] {
+        let srgb = color?.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil)
+        return (srgb?.components ?? []).map { ($0 * 255).rounded() / 255 }
+    }
+
+    @Test
+    func everySymbolFitsTheIconBox() throws {
+        let symbols = [
+            "face.smiling", "arrowshape.turn.up.left", "pencil", "text.bubble", "doc.on.doc", "pin",
+            "pin.slash", "arrow.clockwise", "message.badge", "link", "xmark.circle", "trash", "number",
+            "ellipsis",
+        ]
+        for symbol in symbols {
+            let image = try #require(HoverBarButton.icon(symbol), "\(symbol)")
+            let side = 28
+            let rep = try #require(
+                NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: side * 2, pixelsHigh: side * 2, bitsPerSample: 8,
+                    samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                    bytesPerRow: 0, bitsPerPixel: 0))
+            rep.size = NSSize(width: side, height: side)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            image.draw(
+                in: NSRect(
+                    x: (CGFloat(side) - image.size.width) / 2, y: (CGFloat(side) - image.size.height) / 2,
+                    width: image.size.width, height: image.size.height))
+            NSGraphicsContext.restoreGraphicsState()
+            var xs: [Int] = []
+            var ys: [Int] = []
+            for y in 0..<rep.pixelsHigh {
+                for x in 0..<rep.pixelsWide where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+                    xs.append(x)
+                    ys.append(y)
+                }
+            }
+            let (left, right) = (try #require(xs.min()), try #require(xs.max()))
+            let (top, bottom) = (try #require(ys.min()), try #require(ys.max()))
+            let width = CGFloat(right - left + 1) / 2
+            let height = CGFloat(bottom - top + 1) / 2
+            #expect(width <= 20 && height <= 20, "\(symbol): \(width) x \(height)")
+            #expect(max(width, height) >= 13, "\(symbol): \(width) x \(height)")
+            let middle = (CGFloat(right + left + 1) / 4, CGFloat(bottom + top + 1) / 4)
+            #expect(abs(middle.0 - 14) <= 1.5 && abs(middle.1 - 14) <= 2, "\(symbol): centred at \(middle)")
+        }
+    }
+}
+
+// AppKit's own menus, popped onto a screen and cancelled from inside their tracking loop: its
+// tracking notifications are what lights the row and lets it go.
+@MainActor
+struct RealMenuTests {
+    let list = BarList()
+
+    init() {
+        list.actions.startsThreads = [1, 2]
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(3), at: list.noon + 700, content: "second, with words to click on"),
+        ])
+        list.controller.popUp = { menu, point, view in
+            menu.popUp(positioning: nil, at: point, in: view)
+        }
+    }
+
+    func keyWindow() -> NSWindow {
+        let key = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 400)),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false))
+        key.contentView = list.controller.scrollView
+        key.orderFront(nil)
+        key.layoutIfNeeded()
+        key.displayIfNeeded()
+        return key
+    }
+
+    // What the list shows while each menu tracks; every menu is cancelled once seen.
+    final class Seen {
+        var menus: [(titles: [String], lit: [UInt64], more: Bool)] = []
+    }
+
+    func tracking(_ open: () throws -> Void) rethrows -> [(titles: [String], lit: [UInt64], more: Bool)] {
+        let seen = Seen()
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
+        ) { [list] notification in
+            nonisolated(unsafe) let menu = notification.object as? NSMenu
+            MainActor.assumeIsolated {
+                RunLoop.main.perform(inModes: [.eventTracking, .default]) {
+                    MainActor.assumeIsolated {
+                        seen.menus.append(
+                            (
+                                menu?.items.map(\.title) ?? [], list.hovered,
+                                list.bar.button(.more)?.isSelected == true
+                            ))
+                        menu?.cancelTrackingWithoutAnimation()
+                    }
+                }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        try open()
+        return seen.menus
+    }
+
+    func rightClick(_ point: NSPoint, in view: NSView, of window: NSWindow) throws {
+        window.sendEvent(
+            try #require(
+                NSEvent.mouseEvent(
+                    with: .rightMouseDown, location: view.convert(point, to: nil), modifierFlags: [],
+                    timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: 1)))
+    }
+
+    @Test(.tags(.onScreen), .enabled(if: TestWindow.screenTests))
+    func aRightClicksMenuLightsItsRowUntilItCloses() throws {
+        let window = keyWindow()
+        defer { window.close() }
+        let cell = try list.cell(of: 2)
+        let text = try #require(MessageListFixture.messageText(in: cell))
+        let word = try glyphs(of: "words", in: text, within: text)
+        try settleEvents(in: window)
+        list.pointer.location = nil
+        list.controller.pointerMoved()
+        #expect(list.hovered.isEmpty)
+
+        let onRow = try tracking {
+            try rightClick(NSPoint(x: cell.box.maxX - 4, y: cell.box.midY), in: cell, of: window)
+        }
+        #expect(onRow.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(onRow.map(\.lit) == [[2]], "lit by the menu alone: the pointer is nowhere")
+        #expect(list.hovered.isEmpty, "and let go when it closed")
+
+        let inText = try tracking {
+            try rightClick(NSPoint(x: word.midX, y: word.midY), in: text, of: window)
+        }
+        #expect(inText.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(inText.map(\.lit) == [[2]], "the text view's menu carries the row's items")
+        #expect(list.hovered.isEmpty)
+    }
+
+    @Test(.tags(.onScreen), .enabled(if: TestWindow.screenTests))
+    func moresPopupLightsMoreAndItsRowUntilItCloses() throws {
+        let window = keyWindow()
+        defer { window.close() }
+        try settleEvents(in: window)
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+
+        let popped = try tracking {
+            // The pointer leaves while the menu is open.
+            list.pointer.location = nil
+            more.performClick(nil)
+        }
+
+        #expect(popped.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(popped.map(\.lit) == [[2]])
+        #expect(popped.map(\.more) == [true])
+        #expect(!more.isSelected)
+        #expect(list.hovered.isEmpty)
+    }
+}
+
+// Option-click on a message marks the channel unread from it, as Alt+click in the official
+// client: anywhere in the message's box but on its buttons, and nothing else happens.
+@MainActor
+struct OptionClickTests {
+    let list = BarList()
+
+    init() {
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "see https://example.com now"),
+            row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second"),
+            row(3, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin),
+            row(4, at: list.noon + 800, delivery: .failed),
+            row(5, by: author(2, "Ray"), at: list.noon + 900, content: "an ephemeral answer"),
+        ])
+        list.actions.marksUnread = [1, 2, 3]
+        list.pointer.location = NSPoint(x: 10, y: 10)
+    }
+
+    func middle(of raw: UInt64) throws -> NSPoint {
+        let box = try list.box(of: raw)
+        return NSPoint(x: box.midX, y: box.midY)
+    }
+
+    @Test
+    func anOptionClickInAMessagesBoxMarksItUnread() throws {
+        #expect(list.controller.optionClick(try list.click(.option, at: try middle(of: 2))))
+        #expect(list.controller.optionClick(try list.click(.option, at: try middle(of: 3))))
+
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2", "mark unread 3"])
+    }
+
+    @Test
+    func overALinkItMarksUnreadAndFollowsNothing() throws {
+        let cell = try list.cell(of: 1)
+        let text = try #require(MessageListFixture.messageText(in: cell))
+        let glyphs = try glyphs(of: "example", in: text, within: text)
+        let point = list.table.convert(NSPoint(x: glyphs.midX, y: glyphs.midY), from: text)
+
+        #expect(list.controller.monitored(try list.click(.option, at: point)))
+
+        #expect(list.actions.calls.filter { !$0.hasPrefix("bar") && !$0.hasPrefix("more") } == ["mark unread 1"])
+        #expect(text.selectedRange().length == 0)
+    }
+
+    @Test
+    func otherClicksAreLeftAlone() throws {
+        let point = try middle(of: 2)
+
+        #expect(!list.controller.optionClick(try list.click([], at: point)))
+        #expect(!list.controller.optionClick(try list.click([.option, .shift], at: point)))
+        #expect(!list.controller.optionClick(try list.click([.option, .command], at: point)))
+        #expect(!list.controller.optionClick(try list.click([.option, .control], at: point)))
+        #expect(!list.controller.optionClick(try list.mouse(.rightMouseDown, .option, at: point)))
+        #expect(!list.controller.optionClick(try list.mouse(.leftMouseUp, .option, at: point)))
+        #expect(!list.controller.monitored(try list.click([], at: point)))
+        let gap = NSPoint(x: 200, y: try list.box(of: 3).minY - 6)
+        #expect(!list.controller.optionClick(try list.click(.option, at: gap)))
+        #expect(!list.controller.optionClick(try list.click(.option, at: NSPoint(x: 200, y: list.table.rect(ofRow: 0).midY))))
+
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    @Test
+    func aButtonKeepsItsClick() throws {
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        list.actions.marksUnread.insert(4)
+        let retry = try #require(buttons(try list.cell(of: 4)).first { $0.title == "Retry" })
+        let onRetry = list.table.convert(NSPoint(x: retry.bounds.midX, y: retry.bounds.midY), from: retry)
+        #expect(try list.box(of: 4).contains(onRetry), "in a box whose message can be marked")
+        #expect(!list.controller.optionClick(try list.click(.option, at: onRetry)))
+
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+        let onMore = list.table.convert(NSPoint(x: 14, y: 14), from: more)
+        #expect(!list.controller.optionClick(try list.click(.option, at: onMore)))
+        let onBar = list.table.convert(NSPoint(x: 1, y: 1), from: list.bar)
+        #expect(!list.controller.optionClick(try list.click(.option, at: onBar)))
+
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // A message that can't be marked: the click is an ordinary click with Option held.
+    @Test
+    func whereTheMarkIsNotOfferedTheClickPassesThrough() throws {
+        let point = try middle(of: 5)
+
+        #expect(!list.controller.monitored(try list.click(.option, at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseDragged, .option, at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, .option, at: point)))
+
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // The button's release would reach whatever is under the pointer without its press.
+    @Test
+    func aTakenClicksDragAndReleaseAreTakenToo() throws {
+        let point = try middle(of: 2)
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "no press was taken")
+
+        #expect(list.controller.monitored(try list.click(.option, at: point)))
+        #expect(list.controller.monitored(try list.mouse(.leftMouseDragged, .option, at: point)))
+        #expect(list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "Option let go first")
+
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "the next click's")
+        #expect(!list.controller.monitored(try list.click([], at: point)))
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2"])
+    }
+
+    // A release that never came: the next press is judged by itself.
+    @Test
+    func aPressAfterALostReleaseIsJudgedByItself() throws {
+        let point = try middle(of: 2)
+        #expect(list.controller.monitored(try list.click(.option, at: point)))
+
+        #expect(!list.controller.monitored(try list.click([], at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseDragged, [], at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)))
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2"])
+    }
+
+    // Behind another window, or while the window isn't key, the list takes no click.
+    @Test
+    func withoutThePointerNothingIsMarked() throws {
+        list.pointer.location = nil
+
+        #expect(!list.controller.optionClick(try list.click(.option, at: try middle(of: 2))))
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // The same place in another window, a panel over the list for one.
+    @Test
+    func aClickInAnotherWindowIsNotTheLists() throws {
+        let other = TestWindow.make(size: NSSize(width: 600, height: 400), style: [.titled, .resizable])
+        let point = list.table.convert(try middle(of: 2), to: nil)
+        let events = try [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].map { type in
+            try #require(
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: .option, timestamp: 0,
+                    windowNumber: other.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                    pressure: type == .leftMouseUp ? 0 : 1))
+        }
+
+        #expect(events.allSatisfy { !list.controller.monitored($0) })
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // The jump bar, the unread bar and the thread form lie over the list's rows.
+    @Test
+    func aViewLyingOverTheListKeepsItsClick() throws {
+        let point = try middle(of: 2)
+        let cover = NSView(frame: list.controller.scrollView.bounds)
+        list.controller.scrollView.addSubview(cover)
+        let content = try #require(list.window.contentView)
+        let inWindow = list.table.convert(point, to: nil)
+        #expect(content.hitTest(content.superview?.convert(inWindow, from: nil) ?? inWindow) === cover)
+
+        #expect(!list.controller.monitored(try list.click(.option, at: point)))
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+
+        cover.removeFromSuperview()
+        #expect(list.controller.monitored(try list.click(.option, at: point)))
+    }
+
+    // The app's own event path: the press, its drag and its release never reach the window.
+    @Test
+    func theAppHandsTheListItsOptionClickBeforeTheWindow() throws {
+        let window = TestWindow.hide(
+            SeeingWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 400)),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false))
+        window.contentView = list.controller.scrollView
+        window.layoutIfNeeded()
+        let point = list.table.convert(try middle(of: 2), to: nil)
+        func send(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags) throws {
+            NSApp.sendEvent(
+                try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: flags, timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1)))
+        }
+
+        try send(.leftMouseDown, .option)
+        try send(.leftMouseDragged, .option)
+        try send(.leftMouseUp, [])
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2"])
+        #expect(window.seen.isEmpty)
+
+        try send(.leftMouseDown, [])
+        try send(.leftMouseDragged, [])
+        try send(.leftMouseUp, [])
+        #expect(window.seen == [.leftMouseDown, .leftMouseDragged, .leftMouseUp], "an ordinary click is the window's")
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2"])
+    }
+
+    // Sees what the app sends it and does nothing with it.
+    final class SeeingWindow: OutOfSightWindow {
+        var seen: [NSEvent.EventType] = []
+
+        override func sendEvent(_ event: NSEvent) {
+            seen.append(event.type)
+        }
+    }
+
+    // AppKit keeps a monitor until it is removed.
+    @Test
+    func theListsEventMonitorGoesWithIt() throws {
+        weak var monitor: AnyObject?
+        weak var gone: MessageTableController?
+        autoreleasepool {
+            let controller = MessageTableController(calendar: { berlin }, pointer: { nil })
+            let held = Mirror(reflecting: controller).children.first { $0.label == "eventMonitor" }?.value
+            monitor = held.map { $0 as AnyObject }
+            #expect(monitor != nil && !(monitor is NSNull))
+            gone = controller
+        }
+
+        #expect(gone == nil)
+        #expect(monitor == nil)
+    }
+}
+
+// The app's bridge between a list's table and its message actions.
+@MainActor @Suite(.timeLimit(.minutes(1)))
+struct MessageBridgeTests {
+    nonisolated final class MarkingAccount: Account, @unchecked Sendable {
+        let marked = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+        init() {
+            super.init(noHandle: NoHandle())
+        }
+
+        required init(unsafeFromHandle handle: UInt64) {
+            fatalError("a fake has no Rust object")
+        }
+
+        override func markUnread(channelId: ChannelId, messageId: MessageId) async throws -> MarkOutcome {
+            marked.withLock { $0.append("\(channelId.rawValue) \(messageId.rawValue)") }
+            return .marked
+        }
+    }
+
+    final class Copied {
+        var texts: [String] = []
+    }
+
+    @Test
+    func theBridgeHandsBarMenuAndClicksToTheModel() async throws {
+        let session = SessionScreenTests().formattedSession(FormattedAccount(contents: ["test"], readUpTo: 5))
+        let account = MarkingAccount()
+        let copied = Copied()
+        let model = MessageActionsModel(
+            store: HoverBarRenders.ActionsStore(), account: account,
+            copy: { copied.texts.append($0) }, retry: { _ in }, discard: { _ in },
+            createThread: { _, _ in }, viewThread: { _, _ in }, failed: { _ in })
+        let bridge = MessageListBridge(
+            messages: try #require(session.messages), link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in }, markServerRead: {},
+            messageActions: model)
+        let message = row(2, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 12, 0), content: "hello")
+
+        #expect(bridge.messageBar(for: message, shift: false).map(\.action) == [.createThread, .more])
+        #expect(
+            bridge.messageBar(for: message, shift: true).map(\.action)
+                == [.copyLink, .markUnread, .createThread, .more])
+        #expect(
+            bridge.messageMenu(for: message).map { $0.map(\.action) }
+                == [[.createThread], [.copyText, .markUnread, .copyLink]])
+        bridge.perform(.copyText, on: message, shift: false)
+        #expect(copied.texts == ["hello"])
+        bridge.markUnread(from: message)
+        try await eventually { account.marked.withLock { $0 } == ["10 2"] }
+        session.close()
+    }
+
+    @Test
+    func withoutAModelTheBridgeOffersNothing() throws {
+        let session = SessionScreenTests().formattedSession(FormattedAccount(contents: ["test"], readUpTo: 5))
+        let bridge = MessageListBridge(
+            messages: try #require(session.messages), link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in }, markServerRead: {})
+        let message = row(2, at: berlinTime(2026, 10, 10, 12, 0))
+
+        #expect(bridge.messageBar(for: message, shift: true).isEmpty)
+        #expect(bridge.messageMenu(for: message).isEmpty)
+        session.close()
+    }
+}

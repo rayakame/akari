@@ -71,6 +71,7 @@ public final class SessionModel {
             syncSplit()
             syncForm()
             updateCreateHere()
+            tellOpenChannels()
         }
     }
     /// The open forum's page, in the message list's place; `nil` otherwise. Its Sort & View and
@@ -83,6 +84,7 @@ public final class SessionModel {
             channels?.setOpen(openChannelId)
             tellOpenForum()
             syncSplit()
+            tellOpenChannels()
         }
     }
     /// The channel the window shows: the message list's or the forum's.
@@ -94,7 +96,10 @@ public final class SessionModel {
     /// unless Discord says the thread is gone or the user can no longer see it. Like `messages`,
     /// a new model loads nothing until the view calls `open()`.
     public private(set) var split: MessageListModel? {
-        didSet { oldValue?.retire() }
+        didSet {
+            oldValue?.retire()
+            tellOpenChannels()
+        }
     }
     /// The split thread's channel, for its header and menu.
     public private(set) var splitChannel: Channel?
@@ -130,6 +135,8 @@ public final class SessionModel {
     @ObservationIgnored private var peeked: ChannelId?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
+    /// The last message action that failed (Mark Unread), until `dismissMessageActionFailure()`.
+    public private(set) var messageActionFailure: MessageActionsModel.Failure?
     /// The channels the user is reading: the open channel and the split thread, each while its
     /// list is fresh at the present's bottom, and unless the user scrolled clearly away from it
     /// or the session showed it on its own since the last click or key press; both only while
@@ -200,6 +207,9 @@ public final class SessionModel {
     // may have set it again, so the next derivation is sent whatever it is.
     @ObservationIgnored private var resendReading = false
     @ObservationIgnored private var toldReading: [ChannelId] = []
+    @ObservationIgnored private var toldOpen: [ChannelId] = []
+    @ObservationIgnored private var navigations = 0
+    @ObservationIgnored private var readingUntold = false
     // On a 401 the core has stopped reading itself, and close() can come inside that batch.
     @ObservationIgnored private var accountClosed = false
     @ObservationIgnored private var reduceMotion = false
@@ -243,6 +253,8 @@ public final class SessionModel {
 
     /// Subscribes, reads, connects and applies changes until the session ends.
     public func start() {
+        navigations += 1
+        defer { navigated() }
         guard subscription == nil, !ended else {
             return
         }
@@ -334,6 +346,8 @@ public final class SessionModel {
     /// Go Back: the server's first channel unless it's gated too, else Home (the official
     /// client's `nsfwReturnToSafety`).
     public func leaveAgeGate() {
+        navigations += 1
+        defer { navigated() }
         let safe = channels?.channels.first {
             $0.opensMessageList && !$0.isThread && store.ageGate(channelId: $0.id) == .open
         }
@@ -352,6 +366,8 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
+        navigations += 1
+        defer { navigated() }
         goingTo = nil
         engage()
         enter(place)
@@ -361,6 +377,8 @@ public final class SessionModel {
     /// already open. As in the official client, the open channel's row closes its split, and a
     /// thread's row closes its channel's split, which the channel forgets.
     public func open(channel id: ChannelId) {
+        navigations += 1
+        defer { navigated() }
         engage()
         if id == openChannelId {
             forgetSplit(of: id)
@@ -376,6 +394,8 @@ public final class SessionModel {
     /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
     /// the store doesn't have opens where the user is; one without a message list doesn't open.
     public func go(to channel: ChannelId) {
+        navigations += 1
+        defer { navigated() }
         guard let found = store.channel(id: channel) else {
             fetchThenGo(to: channel)
             return
@@ -509,6 +529,8 @@ public final class SessionModel {
     /// The full view's "Open in Split View" for a thread: its channel opens with the thread
     /// beside it.
     public func openInSplitView() {
+        navigations += 1
+        defer { navigated() }
         guard let open = messages?.channelId, let thread = channels?.channel(open),
             thread.isThread, let parent = thread.parentId,
             let found = store.channel(id: parent), found.opensMessageList || found.opensForum,
@@ -572,6 +594,8 @@ public final class SessionModel {
     public func openThreadForm(
         in parent: ChannelId, from message: MessageId? = nil, location: CreateThreadLocation
     ) {
+        navigations += 1
+        defer { navigated() }
         let creation = store.threadCreation(parentId: parent)
         let allowed =
             message.map { store.canStartThread(channelId: parent, messageId: $0) }
@@ -906,6 +930,31 @@ public final class SessionModel {
         membershipError = nil
     }
 
+    /// What the messages of `list` offer in their hover bars and menus; `copy` is the host's
+    /// pasteboard.
+    public func messageActions(
+        for list: MessageListModel, copy: @escaping (String) -> Void
+    ) -> MessageActionsModel {
+        MessageActionsModel(
+            store: store, account: account, copy: copy,
+            retry: { [composer = list.composer] id in Task { await composer.retry(id) } },
+            discard: { [composer = list.composer] in composer.discard($0) },
+            createThread: { [weak self] channel, message in
+                self?.openThreadForm(in: channel, from: message, location: .message)
+            },
+            viewThread: { [weak self] thread, parent in
+                Task { await self?.openBeside(thread: thread, from: parent) }
+            },
+            marking: { [weak list] channel, message in
+                list?.channelId == channel ? list?.markUnread(from: message) : nil
+            },
+            failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    public func dismissMessageActionFailure() {
+        messageActionFailure = nil
+    }
+
     private func changeMembership(
         of thread: ChannelId, joins: Bool, from location: ThreadLocation
     ) async {
@@ -952,6 +1001,8 @@ public final class SessionModel {
 
     // Without engaging: only the user's choices and the launch do.
     private func enter(_ place: Place) {
+        navigations += 1
+        defer { navigated() }
         defer { updateReading() }
         guard place != self.place else {
             // The session starts at home, so choosing home before READY cancels a server restore.
@@ -1114,6 +1165,7 @@ public final class SessionModel {
     public func close() {
         ended = true
         updateReading()
+        tellOpenChannels()
         account.close()
         accountClosed = true
         subscription?.close()
@@ -1133,6 +1185,8 @@ public final class SessionModel {
     }
 
     private func update(with batch: EventBatch) {
+        navigations += 1
+        defer { navigated() }
         // Before anything here sets the channel as being read, which the core acks at once.
         if batch.ready {
             sawReady = true
@@ -1401,6 +1455,8 @@ public final class SessionModel {
     }
 
     private func restore(_ spot: AccountMemory.Spot) {
+        navigations += 1
+        defer { navigated() }
         switch spot.place {
         case .guild(let guildId):
             guard servers.guilds.contains(where: { $0.id == guildId }) else {
@@ -1454,11 +1510,15 @@ public final class SessionModel {
     }
 
     private func closePage() {
+        navigations += 1
+        defer { navigated() }
         forum = nil
         messages = nil
     }
 
     private func show(channel id: ChannelId) {
+        navigations += 1
+        defer { navigated() }
         spotToRestore = nil
         goingTo = nil
         switch place {
@@ -1572,7 +1632,37 @@ public final class SessionModel {
         }
     }
 
+    // The core ends a mark's hold on a channel a report leaves out: a navigation that changes
+    // the lists in steps names them once, as they are when it is done.
+    private func navigated() {
+        navigations -= 1
+        guard navigations == 0 else {
+            return
+        }
+        tellOpenChannels()
+        if readingUntold {
+            readingUntold = false
+            tellReading()
+        }
+    }
+
+    // The lists the window shows, read or not: a channel the user marked unread stays unread
+    // until it leaves them. From the lists' own setters, so every way a list goes tells the core.
+    private func tellOpenChannels() {
+        let open = ended ? [] : [openChannelId, split?.channelId].compactMap { $0 }
+        guard navigations == 0, !accountClosed, open != toldOpen else {
+            return
+        }
+        toldOpen = open
+        account.setOpenChannels(channelIds: open)
+    }
+
     private func tellReading() {
+        // After the open lists: the core stops reading a channel that leaves them.
+        guard navigations == 0 else {
+            readingUntold = true
+            return
+        }
         let channels = [messages?.channelId, split?.channelId, forum?.forumId].compactMap { $0 }
             .filter(reading.contains)
         guard !accountClosed, channels != toldReading || resendReading else {

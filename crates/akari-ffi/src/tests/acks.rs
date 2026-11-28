@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use akari_core::model::ChannelId;
+use akari_core::model::{ChannelId, MessageId};
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::WebSocketStream;
@@ -11,6 +11,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::fake::{FakeGateway, GENERAL, GUILD, events_until, fixture, online};
 use super::support::{USER, token};
 use crate::account::{Account, MessageLoad};
+use crate::errors::RequestError;
+use crate::records::MarkOutcome;
 
 struct Online {
     account: Arc<Account>,
@@ -175,5 +177,90 @@ async fn mark_guilds_read_crosses() {
         acks_reaching(&online.server, "/read-states/ack-bulk").await,
         1
     );
+    online.account.close();
+}
+
+#[tokio::test]
+async fn mark_unread_crosses() {
+    let online = online_acking().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/channels/300000000000000002/messages"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
+        .await
+        .unwrap();
+    online.account.mark_read(GENERAL);
+    assert!(!unread(&online.account, GENERAL));
+
+    let outcome = online
+        .account
+        .mark_unread(GENERAL, MessageId::new(400_000_000_000_000_012))
+        .await;
+
+    assert_eq!(outcome.ok(), Some(MarkOutcome::Marked));
+    assert!(unread(&online.account, GENERAL));
+    let requests = online.server.received_requests().await.unwrap();
+    let mark = requests
+        .iter()
+        .find(|request| {
+            request.url.path()
+                == "/api/v9/channels/300000000000000002/messages/400000000000000011/ack"
+        })
+        .expect("the ack before the chosen message");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&mark.body).unwrap(),
+        serde_json::json!({"manual": true, "mention_count": 1})
+    );
+
+    let unknown = online
+        .account
+        .mark_unread(GENERAL, MessageId::new(400_000_000_000_000_999))
+        .await;
+    assert!(matches!(unknown, Err(RequestError::InvalidRequest)));
+    online.account.close();
+}
+
+#[tokio::test]
+async fn an_open_channel_marked_unread_stays_unread_until_it_is_left() {
+    let online = online_acking().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/channels/300000000000000002/messages"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
+        .await
+        .unwrap();
+    online.account.set_open_channels(vec![GENERAL]);
+    online.account.set_reading(vec![GENERAL]);
+    assert!(!unread(&online.account, GENERAL));
+    online
+        .account
+        .mark_unread(GENERAL, MessageId::new(400_000_000_000_000_012))
+        .await
+        .unwrap();
+
+    online.account.set_reading(Vec::new());
+    online.account.set_reading(vec![GENERAL]);
+    assert!(unread(&online.account, GENERAL), "still open");
+
+    online.account.set_open_channels(Vec::new());
+    online.account.set_open_channels(vec![GENERAL]);
+    online.account.set_reading(vec![GENERAL]);
+    assert!(!unread(&online.account, GENERAL), "left and opened again");
     online.account.close();
 }

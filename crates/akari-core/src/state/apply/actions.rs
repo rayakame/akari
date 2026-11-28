@@ -24,9 +24,13 @@ impl State {
     ) -> MessageActions {
         if let Some(original) = self.windows.shown_by_row(channel, message) {
             let actions = self.message_actions_of(&original, now_millis);
+            let row = self.message(channel, message);
             return MessageActions {
                 // The thread it would view is the one the row is in.
                 view_thread: actions.view_thread && original.id.cast() != channel,
+                // A mark from the row marks the thread, not the original's channel.
+                mark_unread: row
+                    .is_some_and(|row| self.message_actions_of(&row, now_millis).mark_unread),
                 ..actions
             };
         }
@@ -45,6 +49,21 @@ impl State {
             .shown_by_row(channel, row)
             .or_else(|| self.acted_on(channel, row))
             .map(|message| (message.channel_id, message.id))
+    }
+
+    pub(crate) fn message_link(&self, channel: ChannelId, row: MessageId) -> String {
+        let (channel, message) = self.shown_message(channel, row).unwrap_or((channel, row));
+        let guild = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|channel| channel.guild_id)
+            .map_or_else(|| "@me".to_owned(), |guild| guild.get().to_string());
+        format!(
+            "https://discord.com/channels/{guild}/{}/{}",
+            channel.get(),
+            message.get()
+        )
     }
 
     pub(crate) fn message_actions_of(&self, message: &Message, now_millis: i64) -> MessageActions {

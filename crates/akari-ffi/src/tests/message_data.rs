@@ -540,6 +540,23 @@ fn each_action_crosses_as_itself() {
 }
 
 #[tokio::test]
+async fn a_message_link_crosses() {
+    let mut viewing = viewing().await;
+    viewing.dispatch("MESSAGE_CREATE", reply()).await;
+    viewing.until(inserted(REPLY)).await;
+
+    assert_eq!(
+        viewing.account.store().message_link(GENERAL, REPLY),
+        format!(
+            "https://discord.com/channels/200000000000000001/{}/{}",
+            GENERAL.get(),
+            REPLY.get()
+        )
+    );
+    viewing.account.close();
+}
+
+#[tokio::test]
 async fn message_actions_cross_field_by_field() {
     let mut viewing = viewing().await;
     viewing.dispatch("MESSAGE_CREATE", reply()).await;

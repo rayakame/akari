@@ -593,6 +593,7 @@ struct MessagePreview: NSViewRepresentable {
     }
 
     static func configure(_ cell: MessageCell, with message: Message, now: Date) {
+        cell.menuItems = { MessageMenu.copyText(message) }
         let calendar = Calendar.current
         let locale = Locale.current
         cell.configure(
