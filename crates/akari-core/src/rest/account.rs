@@ -12,8 +12,8 @@ use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, GuildId, MessageId};
-use crate::state::{AckBody, limit_in};
+use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, GuildId, MessageId, UserId};
+use crate::state::{AckBody, ReactionEmoji, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
 const CHANNEL: &str = "channels/{}";
@@ -31,6 +31,11 @@ const EMOJI_SOURCE: &str = "emojis/{}/source";
 const STICKER: &str = "stickers/{}";
 const STICKER_GUILD: &str = "stickers/{}/guild";
 const STICKER_PACK: &str = "sticker-packs/{}";
+const REACTIONS: &str = "channels/{}/messages/{}/reactions";
+const REACTIONS_EMOJI: &str = "channels/{}/messages/{}/reactions/{}";
+const REACTION_OWN: &str = "channels/{}/messages/{}/reactions/{}/@me";
+const REACTION_TYPED_OWN: &str = "channels/{}/messages/{}/reactions/{}/{}/@me";
+const REACTION_TYPED: &str = "channels/{}/messages/{}/reactions/{}/{}/{}";
 const SLOWMODE: u32 = 20016;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
@@ -349,6 +354,16 @@ enum Waiting {
     Never,
     // As `Allowed`, but slowmode isn't waited out: the UI shows its countdown instead.
     Create,
+    // A call that may be repeated: one more try after a 429's wait, and one after a 502, a 504
+    // or a connection that broke.
+    Idempotent,
+}
+
+#[derive(Debug)]
+pub(crate) struct Reactors {
+    pub(crate) users: Vec<model::User>,
+    // Skipped users count too: a short page means the end is reached.
+    pub(crate) received: usize,
 }
 
 #[derive(Debug)]
@@ -654,6 +669,104 @@ impl AccountRest {
         serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
     }
 
+    // `location` is already a query value. Never a super reaction: `type` is 0.
+    pub(crate) async fn add_reaction(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        location: &str,
+    ) -> Result<(), RequestError> {
+        let path = format!(
+            "{}/@me?location={location}&type=0",
+            reactions_of(channel, message, Some(emoji))
+        );
+        let route = RouteKey::new(Method::Put, REACTION_OWN, channel.get());
+        self.send(route, Waiting::Idempotent, || {
+            self.request(HttpMethod::PUT, &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
+    }
+
+    // The user's own without `user`.
+    pub(crate) async fn remove_reaction(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        burst: bool,
+        user: Option<UserId>,
+        location: &str,
+    ) -> Result<(), RequestError> {
+        let (whose, template) = match user {
+            Some(user) => (user.get().to_string(), REACTION_TYPED),
+            None => ("@me".to_owned(), REACTION_TYPED_OWN),
+        };
+        let path = format!(
+            "{}/{}/{whose}?location={location}&burst={burst}",
+            reactions_of(channel, message, Some(emoji)),
+            u8::from(burst)
+        );
+        let route = RouteKey::new(Method::Delete, template, channel.get());
+        self.send(route, Waiting::Idempotent, || {
+            self.request(HttpMethod::DELETE, &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
+    }
+
+    // Every reaction of the message, or every one with `emoji`.
+    pub(crate) async fn remove_reactions(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: Option<&ReactionEmoji>,
+    ) -> Result<(), RequestError> {
+        let path = reactions_of(channel, message, emoji);
+        let template = if emoji.is_some() {
+            REACTIONS_EMOJI
+        } else {
+            REACTIONS
+        };
+        let route = RouteKey::new(Method::Delete, template, channel.get());
+        self.send(route, Waiting::Idempotent, || {
+            self.request(HttpMethod::DELETE, &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
+    }
+
+    // In Discord's order; a user that doesn't decode is skipped.
+    pub(crate) async fn reactors(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &ReactionEmoji,
+        burst: bool,
+        after: Option<UserId>,
+        limit: u8,
+    ) -> Result<Reactors, RequestError> {
+        let after = after.map_or_else(String::new, |user| format!("&after={}", user.get()));
+        let path = format!(
+            "{}?limit={limit}{after}&type={}",
+            reactions_of(channel, message, Some(emoji)),
+            u8::from(burst)
+        );
+        let route = RouteKey::new(Method::Get, REACTIONS_EMOJI, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Idempotent, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        let (users, received) = parse_list(&body).map_err(|_| RequestError::UnexpectedResponse)?;
+        Ok(Reactors { users, received })
+    }
+
     pub(crate) async fn ack(
         &self,
         channel: ChannelId,
@@ -809,6 +922,8 @@ impl AccountRest {
     ) -> Result<Exchange, Failure> {
         let waits = waiting != Waiting::Never;
         let creates = waiting == Waiting::Create;
+        let idempotent = waiting == Waiting::Idempotent;
+        let rate_limit_retries = if idempotent { 1 } else { RATE_LIMIT_RETRIES };
         let mut rate_limited = 0;
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
@@ -843,7 +958,15 @@ impl AccountRest {
                 headers,
                 body,
                 timing,
-            } = self.client.rest().send_raw(request).await?;
+            } = match self.client.rest().send_raw(request).await {
+                Err(RestError::Transport(_)) if idempotent && server_errors == 0 => {
+                    server_errors += 1;
+                    report.retries += 1;
+                    tokio::time::sleep(self.retry_delay).await;
+                    continue;
+                }
+                answer => answer?,
+            };
             self.clock.observe(&headers, timing.headers_at);
             let limits = ResponseLimits::from_response(status, &headers, &body);
             permit.finish(&limits, timing.headers_at);
@@ -864,7 +987,7 @@ impl AccountRest {
                 }
                 429 if waits
                     && limits.retry_after.is_some()
-                    && rate_limited < RATE_LIMIT_RETRIES =>
+                    && rate_limited < rate_limit_retries =>
                 {
                     rate_limited += 1;
                     report.retries += 1;
@@ -903,6 +1026,28 @@ pub(crate) fn uri_component(text: &str) -> String {
         }
     }
     encoded
+}
+
+fn reactions_of(channel: ChannelId, message: MessageId, emoji: Option<&ReactionEmoji>) -> String {
+    let all = format!(
+        "channels/{}/messages/{}/reactions",
+        channel.get(),
+        message.get()
+    );
+    match emoji {
+        Some(emoji) => format!("{all}/{}", reaction_segment(emoji)),
+        None => all,
+    }
+}
+
+// As the official client's request line has it (from the code read, not observed): a Unicode
+// emoji percent-encoded, a custom one as `name:id` with the colon as it is, whatever the name.
+fn reaction_segment(emoji: &ReactionEmoji) -> String {
+    let name = emoji.name.as_deref();
+    match emoji.id {
+        Some(id) => format!("{}:{}", uri_component(name.unwrap_or("null")), id.get()),
+        None => uri_component(name.unwrap_or_default()),
+    }
 }
 
 // An ack's `last_viewed`: days since the Discord epoch, rounded up like the official client.

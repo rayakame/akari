@@ -40,6 +40,8 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
 
 nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func reactions(channelId: ChannelId, messageId: MessageId) -> [Reaction] { [] }
+    override func messageReactions(channelId: ChannelId, messageIds: [MessageId]) -> [MessageReactions] { [] }
     override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     static let guildIds = (1...40).map { GuildId(rawValue: $0) }

@@ -135,8 +135,18 @@ public final class SessionModel {
     @ObservationIgnored private var peeked: ChannelId?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
-    /// The last message action that failed (Mark Unread), until `dismissMessageActionFailure()`.
+    /// The last message action that failed (Mark Unread, a reaction Discord refused with
+    /// words), until `dismissMessageActionFailure()`.
     public private(set) var messageActionFailure: MessageActionsModel.Failure?
+    /// What a message action asks before it removes reactions, until
+    /// `answerMessageConfirmation(_:)`.
+    public private(set) var messageConfirmation: MessageActionsModel.Confirmation?
+    /// The open reactions window ("View Reactions"); it closes itself when its message has no
+    /// reactions left.
+    public private(set) var reactors: ReactorsModel?
+    /// Counts the reactions Discord refused without words; the host's stand-in for the
+    /// official client's shake follows it.
+    public private(set) var refusedReactions = 0
     /// The channels the user is reading: the open channel and the split thread, each while its
     /// list is fresh at the present's bottom, and unless the user scrolled clearly away from it
     /// or the session showed it on its own since the last click or key press; both only while
@@ -974,11 +984,52 @@ public final class SessionModel {
                 list?.channelId == channel ? list?.markUnread(from: message) : nil
             },
             reply: { [weak list] row, shift in list?.composer.startReply(to: row, shift: shift) },
+            reactions: list.reactions,
+            viewReactions: { [weak self] row in self?.viewReactions(of: row) },
+            confirm: { [weak self] in self?.messageConfirmation = $0 },
             failed: { [weak self] in self?.messageActionFailure = $0 })
     }
 
     public func dismissMessageActionFailure() {
         messageActionFailure = nil
+    }
+
+    /// The answer to `messageConfirmation`: "Yes" does what it asked about.
+    public func answerMessageConfirmation(_ confirmed: Bool) {
+        let asked = messageConfirmation
+        messageConfirmation = nil
+        if confirmed {
+            asked?.run()
+        }
+    }
+
+    /// "View Reactions", and a forum post's "+N": the reactions window of the row's message,
+    /// on `emoji` when the message has it, else on the one with the most reactions.
+    public func viewReactions(of row: MessageListModel.Row, emoji: ReactionPill.ID? = nil) {
+        viewReactions(channelId: row.message.channelId, messageId: row.message.id, emoji: emoji)
+    }
+
+    public func viewReactions(
+        channelId: ChannelId, messageId: MessageId, emoji: ReactionPill.ID? = nil
+    ) {
+        let window = ReactorsModel(
+            channelId: channelId, messageId: messageId, emoji: emoji, userId: userId, store: store,
+            account: account)
+        guard !window.isEmpty else {
+            return
+        }
+        window.refused = { [weak self] in self?.refusedReactions += 1 }
+        engage()
+        reactors = window
+    }
+
+    public func closeReactors() {
+        reactors = nil
+    }
+
+    private func follow(_ reactions: ReactionsModel) {
+        reactions.failed = { [weak self] in self?.messageActionFailure = $0 }
+        reactions.refused = { [weak self] in self?.refusedReactions += 1 }
     }
 
     private func changeMembership(
@@ -1323,6 +1374,12 @@ public final class SessionModel {
             form.apply(batch)
         }
         threadBrowser?.apply(batch)
+        if let window = reactors {
+            window.apply(batch)
+            if window.isEmpty {
+                reactors = nil
+            }
+        }
         if let peeked {
             let threads = moreActiveThreads(of: peeked)
             if threads != peekedThreads {
@@ -1576,12 +1633,14 @@ public final class SessionModel {
             ?? PostFormModel(forumId: id, account: account, store: store, drafts: drafts)
         postForms[id] = form
         form.reread()
-        return ForumModel(
+        let page = ForumModel(
             forumId: id, settings: forumSettings[id], store: store, account: account, form: form
         ) {
             [weak self] settings in
             self?.forumSettings[id] = settings
         }
+        follow(page.reactions)
+        return page
     }
 
     private func list(of channel: ChannelId) -> MessageListModel {
@@ -1590,6 +1649,7 @@ public final class SessionModel {
         list.jumpElsewhere = { [weak self] channel, message in
             self?.jump(to: message, in: channel)
         }
+        follow(list.reactions)
         list.bottomChanged = { [weak self, weak list] scrolledAway in
             guard let self, let list, list === self.messages || list === self.split else {
                 return

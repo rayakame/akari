@@ -1595,4 +1595,108 @@ struct MessageBridgeTests {
         #expect(bridge.messageMenu(for: message).isEmpty)
         session.close()
     }
+
+    // MARK: Reactions
+
+    struct Reacting {
+        let account: FormattedAccount
+        let session: SessionModel
+        let bridge: MessageListBridge
+        let link = MessageTableLink()
+
+        // Every message has one 👍 the user may take back, and the user may remove reactions.
+        @MainActor
+        init() throws {
+            account = FormattedAccount(contents: ["test"], readUpTo: 5)
+            account.formattedStore.reactable.withLock { $0 = true }
+            account.formattedStore.shownReactions.withLock { $0 = [reaction("👍", 1)] }
+            session = SessionScreenTests().formattedSession(account)
+            let list = try #require(session.messages)
+            bridge = MessageListBridge(
+                messages: list, link: link, links: LinkFollower(trusted: session.trustedLinks()),
+                go: { _ in }, markServerRead: {}, messageActions: session.messageActions(for: list) { _ in })
+        }
+
+        var calls: [String] { account.reactionCalls.withLock { $0 } }
+    }
+
+    let message = row(2, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 12, 0), content: "hello")
+
+    @Test
+    func theBridgeReactsFromWhereTheClickWas() async throws {
+        let reacting = try Reacting()
+        let bridge = reacting.bridge
+
+        bridge.toggleReaction(.unicode("🎉"), of: message, from: .contextMenu)
+        try await eventually { reacting.calls == ["react 🎉 from contextMenu"] }
+        let quick = try #require(bridge.quickReactions(for: message, shift: false).first)
+        bridge.react(quick, on: message, from: .contextMenu)
+
+        try await eventually { reacting.calls.count == 2 }
+        #expect(reacting.calls.last == "react 💯 from contextMenu")
+        reacting.session.close()
+    }
+
+    @Test
+    func shiftTakesTheQuickReactionsAwayAndSkipsTheRemovalsQuestion() async throws {
+        let reacting = try Reacting()
+        let bridge = reacting.bridge
+        #expect(bridge.quickReactions(for: message, shift: false).map(\.name) == ["💯", "😆", "💖"])
+        #expect(bridge.quickReactions(for: message, shift: true).isEmpty)
+        let removable = bridge.removableReactions(for: message)
+        #expect(removable.map(\.name) == ["👍"])
+
+        bridge.removeReactions(of: removable[0], on: message, shift: false)
+        #expect(reacting.session.messageConfirmation?.title == "Remove Reactions for Emoji")
+        reacting.session.answerMessageConfirmation(false)
+        bridge.removeReactions(of: removable[0], on: message, shift: true)
+
+        #expect(reacting.session.messageConfirmation == nil)
+        try await eventually { reacting.calls == ["remove 👍 of 2"] }
+        reacting.session.close()
+    }
+
+    @Test
+    func viewReactionsOpensTheSessionsWindow() throws {
+        let reacting = try Reacting()
+
+        reacting.bridge.viewReactions(of: message)
+
+        #expect(reacting.session.reactors?.messageId == message.message.id)
+        reacting.session.close()
+    }
+
+    // The list's controller asks the bridge; the model's names come back through it.
+    @Test
+    func aPillsNamesComeFromTheModelOnceThePointerRestedOnIt() async throws {
+        let reacting = try Reacting()
+        let list = BarList()
+        reacting.link.controller = list.controller
+        list.controller.actions = reacting.bridge
+        list.show([message.reacting(reactions(pill("👍")))])
+        let thumbs = try #require(try list.cell(of: 2) as? MessageCell).reactions?.pills.first
+        #expect(thumbs?.toolTip == "👍 reacted by 1 person")
+
+        reacting.bridge.reactionHovered(pill("👍"), on: message)
+
+        try await eventually { thumbs?.toolTip == "👍 reacted by Ann" }
+        #expect(reacting.calls == ["reactors 👍"])
+        reacting.session.close()
+    }
+
+    // The other list's wait began after this one's: once it asked, this one would have too.
+    @Test
+    func thePointerLeavingAPillEndsItsWait() async throws {
+        let left = try Reacting()
+        let other = try Reacting()
+
+        left.bridge.reactionHovered(pill("👍"), on: message)
+        left.bridge.reactionHovered(nil, on: nil)
+        other.bridge.reactionHovered(pill("👍"), on: message)
+
+        try await eventually { other.calls == ["reactors 👍"] }
+        #expect(left.calls.isEmpty)
+        left.session.close()
+        other.session.close()
+    }
 }

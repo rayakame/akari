@@ -512,6 +512,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
     entities.settings = UserSettings {
         display: DisplaySettings {
             gif_auto_play: false,
+            render_reactions: false,
             animate_stickers: StickerAnimation::OnInteraction,
             render_spoilers: SpoilerSetting::Always,
             explicit_content: ExplicitContentSettings {

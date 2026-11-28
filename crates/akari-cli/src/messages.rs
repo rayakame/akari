@@ -13,6 +13,7 @@ use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::keychain::Accounts;
+use crate::reactions;
 use crate::session::{self, Session, closed_message};
 use crate::{printable, report};
 
@@ -48,6 +49,33 @@ pub enum SessionCommand {
         channel_id: u64,
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
+    },
+    /// React to a message. The emoji is the Unicode emoji itself or a custom one as `name:id`.
+    React {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+    },
+    /// Take your reaction back.
+    Unreact {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+    },
+    /// List the users who reacted to a message with an emoji.
+    Reactors {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+        /// The super reactions' users.
+        #[arg(long)]
+        burst: bool,
+        /// Go on after this user (the last one of the page before).
+        #[arg(long, value_name = "USER_ID")]
+        after: Option<u64>,
+        /// How many users, 1 to 100.
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(1..=100))]
+        limit: u8,
     },
     /// Print a channel's latest messages, then new, edited and deleted ones, reaction changes
     /// and changes to messages that replies answer, until Ctrl+C.
@@ -96,6 +124,39 @@ pub async fn run<S: Accounts>(
                 let reply = reply_to(reply, no_mention);
                 send(&session, channel, text.join(" "), reply).await
             }
+        }
+        SessionCommand::React {
+            channel_id,
+            message_id,
+            emoji,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::toggle(&session.account, channel, message, &emoji, true).await
+        }
+        SessionCommand::Unreact {
+            channel_id,
+            message_id,
+            emoji,
+        } => {
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::toggle(&session.account, channel, message, &emoji, false).await
+        }
+        SessionCommand::Reactors {
+            channel_id,
+            message_id,
+            emoji,
+            burst,
+            after,
+            limit,
+        } => {
+            let args = reactions::ReactorsArgs {
+                emoji,
+                burst,
+                after,
+                limit,
+            };
+            let (channel, message) = (Snowflake::new(channel_id), Snowflake::new(message_id));
+            reactions::reactors(&session.account, channel, message, args).await
         }
         SessionCommand::Tail {
             flags_only,
@@ -830,6 +891,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reactors_are_listed_with_where_to_go_on() {
+        let (server, account) = loaded(vec![reply()]).await;
+        let users = json!([
+            {"id": "100000000000000002", "username": "mira", "global_name": "Mira",
+             "discriminator": "0", "avatar": null},
+            {"id": "100000000000000003", "username": "to\u{7}m", "discriminator": "0",
+             "avatar": null},
+        ]);
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path_regex("/reactions/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(users))
+            .mount(&server)
+            .await;
+        let emoji = crate::reactions::parse_emoji("wave:7").unwrap();
+        let ask = |limit| {
+            account.reactors(
+                Snowflake::new(GENERAL),
+                Snowflake::new(REPLY),
+                &emoji,
+                akari_core::ReactionKind::Normal,
+                None,
+                limit,
+            )
+        };
+
+        let full = ask(2).await.unwrap();
+        let short = ask(100).await.unwrap();
+
+        assert_eq!(
+            crate::reactions::reactor_lines(&full),
+            [
+                "Mira (mira)  100000000000000002",
+                "to\\u{7}m (to\\u{7}m)  100000000000000003",
+                "(more: --after 100000000000000003)",
+            ]
+        );
+        assert_eq!(crate::reactions::reactor_lines(&short).len(), 2);
+        let asked = server.received_requests().await.unwrap();
+        let last = asked.last().unwrap();
+        assert_eq!(
+            last.url.path(),
+            format!("/api/v9/channels/{GENERAL}/messages/{REPLY}/reactions/wave:7")
+        );
+        assert_eq!(last.url.query(), Some("limit=100&type=0"));
+        account.close();
+    }
+
+    #[tokio::test]
     async fn shown_target_maps_each_state_and_the_ping() {
         let mut sticker = reply()["referenced_message"].clone();
         sticker["id"] = "400000000000000011".into();
@@ -1167,6 +1276,129 @@ mod tests {
             requests.iter().all(|(method, ..)| method == "GET"),
             "{requests:?}"
         );
+    }
+
+    // #general's message 7 with the user's own reaction with :wave:, and the reactions' routes.
+    async fn reacted(server: &MockServer) {
+        let mut message = answered(7, 0);
+        message["reactions"] = json!([
+            {"emoji": {"id": "7", "name": "wave"}, "count": 1,
+             "count_details": {"normal": 1, "burst": 0}, "me": true, "me_burst": false},
+        ]);
+        let messages = format!("/api/v9/channels/{GENERAL}/messages");
+        Mock::given(method("GET"))
+            .and(path(messages.clone()))
+            .and(query_param("around", "7"))
+            .and(query_param("limit", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([message.clone()])))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(messages))
+            .and(query_param_is_missing("around"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([message])))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path_regex("/reactions/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(server)
+            .await;
+        Mock::given(wiremock::matchers::path_regex("/reactions/"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(server)
+            .await;
+    }
+
+    // Method, path and query of each request for message 7 or the reactions, in order.
+    async fn reaction_requests(server: &MockServer) -> Vec<String> {
+        let received = server.received_requests().await.unwrap();
+        received
+            .iter()
+            .filter(|request| {
+                let path = request.url.path();
+                path.contains("/reactions")
+                    || request.url.query().is_some_and(|q| q.contains("around"))
+            })
+            .map(|request| {
+                let query = request
+                    .url
+                    .query()
+                    .map(|q| format!("?{q}"))
+                    .unwrap_or_default();
+                format!("{} {}{query}", request.method, request.url.path())
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn react_unreact_and_reactors_reach_the_message_as_typed() {
+        let server = MockServer::start().await;
+        reacted(&server).await;
+        let commands = [
+            SessionCommand::React {
+                channel_id: GENERAL,
+                message_id: 7,
+                emoji: "👍".to_owned(),
+            },
+            SessionCommand::Unreact {
+                channel_id: GENERAL,
+                message_id: 7,
+                emoji: "wave:7".to_owned(),
+            },
+            SessionCommand::Reactors {
+                channel_id: GENERAL,
+                message_id: 7,
+                emoji: "wave:7".to_owned(),
+                burst: true,
+                after: Some(100_000_000_000_000_003),
+                limit: 2,
+            },
+        ];
+
+        for command in commands {
+            let client = online(&server).await;
+            let code = run(&client, &Arc::new(OneAccount), command).await;
+            assert!(succeeded(code));
+        }
+
+        let at = format!("/api/v9/channels/{GENERAL}/messages");
+        assert_eq!(
+            reaction_requests(&server).await,
+            [
+                format!("GET {at}?limit=1&around=7"),
+                format!("PUT {at}/7/reactions/%F0%9F%91%8D/@me?location=Message&type=0"),
+                format!("GET {at}?limit=1&around=7"),
+                format!("DELETE {at}/7/reactions/wave:7/0/@me?location=Message&burst=false"),
+                format!("GET {at}/7/reactions/wave:7?limit=2&after=100000000000000003&type=1"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn no_reactor_says_so() {
+        let (server, account) = loaded(vec![reply()]).await;
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path_regex("/reactions/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+        let emoji = crate::reactions::parse_emoji("wave:7").unwrap();
+
+        let page = account
+            .reactors(
+                Snowflake::new(GENERAL),
+                Snowflake::new(REPLY),
+                &emoji,
+                akari_core::ReactionKind::Normal,
+                None,
+                100,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(crate::reactions::reactor_lines(&page), ["(nobody)"]);
+        account.close();
     }
 
     #[test]

@@ -144,8 +144,12 @@ VoiceOver reads "Post {title}, {count} messages".
   ([read-states.md](../protocol/read-states.md#forums)). *Akari: reading the post anywhere
   sets its count to 0, so the next message says "(1 New)"; Discord's own count can keep its old
   number and drift up. With a message count of 0 Akari says "1+", Discord "0".*
-- *Akari:* no reactions on cards yet (backlog "Reactions on forum cards"), no typing faces, and
-  only attachments as a card's media (Discord also shows embeds' images).
+- **A reaction** before the count (after it on a gallery card): the first message's reaction
+  with the most users, or the forum's default reaction without a number while it has none and
+  the user may react; a click reacts or takes the reaction back
+  ([reactions.md](reactions.md#forum-posts)).
+- *Akari:* no typing faces, and only attachments as a card's media (Discord also shows embeds'
+  images).
 
 ### The NEW badge
 
@@ -236,8 +240,9 @@ with its own beginning and a bar under its first message *(code read)*:
   to share what you think!" (14). The box is a speech bubble: under its bottom edge a tail
   points down, 20 wide and 10 high, starting 100 from the box's left, in the box's color.
 - *Akari: the bar scrolls with the list; Discord's sticks to the list's top and then shows
-  "Jump to Top" (backlog). No reactions in the bar yet ("React to Post", the default reaction).
-  A symbol stands where Discord's box has its animation.*
+  "Jump to Top" (backlog). A symbol stands where Discord's box has its animation.*
+- **At the bar's left**: the first message's reactions, the forum's default reaction while it
+  has none, and "React to Post" ([reactions.md](reactions.md#forum-posts)).
 - Reading: the post beside the forum is read as a split thread is, the forum at "now" as before.
   *Akari never moves the forum's ack back to its newest post after a post was read, which
   Discord's code does about 3 s later (not observed on the wire).*

@@ -14,10 +14,18 @@ final class MessageHoverBar: NSView {
     static let headerOverhang: CGFloat = 16
     static let label = "Message Actions"
 
+    // After the quick reactions: Discord's 1 × 24 line with 4 on each side.
+    static let separatorWidth: CGFloat = 9
+
     private(set) var items: [MessageActionItem] = []
     private(set) var buttons: [HoverBarButton] = []
+    /// The emoji before the buttons, each a reaction in one click.
+    private(set) var quick: [QuickReaction] = []
+    private(set) var quickButtons: [QuickReactionButton] = []
+    let separator = NSView()
     /// A button's click, with the button.
     var onAction: (MessageAction, HoverBarButton) -> Void = { _, _ in }
+    var onQuick: (QuickReaction) -> Void = { _ in }
 
     /// The pointer is over the bar: the stronger border and shadow.
     var isPointerInside = false {
@@ -36,6 +44,10 @@ final class MessageHoverBar: NSView {
         layer?.masksToBounds = false
         layer?.zPosition = 1
         isHidden = true
+        separator.wantsLayer = true
+        separator.layer?.cornerRadius = 0.5
+        separator.isHidden = true
+        addSubview(separator)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(Self.label)
@@ -48,29 +60,52 @@ final class MessageHoverBar: NSView {
 
     override var isFlipped: Bool { true }
 
-    static func width(buttons: Int) -> CGFloat {
-        CGFloat(buttons) * HoverBarButton.size + 2 * padding
+    static func width(buttons: Int, quick: Int = 0) -> CGFloat {
+        CGFloat(buttons + quick) * HoverBarButton.size + (quick > 0 ? separatorWidth : 0)
+            + 2 * padding
     }
 
-    func show(_ items: [MessageActionItem]) {
-        guard items != self.items else {
+    /// The bar's width with what it shows now.
+    var fittingWidth: CGFloat {
+        Self.width(buttons: items.count, quick: quick.count)
+    }
+
+    func show(_ items: [MessageActionItem], quick: [QuickReaction] = []) {
+        guard items != self.items || quick != self.quick else {
             return
         }
         self.items = items
-        for button in buttons {
+        self.quick = quick
+        for button in buttons as [NSView] + quickButtons {
             button.removeFromSuperview()
         }
-        buttons = items.enumerated().map { index, item in
+        var x = Self.padding
+        quickButtons = quick.map { reaction in
+            let button = QuickReactionButton(reaction)
+            button.frame = NSRect(
+                x: x, y: Self.padding, width: HoverBarButton.size, height: HoverBarButton.size)
+            button.target = self
+            button.action = #selector(quickClicked(_:))
+            addSubview(button)
+            x += HoverBarButton.size
+            return button
+        }
+        separator.isHidden = quick.isEmpty
+        if !quick.isEmpty {
+            separator.frame = NSRect(x: x + 4, y: Self.padding + 2, width: 1, height: 24)
+            x += Self.separatorWidth
+        }
+        buttons = items.map { item in
             let button = HoverBarButton(item)
             button.frame = NSRect(
-                x: Self.padding + CGFloat(index) * HoverBarButton.size, y: Self.padding,
-                width: HoverBarButton.size, height: HoverBarButton.size)
+                x: x, y: Self.padding, width: HoverBarButton.size, height: HoverBarButton.size)
             button.target = self
             button.action = #selector(clicked(_:))
             addSubview(button)
+            x += HoverBarButton.size
             return button
         }
-        setAccessibilityChildren(buttons)
+        setAccessibilityChildren(quickButtons as [NSView] + buttons)
     }
 
     func button(_ action: MessageAction) -> HoverBarButton? {
@@ -79,6 +114,10 @@ final class MessageHoverBar: NSView {
 
     @objc private func clicked(_ sender: HoverBarButton) {
         onAction(sender.item.action, sender)
+    }
+
+    @objc private func quickClicked(_ sender: QuickReactionButton) {
+        onQuick(sender.reaction)
     }
 
     // A click beside the buttons stays the bar's: the row under it gets nothing.
@@ -105,6 +144,7 @@ final class MessageHoverBar: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             background = Palette.surfaceHigh.cgColor
             border = (isPointerInside ? Palette.borderSubtle : Palette.borderMuted).cgColor
+            separator.layer?.backgroundColor = Palette.borderSubtle.cgColor
         }
         // Discord's shadow-low and shadow-medium.
         let opacity: Float = isPointerInside ? (dark ? 0.16 : 0.08) : (dark ? 0.14 : 0.08)
@@ -223,5 +263,78 @@ final class HoverBarButton: NSButton {
             item.destructive
             ? Palette.textError
             : (isHovered && isEnabled) || isSelected ? Palette.interactiveTextActive : Palette.interactiveText
+    }
+}
+
+/// One quick reaction of the hover bar: the emoji in a button's box; the controller says when
+/// the pointer is over it.
+final class QuickReactionButton: NSButton {
+    static let emojiSide: CGFloat = 20
+
+    let reaction: QuickReaction
+    private let glyph = EmojiGlyphView()
+
+    var isHovered = false {
+        didSet {
+            if isHovered != oldValue {
+                updateColors()
+            }
+        }
+    }
+
+    private(set) var isPressed = false {
+        didSet { updateColors() }
+    }
+
+    init(_ reaction: QuickReaction) {
+        self.reaction = reaction
+        super.init(frame: .zero)
+        isBordered = false
+        title = ""
+        refusesFirstResponder = true
+        (cell as? NSButtonCell)?.highlightsBy = []
+        // The official client's two lines: the emoji's name over what a click does.
+        toolTip = "\(reaction.name)\n\(reaction.hint)"
+        setAccessibilityLabel(reaction.accessibilityLabel)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        glyph.emoji = reaction.emoji.name ?? ""
+        addSubview(glyph)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        glyph.frame = NSRect(
+            x: (bounds.width - Self.emojiSide) / 2, y: (bounds.height - Self.emojiSide) / 2,
+            width: Self.emojiSide, height: Self.emojiSide)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        super.mouseDown(with: event)
+        isPressed = false
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        let fill: NSColor? =
+            isPressed ? Palette.interactiveBackgroundActive : isHovered ? Palette.hoverBackground : nil
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = fill?.cgColor
+        }
     }
 }

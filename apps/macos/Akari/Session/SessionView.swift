@@ -1,6 +1,10 @@
 import AkariKit
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var refusalSound: @MainActor () -> Void = { NSSound.beep() }
+}
+
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
     var warning: AppModel.Warning?
@@ -10,6 +14,7 @@ struct SessionView<MessageArea: View>: View {
     @State var hover = ThreadsHover()
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
+    @Environment(\.refusalSound) private var refusalSound
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +52,24 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                if let reactors = session.reactors {
+                    let frame = ReactorsLayout.frame(in: proxy.size)
+                    ChildWindowsHost(
+                        content: AnyView(
+                            ReactorsPanel(
+                                reactors: reactors, size: frame.size, close: session.closeReactors
+                            )
+                            .imageEnvironment(session)),
+                        frame: frame, browser: true, dimmed: true, label: ReactionWords.window,
+                        onClose: session.closeReactors, refocus: session.refocusChannel
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .id(ObjectIdentifier(reactors))
+                }
+            }
+        }
         .overlayPreferenceValue(PeekRowBounds.self) { anchor in
             GeometryReader { proxy in
                 if let channel = hover.channel, let anchor, !session.peekedThreads.isEmpty {
@@ -80,6 +103,20 @@ struct SessionView<MessageArea: View>: View {
         } message: { failure in
             Text(failure.message)
         }
+        .alert(
+            session.messageConfirmation?.title ?? "",
+            isPresented: Binding(
+                get: { session.messageConfirmation != nil },
+                set: { if !$0 { session.answerMessageConfirmation(false) } }),
+            presenting: session.messageConfirmation
+        ) { question in
+            Button(question.confirm, role: .destructive) { session.answerMessageConfirmation(true) }
+            Button(question.cancel, role: .cancel) { session.answerMessageConfirmation(false) }
+        } message: { question in
+            Text(question.message)
+        }
+        // Akari's stand-in for the official client's shake when Discord refuses a reaction.
+        .onChange(of: session.refusedReactions) { refusalSound() }
     }
 
     private var threadMenu: ThreadMenu? {
