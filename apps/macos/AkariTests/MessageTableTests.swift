@@ -1292,11 +1292,16 @@ struct MessageTableTests {
             return groups + (copies.isEmpty ? [] : [copies])
         }
 
-        /// The rows the actions were asked to act on, as they were handed over.
+        /// The rows the actions were asked to act on, as they were handed over, and where.
         var performed: [MessageListModel.Row] = []
+        var surfaces: [MessageActionsModel.Surface] = []
 
-        func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
+        func perform(
+            _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+            from surface: MessageActionsModel.Surface
+        ) {
             performed.append(row)
+            surfaces.append(surface)
             let name = action == .createThread ? "create thread from" : "\(action)"
             calls.append("\(name) \(row.message.id.rawValue)\(shift ? " shift" : "")")
         }
@@ -1375,6 +1380,36 @@ struct MessageTableTests {
 
         func viewReactions(of row: MessageListModel.Row) {
             calls.append("view reactions of \(row.message.id.rawValue)")
+        }
+
+        var editing = ""
+        var left: Int?
+        var typed: [String] = []
+        var editorFocus: [Bool] = []
+
+        func editText() -> String {
+            editing
+        }
+
+        func editChanged(_ text: String) {
+            editing = text
+            typed.append(text)
+        }
+
+        func editRemaining() -> Int? {
+            left
+        }
+
+        func saveEdit() {
+            calls.append("save edit")
+        }
+
+        func cancelEdit() {
+            calls.append("cancel edit")
+        }
+
+        func editFocused(_ focused: Bool) {
+            editorFocus.append(focused)
         }
 
         var popouts: [ExpressionTarget] = []
@@ -1500,7 +1535,7 @@ struct MessageTableTests {
         let text = try #require(messageText(in: try cell(of: 1))).attributedString()
         #expect(text.string == "message 1 (edited)")
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
-        #expect((marker[.font] as? NSFont)?.pointSize == 12)
+        #expect((marker[.font] as? NSFont)?.pointSize == 10, "the official 10")
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
         let extras = shownTexts(in: try cell(of: 2)).filter { $0.contains("(edited)") }
         #expect(extras.count == 1, "a message without text shows the marker on its own")

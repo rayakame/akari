@@ -465,11 +465,12 @@ bar says "Some messages may be missing" instead.
 
 ## Edits and deletes
 
-- An edited message ends with "(edited)" right after its text, smaller (12) and in
-  `chatTextMuted`, like the timestamps. A message without text puts it after its last line,
-  and one that ends with a code block puts it on a line of its own.
-  The official client's mark has a tooltip with the edit time (**unverified**); Akari adds it
-  later.
+- An edited message ends with "(edited)" right after its text, at 10 in `chatTextMuted`. One
+  that ends with a code block puts it on a line of its own, and one without text puts it after
+  its attachments, embeds and stickers, before its reactions. Its tooltip is the edit's date and
+  time ([edit-delete.md](edit-delete.md#edited)).
+- The user's own edit shows dimmed until Discord takes it, and a message the user deletes is
+  dimmed until Discord answers ([edit-delete.md](edit-delete.md)).
 - An edit that makes a message taller or shorter doesn't move the text the user is reading.
 - A deleted message leaves the list without moving the text the user is reading, whether it
   was above, below or at the top of what's visible. At the bottom, the list stays at the

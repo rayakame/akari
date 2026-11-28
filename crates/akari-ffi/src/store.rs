@@ -97,6 +97,11 @@ impl Store {
             });
         Message {
             replied_to,
+            edit: self
+                .core
+                .message_edit(message.channel_id, message.id)
+                .map(Into::into),
+            deleting: self.core.deleting(message.channel_id, message.id),
             ..Message::new(
                 message,
                 formatted,
@@ -448,6 +453,12 @@ impl Store {
     /// Its `mark_unread` alone is the thread's, and `Account.mark_unread` takes the row's IDs.
     pub fn message_actions(&self, channel_id: ChannelId, message_id: MessageId) -> MessageActions {
         self.core.message_actions(channel_id, message_id).into()
+    }
+
+    /// The message Up arrow in an empty composer edits: the newest loaded one whose
+    /// `MessageActions.edit` is true, wherever the list is. `None` when there is none.
+    pub fn newest_editable_message(&self, channel_id: ChannelId) -> Option<MessageId> {
+        self.core.newest_editable_message(channel_id)
     }
 
     /// What Copy Message Link copies for a row: `https://discord.com/channels/{guild}/{channel}/

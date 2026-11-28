@@ -44,7 +44,9 @@ protocol MessageListActions: AnyObject {
     func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem]
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]]
     // A button's or an item's click, with Shift as it was then.
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool)
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface)
     // An Option-click on a message.
     func markUnread(from row: MessageListModel.Row)
     // The emoji before the bar's buttons.
@@ -85,6 +87,13 @@ protocol MessageListActions: AnyObject {
     // The post's bar: Follow or Following.
     func followPost(_ follows: Bool)
     func copyPostLink()
+    // The inline editor: the text an edit opens with, each change, the counter, Return and Escape.
+    func editText() -> String
+    func editChanged(_ text: String)
+    func editRemaining() -> Int?
+    func saveEdit()
+    func cancelEdit()
+    func editFocused(_ focused: Bool)
 }
 
 extension MessageListActions {
@@ -93,7 +102,10 @@ extension MessageListActions {
     func lastShownJump() -> Int { .max }
     func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] { [] }
     func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] { [] }
-    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}
+    func perform(
+        _ action: MessageAction, on row: MessageListModel.Row, shift: Bool,
+        from surface: MessageActionsModel.Surface
+    ) {}
     func markUnread(from row: MessageListModel.Row) {}
     func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] { [] }
     func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] { [] }
@@ -121,4 +133,10 @@ extension MessageListActions {
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws {}
     func followPost(_ follows: Bool) {}
     func copyPostLink() {}
+    func editText() -> String { "" }
+    func editChanged(_ text: String) {}
+    func editRemaining() -> Int? { nil }
+    func saveEdit() {}
+    func cancelEdit() {}
+    func editFocused(_ focused: Bool) {}
 }

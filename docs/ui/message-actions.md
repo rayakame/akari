@@ -54,6 +54,7 @@ offers nothing: the client gives it no bar and no menu. For every other message:
 | `mention_toggle` | `reply`, not the user's own message, not a private channel: the reply bar has the "@" switch. Webhooks and bots are no exception |
 | `edit` | not the system DM; the user's own; a user message other than type 68; not a sticker alone (a sticker with text is edited); not a voice message; not a forward; writable; Send Messages, which in a locked thread only a moderator has. A message of attachments or embeds alone is edited |
 | `delete` | the user's own, or Manage Messages; writable; not an undeletable type; an AutoMod action (24) only with Manage Messages. A locked thread that is still active doesn't stop it |
+| `edit`, `delete` while deleting | *Akari:* neither, while the user's delete of the message waits for Discord's answer (`Store::deleting`) |
 | `pin` / `unpin` | not the system DM; a user message; Pin Messages (bit 51) and Read Message History, both a private channel's; writable; not a voice or stage channel's chat; not a media channel's post. `pin` for a message that isn't pinned, `unpin` for one that is; never both. Manage Messages no longer pins |
 | `react` | a new emoji on the message: not the system DM; Add Reactions and Read Message History; writable; not a media channel's post. System messages take reactions like any other |
 | `toggle_reaction` | joining or leaving an emoji already on the message: not the system DM; Read Message History; writable; not a media channel's post; not silenced. Add Reactions isn't asked: "Members can still react using reactions already added to messages without this permission." |
@@ -123,7 +124,7 @@ official client's Reply does on this row wasn't read.*
 
 Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
 gives the channel and ID of the message a row shows: the original's for such a starter row,
-the row's own for every other; a reaction, a pin or a delete from the row goes there, and Copy
+the row's own for every other; a reaction, a pin, an edit or a delete from the row goes there, and Copy
 Message Link names them. Mark Unread alone takes the row's own:
 `Account::mark_unread(thread, row)`. While the row's message isn't resolved (loading, gone or
 failed), Copy Message Link names the row itself, in the thread: `Store::message_link` falls
@@ -192,7 +193,7 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 | 1 | up to 3 quick reactions, then a separator | `react` | yes: the user's most used, then 💯, 😆 and 💖 ([reactions.md](reactions.md#quick-reactions)) |
 | 2 | Add Reaction | `react` | yes: opens the emoji picker left of the bar ([emoji-picker.md](emoji-picker.md)) |
 | 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
-| 4 | Edit | `edit` | with editing |
+| 4 | Edit | `edit` | yes: opens the editor in the row ([edit-delete.md](edit-delete.md)) |
 | 5 | Forward | | left out |
 | 6 | Create Thread | `create_thread` | yes |
 | 7 | View Thread | `view_thread` | yes |
@@ -211,7 +212,7 @@ With **Shift held**, the bar changes at once, the pointer still, and back when S
 | 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
 | 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | yes |
 | 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
-| 9 | Delete | `delete`; no question asked | with deleting |
+| 9 | Delete | `delete`; no question asked | yes: deletes at once; with Shift let go at the click it asks first ([edit-delete.md](edit-delete.md#deleting)) |
 | 10 | More | only where Delete isn't | yes |
 
 The Shift key counts as it is at the click: a click on a button of the longer bar, and on a
@@ -225,7 +226,8 @@ menu item, reads it then.
   action on there and its button and menu item appear in their places.*
 - *The official client's letter keys on a message with keyboard focus (E, R, P, Backspace, +, F,
   T, Alt+Enter) are left out: Akari's rows take no keyboard focus yet. The bar's actions are
-  not VoiceOver custom actions of the row either; the rows have none.*
+  not VoiceOver custom actions of the row either; the rows have none. Up arrow in an empty
+  composer edits ([edit-delete.md](edit-delete.md#starting-an-edit)).*
 
 ## The message menu
 
@@ -237,9 +239,9 @@ client's order, with what Akari has in bold:
 | Group | Items |
 |---|---|
 | Reactions | **Add Reaction** (its submenu: up to twelve emoji, then "View More", the picker), **View Reactions** (a message with reactions) |
-| Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
+| Writing | **Edit Message**, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
-| Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red; today a failed send's only) |
+| Removing | **Remove Reactions**, **Remove All Reactions** (red, for those who may remove reactions, on a message with some; [reactions.md](reactions.md#removing-reactions)), **Delete Message** (red: asks first, with the Shift tip, unless Shift is held; a failed send goes at once; [edit-delete.md](edit-delete.md#deleting)) |
 | Developer | Copy Message ID (developer mode) |
 
 *Akari:*

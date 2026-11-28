@@ -330,16 +330,16 @@ async fn a_refusal_is_not_asked_again() {
 
 const EMPTY_LIST: &[u8] =
     b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]";
-const BAD_GATEWAY: &[u8] =
+pub(super) const BAD_GATEWAY: &[u8] =
     b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 
 // Hangs up on the first `failures` connections, then answers an empty list.
-async fn flaky(failures: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+pub(super) async fn flaky(failures: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
     flaky_then(failures, EMPTY_LIST).await
 }
 
 // Hangs up on the first `failures` connections, then answers `answer`.
-async fn flaky_then(
+pub(super) async fn flaky_then(
     failures: usize,
     answer: &'static [u8],
 ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
@@ -365,7 +365,7 @@ async fn flaky_then(
     (format!("http://{address}/api/v9/"), asked)
 }
 
-fn rest_at(api: String) -> AccountRest {
+pub(super) fn rest_at(api: String) -> AccountRest {
     rest_waiting(api, Duration::from_millis(10))
 }
 

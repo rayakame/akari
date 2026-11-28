@@ -6,11 +6,12 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{
-    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, OwnChange, PageKey, ReactionAsk,
-    ReadyDiff, State, Unread, UnreadNeeds, Wanted,
+    DeleteStart, Derived, EditAsk, Entities, ForumUnreadsAsk, Learned, OlderPage, OwnChange,
+    PageKey, ReactionAsk, ReadyDiff, State, Unread, UnreadNeeds, Wanted, WantedEdit,
 };
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
+use super::edits::{EditError, EditOutcome, MessageEdit};
 use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
@@ -785,6 +786,58 @@ impl Store {
     ) {
         self.write("reaction", |inner, events| {
             inner.state.settle_reaction(channel, message, emoji, events);
+        });
+    }
+
+    // `None` when the message's actions don't offer it, or for blank text on its own.
+    pub(crate) fn want_edit(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+        content: &str,
+    ) -> Option<WantedEdit> {
+        let now = self.now_millis();
+        self.write("edit", |inner, events| {
+            inner.state.want_edit(channel, row, content, now, events)
+        })
+    }
+
+    pub(crate) fn ask_edit(&self, channel: ChannelId, message: MessageId) -> Option<EditAsk> {
+        self.write("edit", |inner, events| {
+            inner.state.ask_edit(channel, message, events)
+        })
+    }
+
+    pub(crate) fn edit_answered(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        outcome: Result<Option<model::Message>, EditError>,
+    ) -> EditOutcome {
+        self.write("edit", |inner, events| {
+            inner.state.edit_answered(channel, message, outcome, events)
+        })
+    }
+
+    pub(crate) fn dismiss_edit(&self, channel: ChannelId, message: MessageId) {
+        self.write("edit", |inner, events| {
+            inner.state.dismiss_edit(channel, message, events);
+        });
+    }
+
+    // `None` when the message's actions don't offer it.
+    pub(crate) fn begin_delete(&self, channel: ChannelId, row: MessageId) -> Option<DeleteStart> {
+        let now = self.now_millis();
+        self.write("delete", |inner, events| {
+            inner.state.begin_delete(channel, row, now, events)
+        })
+    }
+
+    pub(crate) fn delete_answered(&self, channel: ChannelId, message: MessageId, deleted: bool) {
+        self.write("delete", |inner, events| {
+            inner
+                .state
+                .delete_answered(channel, message, deleted, events);
         });
     }
 
@@ -1603,6 +1656,29 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    /// The user's own edit of the message while Discord hasn't taken it: `Pending` while every
+    /// copy shows the saved text and Discord hasn't confirmed it, `Failed` after a refusal (the
+    /// message shows Discord's text again) until the next save,
+    /// [`Account::dismiss_edit`](crate::Account::dismiss_edit) or the message's deletion. By the
+    /// message's own IDs. A change comes as `MessageUpdated` for its row.
+    pub fn message_edit(&self, channel: ChannelId, message: MessageId) -> Option<MessageEdit> {
+        self.read(|inner| inner.state.message_edit(channel, message))
+    }
+
+    /// Whether the user's delete of the message waits for Discord's answer: the row dims. By
+    /// the message's own IDs. A change comes as `MessageUpdated` for its row, or
+    /// `MessageDeleted`.
+    pub fn deleting(&self, channel: ChannelId, message: MessageId) -> bool {
+        self.read(|inner| inner.state.deleting(channel, message))
+    }
+
+    /// The message Up arrow in an empty composer edits: the newest loaded one (not pending or
+    /// failed) whose [`MessageActions::edit`] is true, wherever the window is.
+    pub fn newest_editable_message(&self, channel: ChannelId) -> Option<MessageId> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.newest_editable_message(channel, now))
     }
 
     /// The message's reactions, in Discord's order, new emoji at the end; empty when it has

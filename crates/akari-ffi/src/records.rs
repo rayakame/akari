@@ -8,7 +8,7 @@ use akari_core::model::{
 use akari_core::state;
 
 use crate::embeds::{Embed, RichText};
-use crate::errors::GatewayError;
+use crate::errors::{EditError, GatewayError};
 use crate::formatted::FormattedText;
 use crate::images::ImageKey;
 
@@ -665,6 +665,37 @@ pub struct Message {
     /// kind.
     #[uniffi(default = None)]
     pub replied_to: Option<RepliedTo>,
+    /// The user's own edit while Discord hasn't taken it: `content` and `formatted` are the
+    /// saved text while it is `Pending`, Discord's again once it `Failed`.
+    #[uniffi(default = None)]
+    pub edit: Option<MessageEdit>,
+    /// The user's delete waits for Discord's answer: dim the row.
+    #[uniffi(default = false)]
+    pub deleting: bool,
+}
+
+/// The user's own edit of a message while Discord hasn't taken it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum MessageEdit {
+    /// Every place shows the saved text, which Discord hasn't confirmed yet: dim it like a
+    /// message being sent.
+    Pending,
+    /// Discord refused it and the message shows its text as Discord has it. `content` is the
+    /// text the user saved, to open the editor with again (and `Account::dismiss_edit` once
+    /// taken) along with what `error` says.
+    Failed { content: String, error: EditError },
+}
+
+impl From<state::MessageEdit> for MessageEdit {
+    fn from(edit: state::MessageEdit) -> Self {
+        match edit {
+            state::MessageEdit::Failed { content, error } => Self::Failed {
+                content: content.into(),
+                error: error.into(),
+            },
+            _ => Self::Pending,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -1027,6 +1058,8 @@ impl Message {
                 .and_then(|embed| embed.title.as_deref())
                 .map(str::to_owned),
             replied_to: None,
+            edit: None,
+            deleting: false,
         }
     }
 }

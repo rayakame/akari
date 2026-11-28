@@ -202,6 +202,8 @@ public final class MessageListModel {
     public let composer: ComposerModel
     /// What a click on a reaction does, and the names in a pill's tooltip.
     public let reactions: ReactionsModel
+    /// The user's edit of one of their messages here, in its row's place.
+    public let editor: EditModel
     /// The message the pending reply answers: its row is tinted meanwhile.
     public var replyingTo: MessageId? { composer.reply?.messageId }
     /// The last finished load; changes with the rows it brought.
@@ -330,6 +332,7 @@ public final class MessageListModel {
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
         reactions = ReactionsModel(store: store, account: account)
+        editor = EditModel(channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
         readOwner()
         readHiddenDownloads()
@@ -340,6 +343,13 @@ public final class MessageListModel {
         composer.onSend = { [weak self] in
             self?.endNewMessagesLine()
         }
+        editor.row = { [weak self] message in
+            self?.rows.first { $0.message.id == message }
+        }
+        editor.rows = { [weak self] in self?.rows ?? [] }
+        editor.lost = { [weak self] message in self?.lost(message) ?? false }
+        editor.ended = { [weak composer] in composer?.requestFocus() }
+        editor.opened()
         composer.onRefusalChanged = { [weak self] pending in
             self?.reread([pending])
         }
@@ -382,10 +392,14 @@ public final class MessageListModel {
         await load(.latest)
     }
 
-    /// Escape: cancels a pending reply and does nothing else; without one it marks the channel
-    /// read, ends the new messages line, and loads the present when the list shows older
-    /// messages. Scrolling to the bottom is the view's part.
+    /// Escape: ends an open edit, else cancels a pending reply, and does nothing else; without
+    /// either it marks the channel read, ends the new messages line, and loads the present when
+    /// the list shows older messages. Scrolling to the bottom is the view's part.
     public func escape() async {
+        if editor.editing != nil {
+            editor.cancel()
+            return
+        }
         if composer.reply != nil {
             composer.cancelReply()
             return
@@ -396,6 +410,28 @@ public final class MessageListModel {
         if !atPresent || store.window(channelId: channelId)?.latest == false {
             await load(.latest)
         }
+    }
+
+    // Deleted, also where nothing said so: a window evicted meanwhile, a delete while offline.
+    private func lost(_ message: MessageId) -> Bool {
+        let sent = rows.filter { $0.message.delivery == .sent }
+        guard let first = sent.first?.message.id, let last = sent.last?.message.id else {
+            return false
+        }
+        return (reachedOldest || first <= message) && (atPresent || message <= last)
+            && !rows.contains { $0.message.id == message }
+    }
+
+    /// Up arrow in an empty composer: edits the newest loaded message the user may edit, wherever
+    /// the list is; `false` when there is none.
+    @discardableResult public func editNewest() -> Bool {
+        guard let newest = store.newestEditableMessage(channelId: channelId),
+            let row = rows.first(where: { $0.message.id == newest })
+        else {
+            return false
+        }
+        editor.start(row)
+        return editor.editing?.messageId == newest
     }
 
     /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
@@ -742,6 +778,7 @@ public final class MessageListModel {
             fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
+        editor.apply(batch)
         if let target = composer.reply?.messageId,
             everyRow || updated.contains(target)
                 || batch.replyTargetsChanged[channelId]?.contains(target) == true

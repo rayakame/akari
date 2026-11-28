@@ -284,6 +284,15 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.starterMessage(threadId)) { $0.starters[threadId] }
     }
 
+    // As the core: the newest message of the window the user may edit.
+    override func newestEditableMessage(channelId: ChannelId) -> MessageId? {
+        read(.newestEditableMessage(channelId)) { state in
+            state.windows[channelId]?.messageIds.last { message in
+                state.messageActions[MessageKey(channelId, message)]?.edit == true
+            }
+        }
+    }
+
     override func messageLengthLimit() -> UInt32 {
         read(.messageLengthLimit) { $0.lengthLimit }
     }

@@ -399,6 +399,121 @@ for unknown channels.
 
 None of them carries the token or message content.
 
+## Editing and deleting
+
+`Account::edit_message(channel, message, content)` and `Account::delete_message(channel,
+message)` (`crates/akari-core/src/account/edits.rs`; the store's side in `state/edits.rs` and
+`state/apply/edits.rs`). The references are
+[Edit Message](https://docs.discord.food/resources/message#edit-message) and
+[Delete Message](https://docs.discord.food/resources/message#delete-message).
+
+**Everything here that shapes a request or reads an answer is from the code read of canary
+671549, not observed** (modules 138399, 870801, 620632 and 753738): the bodies, the retries and
+the error codes. No edit or delete of the official client was looked at in a network tab.
+Answers are read leniently: an edit's 2xx whose body isn't a message still counts as taken.
+
+### The requests
+
+- **Edit:** `PATCH /channels/{channel}/messages/{message}` with `{"content":"…"}` alone. A
+  reply sent without the ping keeps it off: when the message is a REPLY (19) whose target is
+  loaded and whose `mentions` don't name the target's author (the official client's rule), the
+  body is `{"content":"…","allowed_mentions":{"parse":["users","roles","everyone"],"replied_user":false}}`.
+  No `flags`, `attachments`, `embeds` or nonce. The answer is the edited message.
+- **Delete:** `DELETE /channels/{channel}/messages/{message}`, no body and no query; 204.
+- **Which message:** the one the row shows. A viewed thread's starter row edits and deletes the
+  parent channel's message, as `Store::shown_message` names it.
+- **An archived thread** is opened first (`PATCH /channels/{thread}` with
+  `{"archived":false}`), as before a reaction.
+- **Retries:** both may be repeated, so they follow the rule for such calls
+  ([rate-limits.md](rate-limits.md)): a 429 waited out once, a 502, a 504 or a broken connection
+  asked once more. *Akari:* the official client never retries a delete.
+- **Lanes:** one route key per method and channel, so a channel's edits go out one after another
+  (as in the official client's queue) and its deletes beside them.
+
+### Before asking
+
+- Without `MessageActions::edit` (`delete`), `InvalidRequest` and no request.
+- An edit longer than `Store::message_length_limit()` is `TooLong`, as a send. Blank text on a
+  message without attachments or stickers is `InvalidRequest`: the official client asks to
+  delete the message instead. With attachments or stickers `"content":""` is sent.
+- Text the message shows already sends nothing and answers `Ok` (the official client compares
+  too).
+- Deleting a failed send discards it without a request, as the official client's local delete.
+
+### An edit on its way
+
+*Akari* (D162): the official client closes the editor at once and shows the old text until
+MESSAGE_UPDATE comes; on every error but AutoMod it shows nothing and the typed text is lost.
+Akari shows the saved text at once and keeps it when Discord refuses.
+
+- **At once** every copy of the message takes the saved text: the row, a held message, a
+  thread box's newest message, a forum card, a viewed thread's starter and a reply's line
+  ([dispatches.md](dispatches.md#message-windows)). `Store::message_edit` is `Pending`, and
+  the row's `MessageUpdated` says so.
+- **One request at a time per message, the latest save wins.** A save while one runs replaces
+  it; the earlier call answers `Ok`. When an answer comes, the newest save is asked for if
+  Discord doesn't have it yet; a save back to the text Discord has before anything was asked
+  ends the edit without a request.
+- **The answer or the gateway, whichever comes first**, ends `Pending`: a MESSAGE_UPDATE whose
+  text is the saved one, or Discord's 2xx. The answer is put on the copies when it is at least
+  as new (by `edited_timestamp`) as what the gateway said: its text, edit time and mentions.
+  Embeds and attachments are left to the gateway, which may have changed them since.
+- **Meanwhile the copies keep the saved text**: a MESSAGE_UPDATE's text is noted as Discord's,
+  so the echo of an earlier save or another device's edit never flickers through. At the end
+  the copies show the newer of the answer and the gateway's text, so another device's later
+  edit wins.
+- **A failure after the gateway showed the saved text** counts as done: Discord has it, the
+  answer was lost.
+- **A refusal** puts Discord's text back on every copy, and `Store::message_edit` is
+  `Failed { content, error }` with the text the user saved, until the message is saved again,
+  `Account::dismiss_edit` or its deletion. A new session keeps it; past 16 refused edits the
+  oldest other one goes, and its row is told (`MessageUpdated`). A save after a refusal is
+  asked for unless Discord has that text by what it last said (the gateway may have brought
+  another device's edit since).
+- **A page** that loads while the saved text still shows has it too, in its rows and in the
+  replies' lines it brings: the page may have been read before Discord took the save.
+- **The disk cache** writes a message with an unconfirmed save with Discord's text, in its row
+  and in the reply lines that show it.
+
+| Answer | Official client | `EditError` |
+|---|---|---|
+| 400, code 200000, 200001 or 200002 (AutoMod) | the old text with "(reverted)" and a notice with Discord's message | `MessageBlocked { reason }`, Discord's message |
+| 429, code 20022 | alert "You are being rate limited." / "To keep announcements speedy, published messages can only be edited 3 times per hour. Please try again in {minutes} minute(s)." | `TooManyEdits { retry_after }`, at once |
+| 403 (50005 someone else's, 50001, 50013, any other) | nothing shown | `Forbidden` |
+| 10008 | nothing shown | `Deleted` |
+| 429 | waits `Retry-After` and asks again | `RateLimited { retry_after }` after the one retry |
+| 400, 50035 with `BASE_TYPE_MAX_LENGTH` on `content` | (refused before asking) | `Request(TooLong { limit })` |
+| anything else | nothing shown | `Request(RequestError)` |
+
+20022 holds back no other request: Discord's alert speaks of published messages being edited
+three times an hour, so the limit is taken to be per message, and neither the route key nor its
+bucket is held for the hour, whatever the answer's rate limit headers say (not observed).
+
+### A delete on its way
+
+- `Store::deleting` is true at once: the row dims (`MessageUpdated`), and its actions offer
+  neither Edit nor Delete meanwhile.
+- **204, or 10008** (gone already): the message leaves every copy at once, as for the gateway's
+  MESSAGE_DELETE: the row (`MessageDeleted`), a thread box's newest message, a forum card,
+  a reply's line (`Deleted`) and a viewed thread's starter (`Unavailable`). Its edit is
+  forgotten. The thread box's count waits for the gateway's MESSAGE_DELETE, which comes with
+  the answer or before it, so the delete is counted once; the rest of that echo finds nothing.
+- **Any other answer** clears `deleting` (`MessageUpdated`) and is returned as a
+  `RequestError`. *Akari:* the official client shows nothing and the row stays.
+- A delete whose future is dropped before the answer (a cancelled task) leaves the row as it was.
+
+### Up arrow
+
+`Store::newest_editable_message(channel)` is the message Up arrow in an empty composer edits:
+the newest loaded one (pending and failed sends aren't loaded messages) whose
+`MessageActions::edit` is true, wherever the window is, as the official client's
+`getLastEditableMessage`.
+
+### akari-cli
+
+`akari-cli edit <channel> <message> <text…>` and `akari-cli delete <channel> <message>` load the
+message, then edit or delete it.
+
 ## Live messages
 
 MESSAGE_CREATE, MESSAGE_UPDATE and MESSAGE_DELETE change only windows; see

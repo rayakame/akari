@@ -445,6 +445,39 @@ the tooltip's three names drops them on `MessageReactionsChanged` for that messa
 nickname isn't in the answer; names are found as for a message's author
 ([reactions.md](../../docs/protocol/reactions.md)).
 
+## Editing and deleting
+
+`edit_message(channel_id, message_id, content)` saves the new text of the message a row shows
+(a thread's starter row edits the parent's message) and `delete_message(channel_id,
+message_id)` deletes it. Offer them by `MessageActions.edit` and `.delete`; without, they refuse
+before anything changes (`InvalidRequest`).
+
+An edit shows at once. Every place that shows the message (its row, a thread's box, a forum
+card, a reply's line, a starter row) has the saved text with `MessageUpdated` (and the events
+those places already have), and `Message.edit` is `Pending`: dim the text as for a message
+being sent. Discord's answer or the gateway's echo, whichever comes first, makes it `nil`
+(`MessageUpdated`). A refusal puts Discord's text back and leaves `Message.edit` `Failed {
+content, error }`: `content` is what the user saved, for the editor to open with again and say
+what `error` says (D162); the call throws the same `EditError`. It stays until the next
+`edit_message` of that message, `dismiss_edit(channel_id, message_id)` or the message's
+deletion. One request runs per message: a save while one runs replaces it and the earlier call
+returns without an error. Text the message shows already sends nothing. Blank text on a
+message without attachments or stickers is refused (`InvalidRequest`): ask to delete instead.
+Text past `message_length_limit` is `Request { TooLong }`. `EditError` tells apart
+`MessageBlocked { reason }` (AutoMod; `reason` is Discord's message), `TooManyEdits {
+retry_after }` (a published announcement, three edits an hour), `Forbidden`, `Deleted`,
+`RateLimited { retry_after }` and `Request { error }`.
+
+A delete of a failed send drops it at once (`MessageDeleted`), with no request. Any other sets
+`Message.deleting` (`MessageUpdated`; dim the row) until Discord answers: then the message goes
+everywhere (`MessageDeleted`, the box's and card's events, the reply lines' `ReplyTargetChanged`),
+or a refusal clears `deleting` and throws a `RequestError`. While it is deleting,
+`MessageActions` offers neither Edit nor Delete for it.
+
+`Store.newest_editable_message(channel_id)` is the message Up arrow in an empty composer edits:
+the newest loaded one that `MessageActions.edit` allows, wherever the list is
+([messages.md](../../docs/protocol/messages.md#editing-and-deleting)).
+
 ## The emoji picker
 
 What the picker shows is the core's ([emoji-picker.md](../../docs/protocol/emoji-picker.md));

@@ -97,8 +97,11 @@ enum Palette {
     static let inputBackground = token(
         "inputBackground", dark: "#000000", light: "#000000", alpha: (0.12, 0.02))
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")
+    static let dangerHover = token("dangerHover", dark: "#da373c", light: "#a12829")
     static let brand = NSColor(hex: "#5865f2")
     static let composer = token("composer", dark: "#222327", light: "#ffffff")
+    static let previewRing = token("previewRing", dark: "#1e1f22", light: "#c9cace", alpha: (0.6, 0.3))
+    static let previewShadow = token("previewShadow", dark: "#000000", light: "#000000", alpha: (0.2, 0.08))
     static let mentionText = token("mentionText", dark: "#c9cdfb", light: "#4752c4")
     static let mentionBackground = token(
         "mentionBackground", dark: "#5865f2", light: "#5865f2", alpha: (0.30, 0.15))

@@ -231,7 +231,7 @@ impl Shared {
         ask: ReactionAsk,
         location: ReactionLocation,
     ) -> Result<(), RequestError> {
-        self.unarchive_for_reaction(channel).await?;
+        self.open_archived(channel).await?;
         if ask.add {
             self.rest
                 .add_reaction(channel, message, emoji, location.query())
@@ -241,19 +241,6 @@ impl Shared {
                 .remove_reaction(channel, message, emoji, ask.burst, None, location.query())
                 .await
         }
-    }
-
-    // The official client opens an archived thread before every reaction request.
-    async fn unarchive_for_reaction(&self, channel: ChannelId) -> Result<(), RequestError> {
-        let archived = self
-            .store
-            .channel(channel)
-            .and_then(|channel| channel.thread.as_deref().map(|thread| thread.archived))
-            .unwrap_or(false);
-        if archived {
-            self.rest.unarchive_thread(channel).await?;
-        }
-        Ok(())
     }
 }
 
@@ -316,7 +303,7 @@ impl Shared {
             .ok_or(RequestError::InvalidRequest)?;
         let emoji = emoji.map(|emoji| self.store.reaction_emoji(channel, row, emoji));
         let removed = async {
-            self.unarchive_for_reaction(shown).await?;
+            self.open_archived(shown).await?;
             match (&emoji, whose) {
                 (Some(emoji), Some((user, kind))) => {
                     self.rest

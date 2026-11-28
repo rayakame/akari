@@ -135,7 +135,7 @@ public final class ComposerModel {
             }
         }
     }
-    /// Counts the times the composer should take the focus: a reply was started.
+    /// Counts the times the composer should take the focus: a reply was started, an edit ended.
     public private(set) var focusRequests = 0
 
     private static let counterFrom = 200
@@ -261,6 +261,10 @@ public final class ComposerModel {
         if problem == .replyTargetGone {
             problem = nil
         }
+        focusRequests += 1
+    }
+
+    func requestFocus() {
         focusRequests += 1
     }
 

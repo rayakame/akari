@@ -65,7 +65,10 @@ required tag) and creates posts with the forum's slowmode, the user's own post r
 it keeps each message's reactions, counted live by the reaction dispatches on every copy of the
 message, with an event and a read of their own, adds and takes back the user's own (shown at
 once, one request per message and emoji for the latest wish, a refusal undone, Discord's refusals
-told apart), removes others' for moderators and lists who reacted, page by page; the emoji
+told apart), removes others' for moderators and lists who reacted, page by page; it edits and
+deletes the user's messages (the saved text on every copy at once, pending until Discord takes it,
+Discord's text back with the saved one kept and the reason on a refusal; a delete dimmed until
+Discord answers, then gone from every copy) and picks the message Up arrow edits; the emoji
 picker's data (Unicode's emoji from the `emojis` crate with the short names Discord's users type,
 up to what the host's font draws, the user's servers' emoji and whether and why not they may be
 used in a channel, the user's own count of recently used reactions in the cache, the three quick
@@ -93,8 +96,8 @@ under its one image, and the same covers, a spoilered link covering them all), a
 channel waits behind the age gate, with the user's agreement per server in the cache, and whether
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
-answers a message) and tail messages with their reactions and what a reply answers, react, take a
-reaction back and list who reacted, list what the emoji picker offers in a channel or search it, show where a channel's unread state,
+answers a message) and tail messages with their reactions and what a reply answers, edit and
+delete a message, react, take a reaction back and list who reacted, list what the emoji picker offers in a channel or search it, show where a channel's unread state,
 mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
@@ -102,15 +105,18 @@ emoji span's key, the display settings, attachments with their kind, size, place
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), a message's reactions, reacting, a moderator's removals and who reacted,
+message's thumbnail), editing and deleting a message (its edit and its dimmed delete on the
+record, Up arrow's pick), a message's reactions, reacting, a moderator's removals and who reacted,
 the emoji picker's reads, what a reply answers (its preview on one line, formatted), sending a
 reply, the pins dot, what the user may do with a message and marking unread from one, through
 UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, the composer with its pending reply
 (one per channel, the ping's switch, ended by the send, ✕, Escape and the answered message's
-deletion), what the line over a reply shows and the jump to the message it answers with the way
-back, the media viewer, the
+deletion), the edit of a message in its row (one per channel, kept with its text, Up arrow's
+pick, nothing sent unchanged, an emptied one asking to delete, a refusal opened again with the
+saved text and why) and the delete question, what the line over a reply shows and the jump to
+the message it answers with the way back, the media viewer, the
 forum page and its form for a new post, and what a message's hover bar and menu list: the
 official client's order for the plain and the Shift-held bar and the menu's groups as values,
 later features' places included, with Mark Unread moving the new messages line; a message's
@@ -173,6 +179,11 @@ switch, ✕), the answered row tinted and Escape cancelling it before anything i
 reply has the line about the message it answers over its header (the small avatar and the name,
 the text on one line, the official client's words for a deleted or not loaded one, the spine),
 whose click jumps to that message, and the bar over the list's bottom leads back to the reply;
+Edit in the bar and the menu and Up arrow in an empty composer open the editor in the text's
+place (the composer's box, Return saves, Escape cancels, the counter, the hint line's links, the
+row following its height with the reader's place kept), a saved edit and a delete are dimmed
+until Discord answers, "(edited)" has the edit's date as its tooltip, and Delete (the Shift-held
+bar, the menu) asks the official question with the message in its box unless Shift is held;
 the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and

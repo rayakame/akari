@@ -42,9 +42,12 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `reactionBorderActive` | a pressed reaction's border | `#97979f` at 44% | `#97979f` at 52% |
 | `selectedBackground` | the selected row | `#97979f` at 20% | `#97979f` at 24% |
 | `inputBackground` | text fields | `#000000` at 12% | `#000000` at 2% |
-| `danger` | error messages, e.g. above the login button | `#f23f43` | `#da373c` |
+| `danger` | error messages, e.g. above the login button; the delete question's Delete | `#f23f43` | `#da373c` |
+| `dangerHover` | Delete under the pointer | `#da373c` | `#a12829` |
 | `brand` | Home when selected, a hovered or selected server, primary buttons | `#5865f2` | `#5865f2` |
-| `composer` | the composer card | `#222327` | `#ffffff` |
+| `composer` | the composer card, a message's editor | `#222327` | `#ffffff` |
+| `previewRing` | the ring around a message in a confirmation's box | `#1e1f22` at 60% | `#c9cace` at 30% |
+| `previewShadow` | that box's shadow, 2 down, blurred 10 | `#000000` at 20% | `#000000` at 8% |
 | `mentionText` | a mention's name | `#c9cdfb` | `#4752c4` |
 | `mentionBackground` | a mention's pill | `#5865f2` at 30% | `#5865f2` at 15% |
 | `mentionedBackground` | a message that mentions you | `#f8a300` at 8% | `#f8a300` at 10% |

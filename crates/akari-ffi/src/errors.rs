@@ -373,6 +373,51 @@ impl From<akari_core::ReactionError> for ReactionError {
     }
 }
 
+/// Why Discord didn't take an edit.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum EditError {
+    /// AutoMod refused the new text; `reason` is Discord's message.
+    #[error("AutoMod refused the message")]
+    MessageBlocked { reason: String },
+    /// A published announcement may be edited three times an hour: try again after
+    /// `retry_after`.
+    #[error("the message was edited as often as Discord allows for now")]
+    TooManyEdits { retry_after: Option<Duration> },
+    /// Discord refused for a missing permission or access, or for someone else's message.
+    #[error("editing this message isn't allowed")]
+    Forbidden,
+    /// The message was deleted.
+    #[error("the message was deleted")]
+    Deleted,
+    /// Still rate limited after the one retry.
+    #[error("rate limited by Discord")]
+    RateLimited { retry_after: Option<Duration> },
+    /// Anything else, also a refusal before asking (`InvalidRequest`, `TooLong`).
+    #[error("{error}")]
+    Request { error: RequestError },
+}
+
+impl From<akari_core::EditError> for EditError {
+    fn from(err: akari_core::EditError) -> Self {
+        use akari_core::EditError as E;
+
+        match err {
+            E::MessageBlocked { reason } => Self::MessageBlocked { reason },
+            E::TooManyEdits { retry_after } => Self::TooManyEdits { retry_after },
+            E::Forbidden => Self::Forbidden,
+            E::Deleted => Self::Deleted,
+            E::RateLimited { retry_after } => Self::RateLimited { retry_after },
+            E::Request(error) => Self::Request {
+                error: error.into(),
+            },
+            _ => Self::Request {
+                error: RequestError::UnexpectedResponse,
+            },
+        }
+    }
+}
+
 /// A request on behalf of an account that Discord didn't fulfil.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 #[uniffi::export(Display)]

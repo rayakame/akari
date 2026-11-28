@@ -206,6 +206,7 @@ impl State {
             && !media_post;
         let reactions =
             !system_dm && writable && !media_post && can(Permissions::READ_MESSAGE_HISTORY);
+        let deleting = self.deleting(message.channel_id, message.id);
 
         MessageActions {
             reply,
@@ -213,6 +214,7 @@ impl State {
             mention_toggle: reply && !own && !private,
             // Discord opens a disabled editor where the user may not send.
             edit: !system_dm
+                && !deleting
                 && own
                 && user_message
                 && kind != MEDIA_MENTION
@@ -222,6 +224,7 @@ impl State {
                 && writable
                 && can(Permissions::SEND_MESSAGES),
             delete: (own || moderator)
+                && !deleting
                 && writable
                 && !UNDELETABLE.contains(&kind)
                 && (kind != AUTO_MODERATION_ACTION || moderator),
@@ -237,7 +240,7 @@ impl State {
         }
     }
 
-    fn acted_on(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+    pub(super) fn acted_on(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.message(channel, id)
             .or_else(|| self.windows.shown(channel, id))
             .or_else(|| {

@@ -50,13 +50,16 @@ enum CellText {
         return line
     }
 
-    static func editedMark() -> NSAttributedString {
-        NSAttributedString(
-            string: " (edited)",
-            attributes: [
-                .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
-                .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
-            ])
+    static func editedMark(tooltip: String? = nil) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: TypeScale.edited.nsFont, .foregroundColor: Palette.chatTextMuted,
+            .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
+        ]
+        let mark = NSMutableAttributedString(string: " (edited)", attributes: attributes)
+        if let tooltip {
+            mark.addAttribute(.toolTip, value: tooltip, range: NSRange(location: 1, length: mark.length - 1))
+        }
+        return mark
     }
 
     private static var bodyLine: NSParagraphStyle {
