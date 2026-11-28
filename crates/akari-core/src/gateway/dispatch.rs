@@ -2,8 +2,8 @@ use serde::Deserialize;
 
 use crate::lenient::{default_on_error, skip_invalid, skip_invalid_in_each, skip_invalid_or_empty};
 use crate::model::{
-    Channel, ChannelId, EmojiRef, GuildId, GuildMember, Message, MessageId, Role, RoleId,
-    ThreadMember, UserId,
+    Channel, ChannelId, GuildEmoji, GuildId, GuildMember, Message, MessageId, PartialEmoji,
+    ReactionType, Role, RoleId, ThreadMember, UserId,
 };
 
 /// READY_SUPPLEMENTAL: what READY leaves out, sent right after it.
@@ -45,7 +45,7 @@ pub struct GuildRoleEvent {
 pub struct GuildEmojisUpdate {
     pub guild_id: GuildId,
     #[serde(deserialize_with = "skip_invalid")]
-    pub emojis: Vec<EmojiRef>,
+    pub emojis: Vec<GuildEmoji>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -136,4 +136,56 @@ pub struct MessageDeleteBulk {
     pub ids: Vec<MessageId>,
     pub channel_id: ChannelId,
     pub guild_id: Option<GuildId>,
+}
+
+/// MESSAGE_REACTION_ADD and MESSAGE_REACTION_REMOVE: one user's reaction. The member, the
+/// message's author and the burst colors aren't read.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MessageReaction {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    pub guild_id: Option<GuildId>,
+    pub user_id: UserId,
+    pub emoji: PartialEmoji,
+    #[serde(rename = "type", default, deserialize_with = "default_on_error")]
+    pub kind: ReactionType,
+    /// The older way to say `type` 1.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub burst: bool,
+}
+
+/// MESSAGE_REACTION_REMOVE_ALL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct MessageReactionRemoveAll {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    pub guild_id: Option<GuildId>,
+}
+
+/// MESSAGE_REACTION_REMOVE_EMOJI: every reaction with one emoji, normal and burst.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MessageReactionRemoveEmoji {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    pub guild_id: Option<GuildId>,
+    pub emoji: PartialEmoji,
+}
+
+/// MESSAGE_REACTION_ADD_MANY: a busy message's reactions in one dispatch, for sessions with
+/// the `DEBOUNCE_MESSAGE_REACTIONS` capability.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MessageReactionAddMany {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    pub guild_id: Option<GuildId>,
+    #[serde(default, deserialize_with = "skip_invalid_or_empty")]
+    pub reactions: Vec<DebouncedReaction>,
+}
+
+/// The users who added one emoji, as normal reactions.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DebouncedReaction {
+    #[serde(default, deserialize_with = "skip_invalid_or_empty")]
+    pub users: Vec<UserId>,
+    pub emoji: PartialEmoji,
 }

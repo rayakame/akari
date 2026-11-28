@@ -81,6 +81,15 @@ struct FFISmokeTests {
         #expect(reads.channel(id: ChannelId(rawValue: 1)) == nil)
         #expect(reads.channels(ids: [ChannelId(rawValue: 1)]).isEmpty)
         #expect(reads.connection() == .offline)
+        let channel = ChannelId(rawValue: 1)
+        let message = MessageId(rawValue: 2)
+        #expect(reads.reactions(channelId: channel, messageId: message).isEmpty)
+        #expect(reads.messageReactions(channelId: channel, messageIds: [message]).isEmpty)
+        #expect(reads.replyTarget(channelId: channel, targetId: message) == .notLoaded)
+        #expect(reads.replyTargets(channelId: channel, targetIds: [message]) == [.notLoaded])
+        #expect(!reads.pinsUnread(channelId: channel))
+        let actions = reads.messageActions(channelId: channel, messageId: message)
+        #expect(!actions.reply && !actions.react && !actions.copyLink)
         account.close()
     }
 
@@ -89,6 +98,10 @@ struct FFISmokeTests {
         #expect(Permissions.viewChannel.rawValue == 1 << 10)
         #expect(Permissions.sendMessages.rawValue == 1 << 11)
         #expect(Permissions.sendMessagesInThreads.rawValue == 1 << 38)
+        #expect(Permissions.addReactions.rawValue == 1 << 6)
+        #expect(Permissions.manageMessages.rawValue == 1 << 13)
+        #expect(Permissions.useExternalEmojis.rawValue == 1 << 18)
+        #expect(Permissions.pinMessages.rawValue == 1 << 51)
         #expect(Permissions.all.contains(.administrator))
     }
 

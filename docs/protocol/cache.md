@@ -49,21 +49,31 @@ every other target builds rusqlite's bundled copy.
   `user_settings` (per key: `folders`, absent when the settings proto had none,
   `notification_flags`, `display` and `age_agreements`, the servers whose age-restricted
   channels the user agreed to see; READY doesn't carry them, so every READY keeps the store's,
-  and one that came before the restore takes the cached ones in too) and `read_states` (per channel: the acknowledged message and the
-  mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
+  and one that came before the restore takes the cached ones in too), `read_states` (per channel: the acknowledged message and the
+  mention count) and `pin_acks` (per channel: the pin time the user acknowledged, for the pins
+  dot; a channel's newest pin's time is in its `channels` row). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default. A thread the
   user hasn't joined is kept only when its own messages are cached or a cached message shows
   its box, so a relaunch shows the box at once and the thread's window isn't evicted with it;
   the others, and each thread's newest message, aren't: the next subscription's
   THREAD_LIST_SYNC and the refreshed pages bring them again.
+- **A message's row** keeps its reactions (per emoji the two counts and the user's two flags)
+  and, for a reply, what the store knew of the message it answers: the small preview its line
+  shows, or that it was deleted; nothing for a target that wasn't loaded. So a cached reply
+  shows its line before any page comes, and a cached message its reactions as they stood. The
+  refresh corrects both. A window is written again when a target changed, though none of its
+  messages did. What a thread started from isn't kept: it is fetched, or comes with the page.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 7 since embeds keep their flags and the version of
+- **Version:** `PRAGMA user_version`, 8 since messages keep their reactions and a reply what
+  it answers, and the pin times are kept; 7 since embeds keep their flags and the version of
   Discord's content scan, and their media its flags and placeholder; 6 did the same for
   attachments; 5 brought a thread member's join time, which orders the channel
   list; 4 the membership (its mute and level) instead of `joined`; 3 the read states. Older
-  files are deleted once, so the first launch after such an update starts empty: a version 6
+  files are deleted once, so the first launch after such an update starts empty: a version 7
+  file's replies would show "could not be loaded" where the last session showed their line, and
+  its messages no reactions, until the refresh; a version 6
   file's embeds and a version 5 file's attachments have no scan version, which would cover their media as waiting for a scan,
   a version 3 file would restore every joined thread as unjoined, and a version 2 file would
   restore without read states. A file with any other version is deleted and started empty: the

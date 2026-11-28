@@ -221,6 +221,10 @@ list once when the batch touched it, then reads records only for new and changed
 that a model's first read already shows change nothing, so a model created mid-stream
 converges to the store without duplicates. `BadgeChanged` and `GuildBadgeChanged` make a list
 read only those badges (`channelBadges`, `guildBadges`), and the DM list its `unread` order.
+The batch also keeps, apart from its messages, the messages whose reactions changed
+(`reactionsChanged`, per channel), the messages replies answer that changed
+(`replyTargetsChanged`, per the target's channel) and the channels whose pins dot changed
+(`pinsUnreadChanged`); no model reads them yet.
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.

@@ -274,21 +274,38 @@ pub struct EmbedField {
 pub struct Reaction {
     pub emoji: PartialEmoji,
     /// Normal and burst reactions together.
+    #[serde(default, deserialize_with = "default_on_error")]
     pub count: u32,
-    pub count_details: ReactionCountDetails,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub count_details: Option<ReactionCountDetails>,
     /// Whether the current user reacted normally.
+    #[serde(default, deserialize_with = "default_on_error")]
     pub me: bool,
     /// Whether the current user burst-reacted.
+    #[serde(default, deserialize_with = "default_on_error")]
     pub me_burst: bool,
     /// Hex colors such as `#f0ca59` for the burst animation.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_on_error")]
     pub burst_colors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct ReactionCountDetails {
+    #[serde(default)]
     pub normal: u32,
+    #[serde(default)]
     pub burst: u32,
+}
+
+int_enum! {
+    /// Which of an emoji's two counts a reaction is in.
+    #[derive(Default)]
+    pub enum ReactionType {
+        #[default]
+        Normal = 0,
+        /// A super reaction.
+        Burst = 1,
+    }
 }
 
 /// A Unicode emoji (no `id`) or a custom emoji. A deleted custom emoji has no `name`.
@@ -296,7 +313,7 @@ pub struct ReactionCountDetails {
 pub struct PartialEmoji {
     pub id: Option<Snowflake<EmojiMarker>>,
     pub name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_on_error")]
     pub animated: bool,
 }
 

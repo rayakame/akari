@@ -9,9 +9,10 @@ use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
     AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
-    ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageWindow, Nitro,
-    PostCreation, PostNewCount, PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage,
-    ThreadBrowser, ThreadCreation, User,
+    ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageActions,
+    MessageReactions, MessageWindow, Nitro, PostCreation, PostNewCount, PostPreview, Reaction,
+    ReadState, RepliedTo, ReplyTarget, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
+    ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -52,21 +53,31 @@ impl Store {
             .any(state::Attachment::is_thumbnail)
             .then(|| self.core.shown_thumbnail(message))
             .flatten();
-        Message::new(
-            message,
-            formatted,
-            self.core.mentions_me(message),
-            (self.core.shown_attachments(message), thumbnail),
-            self.core.spoilers_shown(message.channel_id),
-            embeds::embeds(
+        let replied_to = message
+            .replied_to()
+            .map(|(channel_id, message_id)| RepliedTo {
+                channel_id,
+                message_id,
+                mentions_author: self.core.reply_mentions_author(message),
+            });
+        Message {
+            replied_to,
+            ..Message::new(
                 message,
-                &shown,
-                names,
-                document.spoiler_count(),
-                &self.contents,
-            ),
-            hides_content,
-        )
+                formatted,
+                self.core.mentions_me(message),
+                (self.core.shown_attachments(message), thumbnail),
+                self.core.spoilers_shown(message.channel_id),
+                embeds::embeds(
+                    message,
+                    &shown,
+                    names,
+                    document.spoiler_count(),
+                    &self.contents,
+                ),
+                hides_content,
+            )
+        }
     }
 }
 
@@ -326,6 +337,16 @@ impl Store {
         self.core.can_start_thread(channel_id, message_id)
     }
 
+    /// What the user may do with the message, by the official client's rules: its type, flags
+    /// and delivery, the user's permissions and timeout, a thread's archived and locked state.
+    /// Nothing for a message the store doesn't have. Read it again when the message, its channel
+    /// or the user's permissions change.
+    /// A viewed thread's starter row (the thread's ID and the row's) answers for the message it
+    /// shows, in the parent channel: requests take the IDs of `starter_message`'s message.
+    pub fn message_actions(&self, channel_id: ChannelId, message_id: MessageId) -> MessageActions {
+        self.core.message_actions(channel_id, message_id).into()
+    }
+
     /// The parent's slowmode for creating threads, apart from sending: each created thread
     /// starts it. `None` without slowmode.
     pub fn thread_slowmode(&self, parent_id: ChannelId) -> Option<Slowmode> {
@@ -367,6 +388,61 @@ impl Store {
             );
         }
         messages
+    }
+
+    /// The message's reactions, in Discord's order, new emoji at the end; empty when it has none
+    /// or isn't loaded. `MessageReactionsChanged` says to read them again, and `MessageUpdated`
+    /// with the message itself.
+    pub fn reactions(&self, channel_id: ChannelId, message_id: MessageId) -> Vec<Reaction> {
+        self.core
+            .reactions(channel_id, message_id)
+            .iter()
+            .map(Reaction::from)
+            .collect()
+    }
+
+    /// The reactions of the messages among `message_ids` that have some, in the order given.
+    pub fn message_reactions(
+        &self,
+        channel_id: ChannelId,
+        message_ids: Vec<MessageId>,
+    ) -> Vec<MessageReactions> {
+        self.core
+            .reactions_of(channel_id, &message_ids)
+            .into_iter()
+            .map(|(message_id, reactions)| MessageReactions {
+                message_id,
+                reactions: reactions.iter().map(Reaction::from).collect(),
+            })
+            .collect()
+    }
+
+    /// The message a reply answers, by its `Message.replied_to`: as Discord sent it along or a
+    /// load brought it, kept current by its edits and its deletion. `ReplyTargetChanged` says to
+    /// read it again. `NotLoaded` also for a message no loaded reply names.
+    pub fn reply_target(&self, channel_id: ChannelId, target_id: MessageId) -> ReplyTarget {
+        ReplyTarget::from(&self.core.reply_target(channel_id, target_id))
+    }
+
+    /// `reply_target` for each of `target_ids`, in the order given.
+    pub fn reply_targets(
+        &self,
+        channel_id: ChannelId,
+        target_ids: Vec<MessageId>,
+    ) -> Vec<ReplyTarget> {
+        self.core
+            .reply_targets(channel_id, &target_ids)
+            .iter()
+            .map(ReplyTarget::from)
+            .collect()
+    }
+
+    /// Whether the channel has a pin newer than the one the user last acknowledged: the dot on
+    /// the header's pins button. Never for a muted channel, or a thread the user hasn't joined.
+    /// `PinsUnreadChanged` says to read it again; a mute or a join comes with
+    /// `GuildSettingsChanged` or `ChannelUpdated`.
+    pub fn pins_unread(&self, channel_id: ChannelId) -> bool {
+        self.core.pins_unread(channel_id)
     }
 
     /// Whether `Account.fetch_thread` or `check_thread` found this session that the user can't

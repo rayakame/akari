@@ -61,6 +61,11 @@ pub enum StoreEvent {
     GuildBadgeChanged {
         guild_id: GuildId,
     },
+    /// Whether the channel has pins the user hasn't seen changed: read
+    /// [`Store::pins_unread`](super::Store::pins_unread) again.
+    PinsUnreadChanged {
+        channel_id: ChannelId,
+    },
     /// The thread joined or left its guild's [`channel_list`](super::Store::channel_list) while
     /// it didn't change itself: its inactivity window ended, it was read past it, or a message
     /// came after it.
@@ -120,6 +125,18 @@ pub enum StoreEvent {
     MessageDeleted {
         channel_id: ChannelId,
         message_id: MessageId,
+    },
+    /// A message's reactions changed: read
+    /// [`Store::reactions`](super::Store::reactions) again. The message's other parts didn't.
+    MessageReactionsChanged {
+        channel_id: ChannelId,
+        message_id: MessageId,
+    },
+    /// What [`Store::reply_target`](super::Store::reply_target) answers for the message
+    /// changed: it was loaded, edited or deleted. `channel_id` is the target's channel.
+    ReplyTargetChanged {
+        channel_id: ChannelId,
+        target_id: MessageId,
     },
     /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
     /// window if it is at the present; otherwise it comes with a later load.

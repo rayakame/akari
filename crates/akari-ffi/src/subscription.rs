@@ -130,6 +130,10 @@ pub enum StoreEvent {
     GuildBadgeChanged {
         guild_id: GuildId,
     },
+    /// Whether the channel has pins the user hasn't seen changed: read `pins_unread` again.
+    PinsUnreadChanged {
+        channel_id: ChannelId,
+    },
     /// A thread joined or left its guild's `channel_list` without changing itself, e.g. its
     /// inactivity window ended; read the list again.
     ThreadListingChanged {
@@ -192,6 +196,17 @@ pub enum StoreEvent {
     MessageDeleted {
         channel_id: ChannelId,
         message_id: MessageId,
+    },
+    /// A message's reactions changed, and nothing else of it: read `reactions` again.
+    MessageReactionsChanged {
+        channel_id: ChannelId,
+        message_id: MessageId,
+    },
+    /// What `reply_target` answers for the message changed: it was loaded, edited or deleted.
+    /// `channel_id` is the target's channel.
+    ReplyTargetChanged {
+        channel_id: ChannelId,
+        target_id: MessageId,
     },
     /// Discord confirmed a pending message. The message is in the window if it is at the
     /// present; otherwise it comes with a later load.
@@ -258,6 +273,7 @@ impl StoreEvent {
                 guild_id,
             },
             E::GuildBadgeChanged { guild_id } => Self::GuildBadgeChanged { guild_id },
+            E::PinsUnreadChanged { channel_id } => Self::PinsUnreadChanged { channel_id },
             E::ThreadListingChanged {
                 guild_id,
                 thread_id,
@@ -314,6 +330,20 @@ impl StoreEvent {
             } => Self::MessageDeleted {
                 channel_id,
                 message_id,
+            },
+            E::MessageReactionsChanged {
+                channel_id,
+                message_id,
+            } => Self::MessageReactionsChanged {
+                channel_id,
+                message_id,
+            },
+            E::ReplyTargetChanged {
+                channel_id,
+                target_id,
+            } => Self::ReplyTargetChanged {
+                channel_id,
+                target_id,
             },
             E::MessageReplaced {
                 channel_id,

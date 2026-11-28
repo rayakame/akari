@@ -16,13 +16,38 @@ read elsewhere and acknowledges what the user reads in it
 | READY `read_state` | `Versioned<ReadStateEntry>` | Per channel the last acknowledged message, the mention count and the flags; whole, since Identify names no version ([ready.md](ready.md#fields-akari-reads)) |
 | READY `relationships` | `Vec<Relationship>` | Blocked users (type 2) and ignored ones (`user_ignored`), whose messages never count |
 | MESSAGE_ACK | `MessageAck` | The user read a channel, in this session or another |
+| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | A channel's newest pin's time, and the pin time the user acknowledged ([dispatches.md](dispatches.md#pins)) |
 | CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Newer messages in guilds the session isn't subscribed to ([dispatches.md](dispatches.md#large-guilds)) |
 | RELATIONSHIP_ADD, _UPDATE, _REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Changes to who is blocked or ignored |
 
 Only channel read states (`read_state_type` 0) are kept. Identify doesn't ask for
 `NON_CHANNEL_READ_STATES`, so the others (guild events, the notification center, …) should
-not come; if they do, they are skipped. `last_pin_timestamp`, `last_viewed` and the flags
-aren't kept: Akari has no pins view, and `last_viewed` only goes out with its own acks.
+not come; if they do, they are skipped. `last_viewed` and the flags aren't kept:
+`last_viewed` only goes out with Akari's own acks.
+
+## Pins
+
+`Store::pins_unread(channel)` is the dot on the header's pins button, by the official client's
+rule (`hasUnreadPins`, canary 671549; not observed): the channel's newest pin is later than the
+pin time the user acknowledged, compared by milliseconds.
+
+- The newest pin's time is the channel's `last_pin_timestamp` (`state::Channel`): from every
+  channel object (READY and GUILD_CREATE as sent; CHANNEL_CREATE, THREAD_CREATE and every other
+  channel or thread object for a known channel, where a missing or `null` time keeps the known
+  one, as most thread objects leave it out; CHANNEL_UPDATE, where a missing key keeps the known
+  time and `null` clears it), from CHANNEL_PINS_UPDATE (as sent, `null` clears) and from PASSIVE_UPDATE_V2's channels (only a time that is there).
+- The acknowledged time is the read state entry's `last_pin_timestamp` (Discord's epoch for
+  never, which Akari keeps as none) and CHANNEL_PINS_ACK's `timestamp`; an ack without a time is
+  taken to be for the channel's newest pin, as the official client takes its own.
+- No dot for a muted channel or a thread the user hasn't joined (the client's `canBeUnread`).
+  *Akari:* its recency rules for servers with opt-in channels aren't applied.
+- `PinsUnreadChanged { channel_id }` says the answer changed through one of these, also in a
+  later READY's diff. A mute and a thread's join change it too, with their own events
+  (`GuildSettingsChanged`, `ChannelUpdated`). A pin time alone is no `ChannelUpdated` at READY,
+  like a newest message.
+- Akari doesn't ack pins yet (`POST /channels/{id}/pins/ack`, sent by the official client only
+  from its open pins popout: from the code read of canary 671549, not observed); another
+  client's ack arrives as CHANNEL_PINS_ACK.
 
 ## The unread rule
 
@@ -353,7 +378,9 @@ rebuilt under it only if another write came in between.
 
 A deleted channel or thread, a channel a repeated GUILD_CREATE no longer lists, and every
 channel of a guild the user leaves lose their read state, in memory and, with the next flush,
-in the cache. An outage keeps them: the guild's GUILD_CREATE brings no read states back.
+in the cache; the pin time the user acknowledged goes with it. An outage keeps them: the
+guild's GUILD_CREATE brings no read states back. Leaving a guild while it is down takes them
+too.
 
 ## Threads
 
@@ -441,10 +468,11 @@ after READY.
 `akari-cli read-state <channel_id>` shows where a channel's badge comes from:
 - READY's raw read state entry and the channel's fields;
 - what Akari holds after READY, and with `--cache <file>` what a copy of the app's cache held;
-- the badges, permissions and opt-in flags;
+- the badges, the newest pin's time and whether the pins are unread, permissions and opt-in
+  flags;
 - how the newest 100 messages over REST compare with the read position.
 
-`--watch` then follows new messages and badge changes. It prints IDs, flags and counts, never
+`--watch` then follows new messages, badge changes and the pins dot. It prints IDs, flags and counts, never
 names or message content.
 
 ## Open points
