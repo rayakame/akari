@@ -114,18 +114,24 @@ item, so a mark from it marks the thread unread from its start, and the thread s
 may be marked (not an archived, locked one); the original's channel isn't touched. What the
 official client marks from this row wasn't read.*
 
+*Akari: the row offers no Reply. A reply written in the thread can't name a message of the
+parent channel (the composer only builds references into its own channel), so `reply`,
+`reply_pings` and `mention_toggle` are false on the row whatever the original allows. What the
+official client's Reply does on this row wasn't read.*
+
 Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
 gives the channel and ID of the message a row shows: the original's for such a starter row,
-the row's own for every other; a reaction, a reply, a pin or a delete from the row goes there,
-and Copy Message Link names them. Mark Unread alone takes the row's own:
+the row's own for every other; a reaction, a pin or a delete from the row goes there, and Copy
+Message Link names them. Mark Unread alone takes the row's own:
 `Account::mark_unread(thread, row)`. While the row's message isn't resolved (loading, gone or
 failed), Copy Message Link names the row itself, in the thread: `Store::message_link` falls
 back to the row's own IDs.
 
 So the row's bar and menu have Copy Text (the original's text), Copy Message Link (the
-original's, in the parent channel; the row's own until the original is loaded) and Mark Unread (the thread's); never Create Thread, since
-the original has its thread, nor View Thread. *Akari: the apps ask the core with the row's own
-IDs and take the shown message's from the `starter_message` they already hold for the row.*
+original's, in the parent channel; the row's own until the original is loaded) and Mark Unread
+(the thread's); never Create Thread, since the original has its thread, nor View Thread, nor
+Reply. *Akari: the apps ask the core with the row's own IDs and take the shown message's from
+the `starter_message` they already hold for the row.*
 
 ## The hover bar
 
@@ -183,7 +189,7 @@ Each button shows only where `MessageActions` allows it. Without Shift:
 |---|---|---|---|
 | 1 | up to 3 quick reactions, then a separator | `react` | with reactions |
 | 2 | Add Reaction | `react` | with reactions |
-| 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | with replies |
+| 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | yes: starts a reply ([replies.md](replies.md)); Shift at the click starts it without the ping |
 | 4 | Edit | `edit` | with editing |
 | 5 | Forward | | left out |
 | 6 | Create Thread | `create_thread` | yes |
@@ -201,7 +207,7 @@ With **Shift held**, the bar changes at once, the pointer still, and back when S
 | 4 | Mark Unread | `mark_unread` | yes |
 | 5 | Bookmark Message | | left out |
 | 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
-| 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | with replies |
+| 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | yes |
 | 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
 | 9 | Delete | `delete`; no question asked | with deleting |
 | 10 | More | only where Delete isn't | yes |
@@ -229,7 +235,7 @@ client's order, with what Akari has in bold:
 | Group | Items |
 |---|---|
 | Reactions | Add Reaction, View Reactions |
-| Writing | Edit Message, Reply, Forward, **Create Thread**, ***View Thread*** |
+| Writing | Edit Message, **Reply**, Forward, **Create Thread**, ***View Thread*** |
 | The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
 | Removing | Remove Reactions, Remove All Reactions, **Delete Message** (red; today a failed send's only) |
 | Developer | Copy Message ID (developer mode) |
@@ -260,17 +266,19 @@ keeps the channel unread while it stays open are in
 - An Option-click counts anywhere in the message's box: on its text, a link or an emoji too,
   which then aren't followed or opened, and no text is selected. From the code read: the
   official client's row handler takes every Alt+click and stops the click's default.
-- *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar),
-  which keep their click, and only with Option alone. Where the message can't be marked
-  (an archived, locked thread, a message still sending) the click isn't taken: it is an
-  ordinary click with Option held. A click that is taken takes its drag and its release too.*
+- *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar, the
+  text and the spine of a reply's line), which keep their click, and only with Option alone.
+  Where the message can't be marked (an archived, locked thread, a message still sending) the
+  click isn't taken: it is an ordinary click with Option held. A click that is taken takes its
+  drag and its release too.*
 - On a thread's starter row the thread is marked, from its start
   ([A thread's starter row](#a-threads-starter-row)).
 - The open list's new messages line goes over the chosen message, the user's own too, and
   the channel isn't read again while it stays open: leaving it (another channel, the split
-  closed), marking it read (Escape) or writing there ends that. Scrolling, another window, the
-  Mac asleep or a lost connection don't: the channel is still open. Coming back to a channel
-  that was left reads it as always.
+  closed), marking it read (Escape) or writing there ends that. With a reply pending the first
+  Escape only cancels the reply ([replies.md](replies.md#escape)); the next one marks read.
+  Scrolling, another window, the Mac asleep or a lost connection don't: the channel is still
+  open. Coming back to a channel that was left reads it as always.
 - *Akari: the badge and the new messages line change at the click; the official client waits
   for Discord's answer. If Discord refuses, they go back and one alert says so ("Couldn't Mark as
   Unread"). A mark that something later replaced before it counted (Escape right after, the

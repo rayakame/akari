@@ -850,7 +850,7 @@ struct MessageTableTests {
         show(
             MessageTableState(
                 rows: [
-                    row(1, at: noon, kind: .reply), row(2, at: noon + 60),
+                    replyRow(1, at: noon, target()), row(2, at: noon + 60),
                     row(3, at: noon + 120, delivery: .failed),
                 ], reachedOldest: true))
         let key = keyWindow()
@@ -863,8 +863,13 @@ struct MessageTableTests {
         let shown = Set(fields.map(\.stringValue))
         #expect(shown.isSuperset(of: ["Mira", "Not sent."]))
         #expect(shown.contains { $0.hasPrefix("12:00") } && shown.contains { $0.hasPrefix("12:01") })
-        #expect(shown.contains { $0.contains("Replying to") })
         #expect(shown.contains { $0.contains("October") })
+        // A reply's line is drawn, not a field: nothing in it takes a selection.
+        let line = try #require(try cell(of: 1) as? MessageCell).replyLine
+        #expect(!line.isHiddenOrHasHiddenAncestor && line.shownName == "Ray")
+        #expect(line.content.shownText.string == "the original message")
+        #expect(textFields(in: line).isEmpty && messageTexts(in: line).isEmpty)
+        #expect(!MessageMenuAreaTests.views(NSView.self, in: line).contains { $0 is NSText })
 
         for field in fields {
             #expect(!field.isSelectable, "\(field.stringValue)")
@@ -1218,6 +1223,21 @@ struct MessageTableTests {
 
         func jump(to message: MessageId) {
             calls.append("jump to \(message.rawValue)")
+        }
+
+        func jumpToTarget(of row: MessageListModel.Row) {
+            calls.append("jump to target of \(row.message.id.rawValue)")
+        }
+
+        var shownJumps: [Int] = []
+        var lastShown = Int.max
+
+        func jumpShown(_ number: Int) {
+            shownJumps.append(number)
+        }
+
+        func lastShownJump() -> Int {
+            lastShown
         }
 
         func openGuild(_ id: GuildId) {

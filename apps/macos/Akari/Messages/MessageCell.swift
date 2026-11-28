@@ -30,6 +30,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         get { avatar.images }
         set {
             avatar.images = newValue
+            replyLine.images = newValue
             content.images = newValue
             attachments?.images = newValue
             embeds?.images = newValue
@@ -47,6 +48,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         get { content.animatesEmoji }
         set {
             content.animatesEmoji = newValue
+            replyLine.animatesEmoji = newValue
             embeds?.animatesEmoji = newValue
             threadBox?.animatesEmoji = newValue
         }
@@ -55,7 +57,25 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var animatesStickers = false {
         didSet { stickers?.animates = animatesStickers }
     }
-    private let reply = CellText.label()
+    let replyLine = ReplyLineView()
+    let spine = ReplySpineView()
+    /// A click on the reply line's text or the spine.
+    var onReplyJump: () -> Void = {}
+    /// The list's say: the pointer is over the reply line's text or the spine.
+    var replyHovered = false {
+        didSet {
+            replyLine.hovered = replyHovered
+            spine.hovered = replyHovered
+        }
+    }
+    /// The pending reply answers this message: the official client's tint and bar.
+    var isReplyTarget = false {
+        didSet {
+            if isReplyTarget != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
@@ -88,7 +108,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// The message's menu, asked when it opens.
     var menuItems: () -> [NSMenuItem] = { [] }
     // Built for the first failed message: its buttons cost a layout pass each.
-    private var failed: FailedLine?
+    private(set) var failed: FailedLine?
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
     var onLink: (URL) -> Void = { _ in }
@@ -110,12 +130,18 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         }
     }
     private let stack = RowStack()
-    // Discord's flash: the color fades in for 0.2 s, holds to 2 s, then fades out for 0.2 s.
+    // Discord's flash: two layers, 0.2 s in, held to 2 s, 0.6 s out; the upper one has the bar
+    // and blinks twice in its first 0.6 s.
     private let flashView = FlashView()
+    private let flashOverlayView = FlashView()
     let flashLayer = CALayer()
+    let flashOverlay = CALayer()
+    let flashBar = CALayer()
     private static let flashKey = "flash"
-    private static let flashHold: TimeInterval = 2
-    private static let flashFade: TimeInterval = 0.2
+    static let flashHold: TimeInterval = 2
+    static let flashFadeIn: TimeInterval = 0.2
+    static let flashFadeOut: TimeInterval = 0.6
+    static let flashBlink: TimeInterval = 0.6
     private var top: NSLayoutConstraint?
     private var bottom: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -159,12 +185,22 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
         groupTime: String, shortTime: String, fullDate: String,
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
-        media: MediaState = MediaState(), embeds: [EmbedView.Shown] = []
+        media: MediaState = MediaState(), embeds: [EmbedView.Shown] = [],
+        reply: (line: ReplyLine, text: NSAttributedString)? = nil, replyJumps: Bool = true,
+        replyRefused: Bool = false
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
             followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
-            fullDate: fullDate, hasBox: threadBox != nil, media: media, embeds: embeds)
+            fullDate: fullDate, hasBox: threadBox != nil, media: media, embeds: embeds,
+            hasReply: reply != nil)
+        if let reply {
+            replyLine.configure(reply.line, text: reply.text, jumps: replyJumps)
+            spine.isEnabled = replyJumps && reply.line.jumps
+        } else {
+            replyLine.clear()
+        }
+        failed?.show(replyDeleted: replyRefused)
         if let threadBox {
             boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
         }
@@ -189,7 +225,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private func configureAllButTheBody(
         _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
         followsLine: Bool, groupTime: String, shortTime: String, fullDate: String,
-        hasBox: Bool = false, media: MediaState = MediaState(), embeds shown: [EmbedView.Shown] = []
+        hasBox: Bool = false, media: MediaState = MediaState(), embeds shown: [EmbedView.Shown] = [],
+        hasReply: Bool = false
     ) {
         if hasBox {
             boxView().isHidden = false
@@ -214,7 +251,9 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         hoverTime.stringValue = shortTime
         hoverTime.toolTip = fullDate
         hoverTime.isHidden = !isHovered || startsGroup
-        reply.isHidden = !(startsGroup && message.kind == .reply)
+        replyLine.isHidden = !(startsGroup && hasReply)
+        spine.isHidden = replyLine.isHidden
+        replyHovered = false
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
         if message.editedTimestamp != nil, message.content.isEmpty || message.hidesContent {
             lines.append(CellText.editedMark())
@@ -307,11 +346,12 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
         followsLine: Bool = false, hasBox: Bool = false, embeds: [EmbedView.Shown] = [],
-        width: CGFloat
+        hasReply: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
-            groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox, embeds: embeds)
+            groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox, embeds: embeds,
+            hasReply: hasReply)
         let textWidth = width - textLeading - textTrailing
         let shown = !message.content.isEmpty && !message.hidesContent
         let body = shown ? TextMeasurer.shared.height(body, width: textWidth) : 0
@@ -326,7 +366,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        let shown = ([reply, header, content] + [attachments, embeds].compactMap { $0 } + [extras]
+        let shown = ([replyLine, header, content] + [attachments, embeds].compactMap { $0 } + [extras]
             + [stickers, threadBox, failed].compactMap { $0 })
             .filter { !$0.isHidden }
         let stacked =
@@ -349,12 +389,13 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
             + (shown.contains { $0 === attachments } && shown.contains { $0 === embeds }
                 ? Self.accessoryGap - Self.spacing : 0)
+            + (replyLine.isHidden ? 0 : ReplyLineView.gapBelow - Self.spacing)
         let top = showsHeader ? spacing + Self.groupInset : Self.continuationTop
         let height = top + stacked + (showsHeader ? Self.groupBottom : Self.continuationBottom)
         guard showsHeader else {
             return height
         }
-        let replyHeight = reply.isHidden ? 0 : reply.intrinsicContentSize.height + Self.spacing
+        let replyHeight = replyLine.isHidden ? 0 : ReplyLineView.height + ReplyLineView.gapBelow
         return max(height, top + replyHeight + Self.avatarSize + Self.avatarBottomInset)
     }
 
@@ -368,35 +409,64 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// the highlight; `nil` clears it.
     func flash(elapsed: TimeInterval?, reducesMotion: Bool) {
         flashLayer.removeAnimation(forKey: Self.flashKey)
-        let length = reducesMotion ? Self.flashHold : Self.flashHold + Self.flashFade
+        flashOverlay.removeAnimation(forKey: Self.flashKey)
+        let length = reducesMotion ? Self.flashHold : Self.flashHold + Self.flashFadeOut
         guard let elapsed, elapsed < length else {
             return
         }
-        let animation: CAAnimation
+        let times = { (seconds: [TimeInterval]) in seconds.map { NSNumber(value: $0 / length) } }
+        let base: CAAnimation
+        let overlay: CAAnimation
         if reducesMotion {
             let hold = CABasicAnimation(keyPath: "opacity")
             hold.fromValue = 1.0
             hold.toValue = 1.0
-            animation = hold
+            base = hold
+            overlay = hold
         } else {
+            // CSS's ease and ease-in-out.
+            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            let easeInOut = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
+            let linear = CAMediaTimingFunction(name: .linear)
             let fade = CAKeyframeAnimation(keyPath: "opacity")
             fade.values = [0.0, 1.0, 1.0, 0.0]
-            fade.keyTimes = [0, Self.flashFade / length, Self.flashHold / length, 1].map {
-                NSNumber(value: $0)
-            }
-            // CSS's ease.
-            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            fade.timingFunctions = [ease, CAMediaTimingFunction(name: .linear), ease]
-            animation = fade
+            fade.keyTimes = times([0, Self.flashFadeIn, Self.flashHold, length])
+            fade.timingFunctions = [ease, linear, ease]
+            base = fade
+            // The official client's pulse: out and in twice, at fifths of 0.6 s.
+            let blink = CAKeyframeAnimation(keyPath: "opacity")
+            let fifth = Self.flashBlink / 5
+            blink.values = [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0]
+            blink.keyTimes = times([0, fifth, 2 * fifth, 3 * fifth, 4 * fifth, Self.flashHold, length])
+            blink.timingFunctions = [easeInOut, easeInOut, easeInOut, easeInOut, linear, ease]
+            overlay = blink
         }
-        animation.duration = length
-        animation.beginTime = flashLayer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
         // A legacy scroller's gutter can change without a layout of the cell.
-        flashView.frame = box
+        placeFlash()
         effectiveAppearance.performAsCurrentDrawingAppearance {
             flashLayer.backgroundColor = Palette.messageHighlight.cgColor
+            flashOverlay.backgroundColor = Palette.messageHighlight.cgColor
+            flashBar.backgroundColor = Palette.textBrand.cgColor
         }
-        flashLayer.add(animation, forKey: Self.flashKey)
+        for (layer, animation) in [(flashLayer, base), (flashOverlay, overlay)] {
+            animation.duration = length
+            animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+            layer.add(animation, forKey: Self.flashKey)
+        }
+    }
+
+    private func placeFlash() {
+        flashView.frame = box
+        flashOverlayView.frame = box
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        flashBar.frame = NSRect(x: 0, y: 0, width: 2, height: box.height)
+        CATransaction.commit()
+    }
+
+    /// The upper layer's blink.
+    var flashOverlayAnimation: CAAnimation? {
+        flashOverlay.animation(forKey: Self.flashKey)
     }
 
     var flashAnimation: CAAnimation? {
@@ -411,7 +481,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         attachments?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         embeds?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         super.layout()
-        flashView.frame = box
+        placeFlash()
     }
 
     /// The message's own area, which hover, the mention highlight and its menu cover.
@@ -447,6 +517,15 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     override func draw(_ dirtyRect: NSRect) {
         let box = box
         defer { drawConnector() }
+        // The official client's sheet: the reply's tint takes the mention's place, and its
+        // hovered color the hover tint's.
+        if isReplyTarget {
+            (isHovered ? Palette.replyingBackgroundHover : Palette.replyingBackground).setFill()
+            box.fill(using: .sourceOver)
+            Palette.brand.setFill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
+            return
+        }
         if mentioned {
             Palette.mentionedBackground.setFill()
             box.fill(using: .sourceOver)
@@ -552,8 +631,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         avatar.translatesAutoresizingMaskIntoConstraints = false
         avatar.placeholder = .disc
         avatar.cornerRadius = Self.avatarSize / 2
-        reply.attributedStringValue = CellText.symbolLine(
-            "arrowshape.turn.up.left", "Replying to an earlier message")
+        replyLine.content.target = self
+        replyLine.content.action = #selector(replyClicked)
+        spine.target = self
+        spine.action = #selector(replyClicked)
         hoverTime.font = TypeScale.hoverTime.nsFont
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
@@ -563,13 +644,20 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         stack.alignment = .leading
         stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setViews([reply, header, content, extras], in: .top)
+        stack.setViews([replyLine, header, content, extras], in: .top)
+        stack.setCustomSpacing(ReplyLineView.gapBelow, after: replyLine)
         flashView.layer = flashLayer
         flashView.wantsLayer = true
         flashLayer.cornerRadius = 4
         flashLayer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         flashLayer.opacity = 0
-        for view in [flashView, avatar, stack, hoverTime] as [NSView] {
+        flashOverlay.cornerRadius = 4
+        flashOverlay.maskedCorners = flashLayer.maskedCorners
+        flashOverlay.opacity = 0
+        flashOverlay.addSublayer(flashBar)
+        flashOverlayView.layer = flashOverlay
+        flashOverlayView.wantsLayer = true
+        for view in [flashView, flashOverlayView, avatar, spine, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
 
@@ -589,6 +677,11 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textTrailing),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            replyLine.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            spine.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ReplySpineView.leading),
+            spine.topAnchor.constraint(equalTo: replyLine.topAnchor),
+            spine.widthAnchor.constraint(equalToConstant: ReplySpineView.size.width),
+            spine.heightAnchor.constraint(equalToConstant: ReplySpineView.size.height),
             content.widthAnchor.constraint(equalTo: stack.widthAnchor),
             extras.widthAnchor.constraint(equalTo: stack.widthAnchor),
             avatar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -601,6 +694,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
                 equalTo: stack.topAnchor,
                 constant: MessageText.firstLineMiddle + TypeScale.hoverTime.nsFont.capHeight / 2),
         ])
+    }
+
+    @objc private func replyClicked() {
+        onReplyJump()
     }
 
     @objc private func retryClicked() {
@@ -753,16 +850,24 @@ private final class TagCell: NSTextFieldCell {
     }
 }
 
-private final class FailedLine: NSView {
+final class FailedLine: NSView {
     static let height: CGFloat = 20
+    static let notSent = "Not sent."
+    static let replyDeleted = "Not sent: the message it replies to was deleted."
     let retry = FailedLine.button("Retry")
     let delete = FailedLine.button("Delete")
+    private let label = CellText.label()
+
+    func show(replyDeleted: Bool) {
+        label.stringValue = replyDeleted ? Self.replyDeleted : Self.notSent
+    }
+
+    var text: String { label.stringValue }
 
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        let label = CellText.label()
-        label.stringValue = "Not sent."
+        label.stringValue = Self.notSent
         label.font = TypeScale.detail.nsFont
         label.textColor = Palette.danger
         let row = RowStack(views: [label, retry, delete])

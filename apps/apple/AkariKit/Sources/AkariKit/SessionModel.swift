@@ -192,6 +192,7 @@ public final class SessionModel {
     @ObservationIgnored private var sawReady = false
     @ObservationIgnored private(set) var splitFetch: Task<Void, Never>?
     @ObservationIgnored private(set) var escaping: Task<Void, Never>?
+    @ObservationIgnored private(set) var jumping: Task<Void, Never>?
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
     @ObservationIgnored private var appActive = false
@@ -552,13 +553,19 @@ public final class SessionModel {
     /// messages lines, and loads each present a list doesn't show; scrolling both to the bottom
     /// is the view's part. With nothing to mark or load in either, it ends both lines and closes
     /// the split instead, as the official client does, also with a list scrolled up, and returns
-    /// false: nothing to scroll.
-    @discardableResult public func escape() -> Bool {
+    /// false: nothing to scroll. Before any of that it cancels a pending reply and does nothing
+    /// else: the one of the pane Escape was pressed in (`pane`) first, else the open channel's.
+    @discardableResult public func escape(from pane: ChannelId? = nil) -> Bool {
         if threadForm != nil {
             closeThreadForm()
             return false
         }
         let lists = [messages, split].compactMap { $0 }
+        let replying = lists.filter { $0.channelId == pane } + lists
+        if let composer = replying.lazy.map(\.composer).first(where: { $0.reply != nil }) {
+            composer.cancelReply()
+            return false
+        }
         if split != nil, !lists.contains(where: \.escapeHasWork) {
             for list in lists {
                 list.endNewMessagesLine()
@@ -574,6 +581,19 @@ public final class SessionModel {
             }
         }
         return true
+    }
+
+    /// Jumps to a message in another channel than the list asking: in the open list that shows
+    /// the channel, else the channel opens where it lives and jumps once its list is open.
+    public func jump(to message: MessageId, in channel: ChannelId) {
+        if let list = [messages, split].compactMap({ $0 }).first(where: { $0.channelId == channel }) {
+            jumping = Task { await list.jump(to: message) }
+            return
+        }
+        go(to: channel)
+        if let list = messages, list.channelId == channel {
+            list.jumpOnOpen = message
+        }
     }
 
     /// Which threads the user may create in `channel`, for the Threads browser's buttons.
@@ -757,6 +777,11 @@ public final class SessionModel {
                 let edited = store.messages(channelId: channel, ids: [source]).first
             {
                 form.follow(edited)
+            }
+            if let line = form.sourceReply,
+                batch.replyTargetsChanged[line.channelId]?.contains(line.messageId) == true
+            {
+                form.readSourceReply()
             }
         }
         let permissions =
@@ -948,6 +973,7 @@ public final class SessionModel {
             marking: { [weak list] channel, message in
                 list?.channelId == channel ? list?.markUnread(from: message) : nil
             },
+            reply: { [weak list] row, shift in list?.composer.startReply(to: row, shift: shift) },
             failed: { [weak self] in self?.messageActionFailure = $0 })
     }
 
@@ -1561,6 +1587,9 @@ public final class SessionModel {
     private func list(of channel: ChannelId) -> MessageListModel {
         let list = MessageListModel(
             channelId: channel, userId: userId, account: account, store: store, drafts: drafts)
+        list.jumpElsewhere = { [weak self] channel, message in
+            self?.jump(to: message, in: channel)
+        }
         list.bottomChanged = { [weak self, weak list] scrolledAway in
             guard let self, let list, list === self.messages || list === self.split else {
                 return

@@ -16,9 +16,38 @@ struct ComposerView: View {
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}
+    /// A click on the reply bar: to the message the reply answers.
+    var onReplyJump: (MessageId) -> Void = { _ in }
     @State private var height: CGFloat = 56
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let reply = composer.reply {
+                // The band is the box's top part; a line parts it from the text.
+                ReplyBar(
+                    reply: reply, jump: { onReplyJump(reply.messageId) },
+                    toggle: { composer.toggleReplyMention() }, cancel: { composer.cancelReply() }
+                )
+                .frame(height: ReplyBarView.height(showsToggle: reply.showsToggle))
+                .background(CursorArea(.pointingHand))
+                Rectangle()
+                    .fill(Color(nsColor: Palette.borderSubtle))
+                    .frame(height: Self.replyLine)
+            }
+            field
+        }
+        .background(Color(nsColor: Palette.composer))
+        .clipShape(RoundedRectangle(cornerRadius: Self.radius))
+        .overlay(alignment: .bottomTrailing) { counter }
+        .opacity(denied ? 0.5 : 1)
+        // The user panel's margins, so both bottom edges line up.
+        .padding([.horizontal, .bottom], 8)
+    }
+
+    static let radius: CGFloat = 8
+    static let replyLine: CGFloat = 1
+
+    private var field: some View {
         ZStack(alignment: .topLeading) {
             ComposerField(
                 text: Bindable(composer).draft, enabled: !denied,
@@ -27,7 +56,8 @@ struct ComposerView: View {
                     Task { await composer.submit(willSend: onSend) }
                 },
                 onEscape: onEscape, onShiftEscape: onShiftEscape, onShiftPageUp: onShiftPageUp,
-                onAttach: onAttach, autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused
+                onAttach: onAttach, autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused,
+                focusRequests: composer.focusRequests
             )
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
@@ -42,11 +72,6 @@ struct ComposerView: View {
             }
         }
         .frame(height: height)
-        .background(Color(nsColor: Palette.composer), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(alignment: .bottomTrailing) { counter }
-        .opacity(denied ? 0.5 : 1)
-        // The user panel's margins, so both bottom edges line up.
-        .padding([.horizontal, .bottom], 8)
     }
 
     // Before the store knows the channel the user can already type.
@@ -83,6 +108,8 @@ struct ComposerField: NSViewRepresentable {
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}
+    /// Counts the model's requests for the focus: a reply was started.
+    var focusRequests = 0
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -92,6 +119,7 @@ struct ComposerField: NSViewRepresentable {
         let (scrollView, textView) = ComposerTextView.scrollable()
         textView.string = text
         context.coordinator.attach(textView)
+        context.coordinator.focusRequests = focusRequests
         onAttach(textView)
         return scrollView
     }
@@ -112,11 +140,16 @@ struct ComposerField: NSViewRepresentable {
         textView.onShiftPageUp = onShiftPageUp
         context.coordinator.measure()
         context.coordinator.focusIfAsked()
+        if context.coordinator.focusRequests != focusRequests {
+            context.coordinator.focusRequests = focusRequests
+            DispatchQueue.main.async { [weak textView] in textView?.takeFocus() }
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerField
         weak var textView: ComposerTextView?
+        var focusRequests = 0
         // The window's shared undo manager would replay typing against text replaced in code.
         private let undo = UndoManager()
         nonisolated(unsafe) private var keyObserver: NSObjectProtocol?

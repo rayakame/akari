@@ -4,7 +4,7 @@ use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, Permissions, Use
 use akari_core::state;
 
 use crate::contents::{Contents, Found};
-use crate::embeds;
+use crate::embeds::{self, RichText};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
@@ -32,6 +32,29 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn core(&self) -> &state::Store {
         &self.core
+    }
+
+    fn target(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+        target: &state::ReplyTarget,
+        names: &Names<'_>,
+    ) -> ReplyTarget {
+        let formatted = match target {
+            state::ReplyTarget::Loaded(preview) if !preview.content.is_empty() => {
+                let document = self.contents.reply_document(id, &preview.content);
+                let text = akari_markdown::line_text(&preview.content);
+                // The loaded message knows the users it mentions by name.
+                let message = self.core.message(channel, id);
+                Some(RichText {
+                    formatted: FormattedText::new(&document, &text, names, message.as_deref()),
+                    text: text.into_owned(),
+                })
+            }
+            _ => None,
+        };
+        ReplyTarget::new(target, formatted)
     }
 
     fn message(&self, message: &state::Message, names: &Names<'_>, misses: &mut u32) -> Message {
@@ -429,7 +452,9 @@ impl Store {
     /// load brought it, kept current by its edits and its deletion. `ReplyTargetChanged` says to
     /// read it again. `NotLoaded` also for a message no loaded reply names.
     pub fn reply_target(&self, channel_id: ChannelId, target_id: MessageId) -> ReplyTarget {
-        ReplyTarget::from(&self.core.reply_target(channel_id, target_id))
+        let names = Names::new(&self.core, channel_id);
+        let target = self.core.reply_target(channel_id, target_id);
+        self.target(channel_id, target_id, &target, &names)
     }
 
     /// `reply_target` for each of `target_ids`, in the order given.
@@ -438,10 +463,12 @@ impl Store {
         channel_id: ChannelId,
         target_ids: Vec<MessageId>,
     ) -> Vec<ReplyTarget> {
+        let names = Names::new(&self.core, channel_id);
         self.core
             .reply_targets(channel_id, &target_ids)
             .iter()
-            .map(ReplyTarget::from)
+            .zip(&target_ids)
+            .map(|(target, id)| self.target(channel_id, *id, target, &names))
             .collect()
     }
 

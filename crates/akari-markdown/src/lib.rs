@@ -58,6 +58,7 @@ pub fn parse_embed(source: &str, text: EmbedText) -> Document {
             links,
             lists: false,
             headings: false,
+            line: false,
         },
         EmbedText::Description { lists } => Rules {
             lists,
@@ -76,6 +77,32 @@ pub fn parse_embed(source: &str, text: EmbedText) -> Document {
     let mut parser = Parser::with(rules);
     let nodes = parser.region(&Input::source(source), 0..source.len(), Ctx::ROOT);
     flatten::flatten(&nodes, false)
+}
+
+/// Parses the content of a message a reply answers for the reply's one-line preview, with
+/// Discord's inline-reply rules (canary 671549): the message's rules without quotes, a code
+/// block as inline code, emoji never jumbo. The document is one paragraph at most, without
+/// containers or `Break`s: headings, subtext and list items are its text, and where the content
+/// breaks a line, a `Text` span covers the line feed. [`line_text`] is the text its spans show.
+pub fn parse_inline_reply(source: &str) -> Document {
+    if u32::try_from(source.len()).is_err() {
+        return Document::default();
+    }
+    let mut parser = Parser::with(Rules {
+        line: true,
+        ..Rules::MESSAGE
+    });
+    let nodes = parser.region(&Input::source(source), 0..source.len(), Ctx::ROOT);
+    flatten::one_line(&nodes, source)
+}
+
+/// `source` with every line feed and carriage return as a space, so that it is one line and
+/// every offset into it stays what it was: the text [`parse_inline_reply`]'s spans show.
+pub fn line_text(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains(['\n', '\r']) {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    std::borrow::Cow::Owned(source.replace(['\n', '\r'], " "))
 }
 
 /// A title or field name on one line, as Discord shows it: its line breaks, with the spaces
