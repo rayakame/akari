@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, Permissions, UserId};
 use akari_core::state;
+use tokio::runtime::Runtime;
 
 use crate::contents::{Contents, Found};
 use crate::embeds::{self, RichText};
+use crate::emoji::{EmojiAccess, EmojiSection, EmojiVersion, PickerEmoji};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
@@ -14,6 +16,7 @@ use crate::records::{
     ReadState, RepliedTo, ReplyTarget, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
     ThreadCreation, User,
 };
+use crate::runtime::run;
 use crate::subscription::StoreSubscription;
 
 /// An account's state. Reads are synchronous and cheap (one read lock each) and return
@@ -22,11 +25,20 @@ use crate::subscription::StoreSubscription;
 pub struct Store {
     core: state::Store,
     contents: Arc<Contents>,
+    runtime: &'static Runtime,
 }
 
 impl Store {
-    pub(crate) fn new(core: state::Store, contents: Arc<Contents>) -> Arc<Self> {
-        Arc::new(Self { core, contents })
+    pub(crate) fn new(
+        core: state::Store,
+        contents: Arc<Contents>,
+        runtime: &'static Runtime,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            core,
+            contents,
+            runtime,
+        })
     }
 
     #[cfg(test)]
@@ -220,6 +232,73 @@ impl Store {
 
     pub fn guild(&self, id: GuildId) -> Option<Guild> {
         self.core.guild(id).map(|guild| Guild::from(&*guild))
+    }
+
+    /// The user's servers' custom emoji as the picker lists them for reacting in the channel: the
+    /// channel's own server first, then the rail's order, each server's emoji by ID, each with
+    /// whether the user may use it there. Left out, as in Discord's picker: emoji for roles the
+    /// user lacks, other servers' where the channel doesn't allow external emoji, and servers
+    /// left without any. Read again on `GuildEmojisChanged` while the picker shows.
+    pub fn custom_emoji_sections(&self, channel_id: ChannelId) -> Vec<EmojiSection> {
+        self.core
+            .custom_emoji_sections(channel_id)
+            .iter()
+            .map(EmojiSection::from)
+            .collect()
+    }
+
+    /// Whether the user may react with the custom emoji in the channel; `None` for an emoji none
+    /// of the user's servers has, or a channel the store doesn't know.
+    pub fn emoji_access(&self, channel_id: ChannelId, emoji_id: EmojiId) -> Option<EmojiAccess> {
+        self.core.emoji_access(channel_id, emoji_id).map(Into::into)
+    }
+
+    /// The picker's Frequently Used in the channel, best first: the emoji the user reacted with
+    /// (Akari's own count, at most 42), as the picker lists them there; Unicode emoji newer than
+    /// `newest` are left out. No event: read it when the picker opens.
+    pub fn recent_reactions(
+        &self,
+        channel_id: ChannelId,
+        newest: EmojiVersion,
+    ) -> Vec<PickerEmoji> {
+        self.core
+            .recent_reactions(channel_id, newest.into())
+            .iter()
+            .map(PickerEmoji::from)
+            .collect()
+    }
+
+    /// The hover bar's three quick reactions in the channel: the recently used ones the user may
+    /// use there, filled from 💯, 😆 and 💖, none newer than `newest`. No event: read it when the
+    /// bar shows.
+    pub fn quick_reactions(&self, channel_id: ChannelId, newest: EmojiVersion) -> Vec<PickerEmoji> {
+        self.core
+            .quick_reactions(channel_id, newest.into())
+            .iter()
+            .map(PickerEmoji::from)
+            .collect()
+    }
+
+    /// The emoji whose names match `query`, at most `limit`, as the picker lists them in the
+    /// channel: those the user may use first, then by how well they match (the whole name, its
+    /// start, a word's start, anywhere), then the channel's own server, Unicode, the other
+    /// servers. Runs on Akari's runtime, so a caller on the main thread only waits.
+    pub async fn search_emoji(
+        &self,
+        channel_id: ChannelId,
+        query: String,
+        newest: EmojiVersion,
+        limit: u32,
+    ) -> Vec<PickerEmoji> {
+        let core = self.core.clone();
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        run(self.runtime, async move {
+            core.search_emoji(channel_id, &query, newest.into(), limit)
+                .iter()
+                .map(PickerEmoji::from)
+                .collect()
+        })
+        .await
     }
 
     /// The server a custom emoji is from, among the user's servers.

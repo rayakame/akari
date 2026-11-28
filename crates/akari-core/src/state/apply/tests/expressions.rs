@@ -10,6 +10,9 @@ fn emoji(id: u64, name: &str) -> Value {
            "require_colons": true, "managed": false, "roles": []})
 }
 
+// ID, name, animated, available, managed, roles.
+type Kept<'a> = (u64, &'a str, bool, bool, bool, Vec<u64>);
+
 fn emoji_guild(state: &State, id: u64) -> Option<u64> {
     state.emoji_guild(EmojiId::new(id)).map(|guild| guild.get())
 }
@@ -33,8 +36,8 @@ fn guild_emojis_say_which_server_an_emoji_is_from() {
     assert_eq!(emoji_guild(&state, POG), Some(G3));
 }
 
-// GUILD_EMOJIS_UPDATE replaces the list; GUILD_UPDATE keeps it; leaving forgets it. None of it
-// is shown, so no event.
+// GUILD_EMOJIS_UPDATE replaces the list, which the picker shows; GUILD_UPDATE keeps it; leaving
+// forgets it.
 #[test]
 fn emoji_updates_replace_the_list_and_leaving_forgets_it() {
     let mut ready = ready_value();
@@ -46,7 +49,7 @@ fn emoji_updates_replace_the_list_and_leaving_forgets_it() {
         "GUILD_EMOJIS_UPDATE",
         json!({"guild_id": G1.to_string(), "emojis": [emoji(POG, "pog"), emoji(DANCE, "dance")]}),
     );
-    assert_eq!(events, Vec::<String>::new());
+    assert_eq!(events, [format!("GuildEmojisChanged({G1})")]);
     assert_eq!(emoji_guild(&state, WAVE), None);
     assert_eq!(emoji_guild(&state, POG), Some(G1));
 
@@ -83,21 +86,148 @@ fn a_broken_emoji_is_skipped() {
     assert!(state.guild(GuildId::new(G1)).is_some());
 }
 
-// Nothing shows a server's emoji list: a READY whose servers differ only in it changes nothing
-// the host sees.
+// The emoji list has its own event: a READY whose servers differ only in it changes no guild.
 #[test]
-fn a_ready_with_only_new_emoji_reports_no_guild_change() {
+fn a_ready_with_only_new_emoji_reports_only_the_list() {
     let mut state = ready_state();
     let mut ready = ready_value();
     ready["guilds"][0]["emojis"] = json!([emoji(WAVE, "wave")]);
 
-    let events = apply(&mut state, "READY", ready);
+    let events = apply(&mut state, "READY", ready.clone());
 
     assert!(
         !events.iter().any(|event| event.starts_with("GuildUpdated")),
         "{events:?}"
     );
+    assert!(
+        events.contains(&format!("GuildEmojisChanged({G1})")),
+        "{events:?}"
+    );
     assert_eq!(emoji_guild(&state, WAVE), Some(G1));
+
+    let again = apply(&mut state, "READY", ready);
+    assert!(
+        !again
+            .iter()
+            .any(|event| event.starts_with("GuildEmojisChanged")),
+        "the same list again: {again:?}"
+    );
+}
+
+// What the picker needs of each: the name, whether it's animated, available (the server lost the
+// boosts it needs), an integration's (managed), and the roles that may use it, by ID.
+#[test]
+fn guild_emoji_keep_what_the_picker_needs() {
+    let mut ready = ready_value();
+    ready["guilds"][0]["emojis"] = json!([
+        {"id": DANCE.to_string(), "name": "dance", "animated": true, "available": false,
+         "managed": true, "roles": ["500000000000000002"]},
+        emoji(WAVE, "wave"),
+        {"id": POG.to_string(), "name": null},
+    ]);
+    let state = state_from(&ready);
+
+    let guild = state.guild(GuildId::new(G1)).unwrap();
+    let kept: Vec<Kept> = guild
+        .emojis
+        .iter()
+        .map(|emoji| {
+            (
+                emoji.id.get(),
+                &*emoji.name,
+                emoji.animated,
+                emoji.available,
+                emoji.managed,
+                emoji.roles.iter().map(|role| role.get()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (WAVE, "wave", false, true, false, vec![]),
+            (
+                DANCE,
+                "dance",
+                true,
+                false,
+                true,
+                vec![500_000_000_000_000_002]
+            ),
+        ],
+        "by ID, a deleted (nameless) one left out"
+    );
+    assert_eq!(
+        guild.emojis[1].image_key(),
+        crate::media::ImageKey::Emoji {
+            id: EmojiId::new(DANCE),
+            animated: true
+        }
+    );
+}
+
+#[test]
+fn an_unchanged_emoji_update_says_nothing() {
+    let mut ready = ready_value();
+    ready["guilds"][0]["emojis"] = json!([emoji(WAVE, "wave"), emoji(DANCE, "dance")]);
+    let mut state = state_from(&ready);
+
+    let events = apply(
+        &mut state,
+        "GUILD_EMOJIS_UPDATE",
+        json!({"guild_id": G1.to_string(), "emojis": [emoji(DANCE, "dance"), emoji(WAVE, "wave")]}),
+    );
+
+    assert_eq!(events, Vec::<String>::new());
+}
+
+// A renamed emoji is a change too: the picker shows names.
+#[test]
+fn a_renamed_emoji_changes_the_list() {
+    let mut ready = ready_value();
+    ready["guilds"][0]["emojis"] = json!([emoji(WAVE, "wave")]);
+    let mut state = state_from(&ready);
+
+    let events = apply(
+        &mut state,
+        "GUILD_EMOJIS_UPDATE",
+        json!({"guild_id": G1.to_string(), "emojis": [emoji(WAVE, "hello")]}),
+    );
+
+    assert_eq!(events, [format!("GuildEmojisChanged({G1})")]);
+    let guild = state.guild(GuildId::new(G1)).unwrap();
+    assert_eq!(&*guild.emojis[0].name, "hello");
+}
+
+// GUILD_CREATE for a server the store has replaces its list: an event only when it differs.
+#[test]
+fn a_repeated_guild_create_reports_a_new_emoji_list() {
+    let mut state = ready_state();
+    let mut first = guild_create(G3);
+    first["emojis"] = json!([emoji(POG, "pog")]);
+    apply(&mut state, "GUILD_CREATE", first.clone());
+
+    let same = apply(&mut state, "GUILD_CREATE", first.clone());
+    assert!(
+        !same
+            .iter()
+            .any(|event| event.starts_with("GuildEmojisChanged")),
+        "{same:?}"
+    );
+
+    let mut other = first;
+    other["emojis"] = json!([emoji(POG, "pog"), emoji(WAVE, "wave")]);
+    let changed = apply(&mut state, "GUILD_CREATE", other);
+    assert!(
+        changed.contains(&format!("GuildEmojisChanged({G3})")),
+        "{changed:?}"
+    );
+    assert!(
+        !changed
+            .iter()
+            .any(|event| event.starts_with("GuildUpdated")),
+        "{changed:?}"
+    );
 }
 
 // The update always carries the whole list: one without it doesn't decode, rather than emptying

@@ -220,14 +220,35 @@ final class ChildWindows {
         if let host {
             host.rootView = content
         } else {
-            open(content, in: parent, dimmed: dimmed)
+            let host = PanelHostingView(rootView: content)
+            open(host, in: parent, dimmed: dimmed)
+            self.host = host
         }
-        panel?.appearance = parent.effectiveAppearance
-        shield?.appearance = parent.effectiveAppearance
         var frame = frame
         if fitsWidth, let host {
             frame.size.width = host.fittingSize.width
         }
+        place(frame, in: parent)
+    }
+
+    /// Shows an AppKit view at `frame` (screen coordinates), with the shield when `keyable`.
+    func show(_ view: NSView, at frame: NSRect, in parent: NSWindow, dimmed: Bool) {
+        if self.parent !== parent {
+            tearDown(refocus: false)
+        }
+        if let panel {
+            if panel.contentView !== view {
+                panel.contentView = view
+            }
+        } else {
+            open(view, in: parent, dimmed: dimmed)
+        }
+        place(frame, in: parent)
+    }
+
+    private func place(_ frame: NSRect, in parent: NSWindow) {
+        panel?.appearance = parent.effectiveAppearance
+        shield?.appearance = parent.effectiveAppearance
         if shield?.frame != parent.frame {
             shield?.setFrame(parent.frame, display: true)
         }
@@ -237,11 +258,10 @@ final class ChildWindows {
         }
     }
 
-    private func open(_ content: AnyView, in parent: NSWindow, dimmed: Bool) {
+    private func open(_ content: NSView, in parent: NSWindow, dimmed: Bool) {
         self.parent = parent
         let panel = ContainerPanel(keyable: keyable)
-        let host = PanelHostingView(rootView: content)
-        panel.contentView = host
+        panel.contentView = content
         panel.onEscape = { [weak self] in self?.onClose() }
         if let label {
             panel.setAccessibilitySubrole(.dialog)
@@ -258,7 +278,6 @@ final class ChildWindows {
         }
         below.addChildWindow(panel, ordered: .above)
         self.panel = panel
-        self.host = host
         if keyable {
             focus.makeKey(panel)
         }

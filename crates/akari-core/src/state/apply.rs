@@ -348,9 +348,10 @@ impl Derived {
 }
 
 // What a READY's swap replays of the local acks taken while it was prepared.
-#[derive(Default)]
 #[cfg_attr(test, derive(PartialEq))]
 struct Journal {
+    // READY's account.
+    user: UserId,
     acks: Vec<(ChannelId, MessageId)>,
     // Undone since: nothing to replay, but their badges moved after the diff.
     undone: BTreeSet<ChannelId>,
@@ -563,8 +564,12 @@ impl State {
         })
     }
 
-    pub(crate) fn begin_journal(&mut self) {
-        self.journal = Some(Journal::default());
+    pub(crate) fn begin_journal(&mut self, user: UserId) {
+        self.journal = Some(Journal {
+            user,
+            acks: Vec::new(),
+            undone: BTreeSet::new(),
+        });
     }
 
     pub(crate) fn end_journal(&mut self) {
@@ -585,7 +590,10 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> (Entities, Derived) {
         // READY doesn't carry them: they're Akari's, kept with the account.
-        next.settings.age_agreements = self.entities.settings.age_agreements.clone();
+        if self.entities.me().is_none_or(|me| next.me() == Some(me)) {
+            next.settings.age_agreements = self.entities.settings.age_agreements.clone();
+            next.settings.reaction_uses = self.entities.settings.reaction_uses.clone();
+        }
         self.recounts = match self.journal.take() {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
@@ -661,7 +669,16 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> bool {
         if self.ready || self.restored || self.journal.is_some() {
-            self.keep_cached_agreements(&cached, events);
+            let me = self
+                .me()
+                .or(self.journal.as_ref().map(|journal| journal.user));
+            // The host's file can be another account's than READY's.
+            if cached.me() == me {
+                self.keep_cached_agreements(&cached, events);
+                // A READY that beat the restore knows nothing of them; the flusher would erase them.
+                Arc::make_mut(&mut self.entities.settings.reaction_uses)
+                    .merge(&cached.settings.reaction_uses);
+            }
             return false;
         }
         self.entities = cached;
@@ -703,6 +720,9 @@ impl State {
                     kept.insert(id);
                     if !before.shows_the_same(after) {
                         events.push(StoreEvent::GuildUpdated(after.clone()));
+                    }
+                    if before.emojis != after.emojis {
+                        events.push(StoreEvent::GuildEmojisChanged { guild_id: id });
                     }
                 }
                 (None, Some(after)) => events.push(StoreEvent::GuildAdded(after.clone())),
@@ -814,7 +834,7 @@ impl State {
             }
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
-            E::GuildEmojisUpdate(update) => self.put_emojis(*update),
+            E::GuildEmojisUpdate(update) => self.put_emojis(*update, events),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
@@ -1398,6 +1418,9 @@ impl State {
         self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
+                if before.emojis != after.emojis {
+                    events.push(StoreEvent::GuildEmojisChanged { guild_id: id });
+                }
                 if !before.shows_the_same(&after) {
                     events.push(StoreEvent::GuildUpdated(after));
                 }
@@ -1566,14 +1589,20 @@ impl State {
         self.put_guild(next, &known, events);
     }
 
-    // Nothing shows the list, so no event.
-    fn put_emojis(&mut self, update: GuildEmojisUpdate) {
+    fn put_emojis(&mut self, update: GuildEmojisUpdate, events: &mut Vec<StoreEvent>) {
         let Some(known) = self.entities.guilds.get(&update.guild_id) else {
             return;
         };
+        let emojis = super::convert::guild_emojis(update.emojis);
+        if *emojis == *known.emojis {
+            return;
+        }
         let mut next = (**known).clone();
-        next.emojis = super::convert::emoji_ids(&update.emojis);
+        next.emojis = emojis;
         self.entities.guilds.insert(update.guild_id, Arc::new(next));
+        events.push(StoreEvent::GuildEmojisChanged {
+            guild_id: update.guild_id,
+        });
     }
 
     fn delete_role(&mut self, delete: GuildRoleDelete, events: &mut Vec<StoreEvent>) {
@@ -1877,7 +1906,12 @@ impl State {
         self.entities
             .guilds
             .values()
-            .find(|guild| guild.emojis.binary_search(&emoji).is_ok())
+            .find(|guild| {
+                guild
+                    .emojis
+                    .binary_search_by_key(&emoji, |known| known.id)
+                    .is_ok()
+            })
             .map(|guild| guild.id)
     }
 
@@ -2299,6 +2333,7 @@ mod browser;
 mod creating;
 mod forum;
 mod media;
+mod picker;
 mod reactions;
 mod reading;
 

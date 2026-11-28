@@ -2250,7 +2250,7 @@ async fn pump(mut finish: Finish) {
                 let preparing = {
                     let _gate = shared.acks.gate();
                     shared.acks.forget_all();
-                    shared.store.begin_ready()
+                    shared.store.begin_ready(ready.user.user.id)
                 };
                 let store = shared.store.clone();
                 let prepared =

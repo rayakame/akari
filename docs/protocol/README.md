@@ -22,6 +22,9 @@ surprises we found.
   a nonce, request errors
 - [reactions.md](reactions.md): adding and removing reactions and listing who reacted: the
   routes, the emoji in the path, the optimistic change and its undo, the errors
+- [emoji-picker.md](emoji-picker.md): what the core gives the emoji picker: Unicode's emoji and
+  their names, the user's servers' emoji and which may be used where, the recently used
+  reactions, the quick reactions, search
 - [rate-limits.md](rate-limits.md): per-route and global REST limits and how Akari stays
   within them
 - [user-settings.md](user-settings.md): the settings proto (server folders and order) and

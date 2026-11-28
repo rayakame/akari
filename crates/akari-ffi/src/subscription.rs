@@ -112,6 +112,11 @@ pub enum StoreEvent {
     /// The display settings changed; read `display_settings` again, and the messages: their
     /// attachments may show otherwise.
     DisplaySettingsChanged,
+    /// The guild's custom emoji changed: read `custom_emoji_sections` again where the picker
+    /// shows.
+    GuildEmojisChanged {
+        guild_id: GuildId,
+    },
     /// The user agreed to see the guild's age-restricted channels; read `age_gate` again.
     AgeGateChanged {
         guild_id: GuildId,
@@ -263,6 +268,7 @@ impl StoreEvent {
             },
             E::ServerListChanged => Self::ServerListChanged,
             E::DisplaySettingsChanged => Self::DisplaySettingsChanged,
+            E::GuildEmojisChanged { guild_id } => Self::GuildEmojisChanged { guild_id },
             E::AgeGateChanged { guild_id } => Self::AgeGateChanged { guild_id },
             E::GuildSettingsChanged { guild_id } => Self::GuildSettingsChanged { guild_id },
             E::BadgeChanged {

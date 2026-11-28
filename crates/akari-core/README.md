@@ -3,7 +3,10 @@
 The Discord client without a UI: the wire models and gateway decoding, `DiscordClient` with
 both logins, the gateway connection, the state store (`akari_core::state`), the disk cache
 (`akari_core::cache`) and `Account`, which keeps the store current, loads history and sends
-messages. Hosts reach it through `akari-ffi` (Swift, Kotlin) or link it directly (Linux, the
+messages, and the emoji picker's data (`akari_core::emoji`: Unicode's emoji and the short names
+Discord's users type; the store's reads of the user's servers' emoji, which may be used where,
+the recently used and quick reactions and search, in `docs/protocol/emoji-picker.md`). Hosts
+reach it through `akari-ffi` (Swift, Kotlin) or link it directly (Linux, the
 CLI). How Discord's side behaves is in `docs/protocol`; how messages load is in
 `docs/protocol/messages.md`.
 

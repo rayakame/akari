@@ -50,6 +50,14 @@ final class FakeStore: Store, @unchecked Sendable {
         var newPosts: Set<ChannelId> = []
         // `nil` inside: Discord hasn't said how many.
         var postNewCounts: [ChannelId: UInt32?] = [:]
+        // The picker's servers by the channel asked for; none: no server emoji there.
+        var emojiSections: [ChannelId: [EmojiSection]] = [:]
+        // By channel; none: nothing used yet.
+        var recentReactions: [ChannelId: [PickerEmoji]] = [:]
+        // By channel; none: the core's defaults, 💯 😆 💖.
+        var quickReactions: [ChannelId: [PickerEmoji]] = [:]
+        // What a search finds for a query as typed.
+        var emojiSearch: @Sendable (String) -> [PickerEmoji] = { _ in [] }
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -85,6 +93,8 @@ final class FakeStore: Store, @unchecked Sendable {
     let subscription: FakeSubscription
     let log: CallLog
     private let state: Locked<State>
+    // A search for one of these queries waits until its signal fires.
+    let heldSearches = Locked<[String: Signal]>([:])
 
     init(_ state: State = State(), subscription: FakeSubscription = FakeSubscription()) {
         self.state = Locked(state)
@@ -332,6 +342,72 @@ final class FakeStore: Store, @unchecked Sendable {
     override func newPosts(postIds: [ChannelId]) -> [ChannelId] {
         read(.newPosts(postIds)) { state in postIds.filter(state.newPosts.contains) }
     }
+
+    override func customEmojiSections(channelId: ChannelId) -> [EmojiSection] {
+        read(.customEmojiSections(channelId)) { $0.emojiSections[channelId] ?? [] }
+    }
+
+    override func emojiAccess(channelId: ChannelId, emojiId: EmojiId) -> EmojiAccess? {
+        state.current.emojiSections[channelId]?.lazy.flatMap(\.emojis).first { $0.id == emojiId }?.access
+    }
+
+    override func recentReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] {
+        read(.recentReactions(channelId, newest)) { $0.recentReactions[channelId] ?? [] }
+    }
+
+    override func quickReactions(channelId: ChannelId, newest: EmojiVersion) -> [PickerEmoji] {
+        read(.quickReactions(channelId, newest)) { state in
+            state.quickReactions[channelId] ?? ["💯", "😆", "💖"].map(pickerEmoji)
+        }
+    }
+
+    // Logged as a call: it runs off the main thread, as the core's does.
+    override func searchEmoji(
+        channelId: ChannelId, query: String, newest: EmojiVersion, limit: UInt32
+    ) async -> [PickerEmoji] {
+        log.append(.searchEmoji(channelId, query, newest, limit: limit))
+        if let held = heldSearches.current[query] {
+            await held.wait()
+        }
+        return Array(state.current.emojiSearch(query).prefix(Int(limit)))
+    }
+
+    // A search for `query` answers once the returned signal fires.
+    func holdSearch(_ query: String) -> Signal {
+        let signal = Signal()
+        heldSearches.withLock { $0[query] = signal }
+        return signal
+    }
+}
+
+private let catalog = unicodeEmoji(newest: newestEmojiVersion()).flatMap(\.emojis)
+
+// A Unicode emoji as the core's picker reads give it.
+func pickerEmoji(_ emoji: String) -> PickerEmoji {
+    .unicode(emoji: unicodeEmojiRecord(emoji))
+}
+
+func unicodeEmojiRecord(_ emoji: String) -> UnicodeEmoji {
+    catalog.first { $0.emoji == emoji }
+        ?? UnicodeEmoji(
+            emoji: emoji, name: emoji, shortcodes: [], cldrName: emoji, group: .symbols,
+            skinTones: false, version: EmojiVersion(major: 6, minor: 0))
+}
+
+func customEmoji(
+    _ raw: UInt64, _ name: String, in guild: UInt64 = 1, animated: Bool = false,
+    access: EmojiAccess = .usable
+) -> CustomEmoji {
+    CustomEmoji(
+        id: id(raw), guildId: id(guild), name: name, animated: animated,
+        key: .emoji(emojiId: id(raw), animated: animated), access: access)
+}
+
+func pickerEmoji(
+    _ raw: UInt64, _ name: String, in guild: UInt64 = 1, animated: Bool = false,
+    access: EmojiAccess = .usable
+) -> PickerEmoji {
+    .custom(emoji: customEmoji(raw, name, in: guild, animated: animated, access: access))
 }
 
 // A message as the store is asked about it: a thread's starter row and the message it shows have

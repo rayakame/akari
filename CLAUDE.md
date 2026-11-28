@@ -65,7 +65,11 @@ required tag) and creates posts with the forum's slowmode, the user's own post r
 it keeps each message's reactions, counted live by the reaction dispatches on every copy of the
 message, with an event and a read of their own, adds and takes back the user's own (shown at
 once, one request per message and emoji for the latest wish, a refusal undone, Discord's refusals
-told apart), removes others' for moderators and lists who reacted, page by page; the messages replies answer in a store of their
+told apart), removes others' for moderators and lists who reacted, page by page; the emoji
+picker's data (Unicode's emoji from the `emojis` crate with the short names Discord's users type,
+up to what the host's font draws, the user's servers' emoji and whether and why not they may be
+used in a channel, the user's own count of recently used reactions in the cache, the three quick
+reactions and search); the messages replies answer in a store of their
 own (loaded, deleted or not loaded, bounded per channel, kept current by edits and deletes);
 whether a channel has pins the user hasn't seen (the pins dot); and says what the user may do
 with a message (`MessageActions`: reply, edit, delete, pin, react, mark unread, copy its link,
@@ -90,7 +94,7 @@ channel waits behind the age gate, with the user's agreement per server in the c
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
 answers a message) and tail messages with their reactions and what a reply answers, react, take a
-reaction back and list who reacted, show where a channel's unread state,
+reaction back and list who reacted, list what the emoji picker offers in a channel or search it, show where a channel's unread state,
 mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
@@ -98,7 +102,8 @@ emoji span's key, the display settings, attachments with their kind, size, place
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), a message's reactions, reacting, a moderator's removals and who reacted, what a reply answers (its preview on one line, formatted), sending a
+message's thumbnail), a message's reactions, reacting, a moderator's removals and who reacted,
+the emoji picker's reads, what a reply answers (its preview on one line, formatted), sending a
 reply, the pins dot, what the user may do with a message and marking unread from one, through
 UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
@@ -111,7 +116,8 @@ official client's order for the plain and the Shift-held bar and the menu's grou
 later features' places included, with Mark Unread moving the new messages line; a message's
 reactions as pills (plain and super reactions counted together), a click that adds or takes back,
 the quick reactions, a pill's tooltip names, the reactions window's emoji and users, the removals'
-question, and a forum card's and post bar's reactions), the message
+question, a forum card's and post bar's reactions, and the emoji picker's sections, search,
+selection and pick), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -155,7 +161,9 @@ Thread, Copy Text, Mark Unread and Copy Message Link in the official order, and 
 on a message marks unread from it; a message's reactions stand under it as pills (the count
 rolling in the key window, the user's own in the brand's colors, an add button at the end,
 changed in place without rebuilding the row), a click adds or takes back, the hover bar has three
-quick reactions, Add Reaction lists them as a menu until there is an emoji picker, the menu has
+quick reactions, Add Reaction (the bar's, a row's add button, a post's React to Post, the menu's
+"View More") opens the emoji picker beside it (search, a strip of sections, the grid with pinned
+headers, the arrows, Return and Shift, the row kept lit while it is open), the menu has
 View Reactions (a window with the emoji by count and who reacted, a hundred at a time, with a ✕
 where allowed) and, for moderators, Remove Reactions and Remove All Reactions after a question,
 "Show emoji reactions" off hides all of it, and forum cards and a post's bar show the post's

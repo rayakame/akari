@@ -4,6 +4,7 @@ mod account;
 mod client;
 mod contents;
 mod embeds;
+mod emoji;
 mod errors;
 mod formatted;
 mod ids;
@@ -25,6 +26,10 @@ pub use client::{DiscordClient, Endpoints, HostInfo, Token, discord_endpoints};
 pub use embeds::{
     Embed, EmbedAuthor, EmbedFieldText, EmbedFooter, EmbedImage, EmbedKind, EmbedLink, EmbedVideo,
     RichText,
+};
+pub use emoji::{
+    CustomEmoji, EmojiAccess, EmojiGroup, EmojiSection, EmojiVersion, PickerEmoji, UnicodeEmoji,
+    UnicodeEmojiGroup, newest_emoji_version, picker_reaction, unicode_emoji,
 };
 pub use errors::{
     ClientError, GatewayError, ImageError, LoginError, LogoutError, NetworkErrorKind, RequestError,

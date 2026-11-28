@@ -47,8 +47,13 @@ protocol MessageListActions: AnyObject {
     func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool)
     // An Option-click on a message.
     func markUnread(from row: MessageListModel.Row)
-    // The emoji before the bar's buttons and in Add Reaction's menu.
+    // The emoji before the bar's buttons.
     func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction]
+    // The emoji of Add Reaction's submenu in the menu.
+    func menuReactions(for row: MessageListModel.Row) -> [QuickReaction]
+    // The emoji picker for the row's message, whose picks react from `location`; nil where Add
+    // Reaction isn't offered.
+    func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel?
     func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation)
     // A click on a pill under a message or in a post's bar, and on a forum's default reaction.
     func toggleReaction(
@@ -91,6 +96,10 @@ extension MessageListActions {
     func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}
     func markUnread(from row: MessageListModel.Row) {}
     func quickReactions(for row: MessageListModel.Row, shift: Bool) -> [QuickReaction] { [] }
+    func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] { [] }
+    func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel? {
+        nil
+    }
     func react(_ quick: QuickReaction, on row: MessageListModel.Row, from location: ReactionLocation) {}
     func toggleReaction(
         _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation

@@ -20,7 +20,7 @@ pub(crate) use self::caches::Caches;
 pub(crate) use self::flusher::Flusher;
 use self::rows::{
     ChannelRow, CurrentUserRow, DisplayRow, FolderRow, GuildRow, GuildSettingsRow, MemberRow,
-    MessageRow, ReadStateRow, UserRow,
+    MessageRow, ReactionUseRow, ReadStateRow, UserRow,
 };
 pub(crate) use self::snapshot::Snapshot;
 pub(crate) use self::thread::CacheThread;
@@ -28,7 +28,8 @@ use crate::model::{ChannelId, GuildId, Snowflake, Timestamp, UserId};
 use crate::state::apply::Entities;
 use crate::state::{
     AgeAgreements, CachedMessages, CachedTargets, Channel, CurrentUser, Delivery, DisplaySettings,
-    FolderEntry, Guild, GuildSettings, Member, Message, ReadState, ReplyTarget, User,
+    FolderEntry, Guild, GuildSettings, Member, Message, ReactionUse, ReactionUses, ReadState,
+    ReplyTarget, User,
 };
 
 const LOG: &str = "akari_core::cache";
@@ -48,6 +49,7 @@ const FOLDERS: &str = "folders";
 const NOTIFICATION_FLAGS: &str = "notification_flags";
 const DISPLAY: &str = "display";
 const AGE_AGREEMENTS: &str = "age_agreements";
+const REACTION_USES: &str = "reaction_uses";
 
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
     directory.join(format!("{}.sqlite", user.get()))
@@ -319,6 +321,15 @@ impl Cache {
                     settings.age_agreements =
                         Arc::new(guilds.into_iter().map(GuildId::new).collect());
                 }),
+                REACTION_USES => {
+                    serde_json::from_str::<Vec<ReactionUseRow>>(&data)
+                        .ok()
+                        .map(|rows| {
+                            settings.reaction_uses = Arc::new(ReactionUses::from_uses(
+                                rows.into_iter().map(ReactionUse::from).collect(),
+                            ));
+                        })
+                }
                 _ => Some(()),
             };
             if read.is_none() {
@@ -599,6 +610,11 @@ impl Writer<'_> {
     pub(crate) fn put_age_agreements(&mut self, guilds: &AgeAgreements) -> rusqlite::Result<()> {
         let ids: Vec<u64> = guilds.iter().map(|guild| guild.get()).collect();
         self.put_user_setting(AGE_AGREEMENTS, json(&ids)?)
+    }
+
+    pub(crate) fn put_reaction_uses(&mut self, uses: &ReactionUses) -> rusqlite::Result<()> {
+        let rows: Vec<ReactionUseRow> = uses.uses().iter().map(ReactionUseRow::from).collect();
+        self.put_user_setting(REACTION_USES, json(&rows)?)
     }
 
     fn put_user_setting(&mut self, key: &str, data: String) -> rusqlite::Result<()> {

@@ -817,19 +817,24 @@ impl From<akari_core::ReactorsPage> for ReactorsPage {
     }
 }
 
+impl From<&state::ReactionEmoji> for ReactionEmoji {
+    fn from(emoji: &state::ReactionEmoji) -> Self {
+        Self {
+            id: emoji.id,
+            name: emoji.name.as_deref().map(str::to_owned),
+            animated: emoji.animated,
+            key: emoji.id.map(|emoji_id| ImageKey::Emoji {
+                emoji_id,
+                animated: emoji.animated,
+            }),
+        }
+    }
+}
+
 impl From<&state::Reaction> for Reaction {
     fn from(reaction: &state::Reaction) -> Self {
-        let emoji = &reaction.emoji;
         Self {
-            emoji: ReactionEmoji {
-                id: emoji.id,
-                name: emoji.name.as_deref().map(str::to_owned),
-                animated: emoji.animated,
-                key: emoji.id.map(|emoji_id| ImageKey::Emoji {
-                    emoji_id,
-                    animated: emoji.animated,
-                }),
-            },
+            emoji: (&reaction.emoji).into(),
             normal: reaction.normal,
             burst: reaction.burst,
             me: reaction.me,

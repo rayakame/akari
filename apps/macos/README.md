@@ -110,13 +110,24 @@ Voice, notifications and settings come later.
   is known before the cell exists. A row whose reactions alone changed keeps its cell
   (`TimelineChanges.reacted`): the pills change in place and the row's height is noted inside
   the same update that keeps the reader's place or the bottom. The hover bar has the quick
-  reactions before its buttons (`QuickReactionButton`); Add Reaction, in the bar, at a row's
-  end and in a post's bar, opens them as a menu until there is an emoji picker; the message's
-  menu has them as Add Reaction's submenu, with View Reactions and the two removals, whose
-  question is an alert of the session's window. `ReactorsPanel` is the reactions window, a key
+  reactions before its buttons (`QuickReactionButton`, a custom one's `ImageLayerView`); Add
+  Reaction, in the bar, at a row's end and in a post's bar, opens the emoji picker; the
+  message's menu has Add Reaction's submenu (its emoji drawn beside their `:name:`, then "View
+  More"), View Reactions and the two removals, whose question is an alert of the session's
+  window. `ReactorsPanel` is the reactions window, a key
   panel over a dimmed window like the Threads modal. A forum post's bar (`PostBarCell`) has
   its reactions at its left, and a card its one reaction as a chip over the card
   (`ForumCardReaction`). A reaction Discord refuses without words plays the alert sound.
+- **The emoji picker** (`docs/ui/emoji-picker.md`): `EmojiPickerPresenter`, owned by the list's
+  controller, shows `EmojiPickerView` in a key `ChildWindows` panel beside its opener (left of
+  the hover bar, right of a button) over a clear shield, and keeps the message's row lit with
+  its bar while it is open. The view follows its `EmojiPickerModel`: `PickerSearchField` keeps
+  the keyboard's focus and hands the arrows and Return to the model, `EmojiStripView` has a
+  button per section and lights the one at the grid's top, `EmojiGridView` lays out
+  `EmojiGridLayout` with views only for the cells that show (`EmojiGlyphView` for Unicode, an
+  `ImageLayerView` for custom emoji), the selection, the headers and the pinned one, and
+  `EmojiFooterView` names the selected emoji. `EmojiPickerRenders` draws it at 2x with
+  `TEST_RUNNER_AKARI_RENDERS=1`.
 - **History:** older pages load before the top is reached and newer ones near the bottom while
   older messages are shown; the text being read never moves when a page lands, an edit
   changes a message's height or a message is deleted. A bar above the composer jumps to the

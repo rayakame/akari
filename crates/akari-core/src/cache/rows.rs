@@ -10,14 +10,16 @@ use crate::model::{
     ChannelId, ChannelType, GuildId, MessageId, MessageReferenceType, MessageType, OverwriteType,
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
+use crate::state::ReactionUse;
 use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentFilter, ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings,
-    ForumSort, ForumTag, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
-    NotificationLevel, PermissionOverwrite, Reaction, ReactionEmoji, ReadState, Redaction,
-    ReplyPreview, ReplyTarget, Role, RoleSubscription, SpoilerSetting, Sticker, StickerAnimation,
-    SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership, Unreads, User,
+    ForumSort, ForumTag, Guild, GuildEmoji, GuildSettings, ImageHash, Member, Message,
+    MessageReference, NotificationLevel, PermissionOverwrite, Reaction, ReactionEmoji, ReadState,
+    Redaction, ReplyPreview, ReplyTarget, Role, RoleSubscription, SpoilerSetting, Sticker,
+    StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership, Unreads,
+    User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -174,15 +176,62 @@ pub(super) struct GuildRow {
     // 0 all messages, 1 only mentions, 2 nothing.
     #[serde(default, skip_serializing_if = "is_zero")]
     default_level: u8,
-    // Its custom emoji's IDs, sorted; absent in files written before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    emojis: Vec<u64>,
+    emojis: Vec<GuildEmojiRow>,
     #[serde(default, skip_serializing_if = "is_false")]
     age_restricted: bool,
 }
 
 fn is_zero(value: &u8) -> bool {
     *value == 0
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize)]
+struct GuildEmojiRow {
+    id: u64,
+    name: Box<str>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    animated: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    available: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    managed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    roles: Vec<u64>,
+}
+
+impl From<&GuildEmoji> for GuildEmojiRow {
+    fn from(emoji: &GuildEmoji) -> Self {
+        Self {
+            id: emoji.id.get(),
+            name: emoji.name.clone(),
+            animated: emoji.animated,
+            available: emoji.available,
+            managed: emoji.managed,
+            roles: emoji.roles.iter().map(|role| role.get()).collect(),
+        }
+    }
+}
+
+impl From<GuildEmojiRow> for GuildEmoji {
+    fn from(row: GuildEmojiRow) -> Self {
+        Self {
+            id: Snowflake::new(row.id),
+            name: row.name,
+            animated: row.animated,
+            available: row.available,
+            managed: row.managed,
+            roles: row.roles.into_iter().map(Snowflake::new).collect(),
+        }
+    }
 }
 
 fn level_code(level: NotificationLevel) -> u8 {
@@ -224,7 +273,7 @@ impl From<&Guild> for GuildRow {
             large: guild.large,
             community: guild.community,
             default_level: level_code(guild.default_message_notifications),
-            emojis: guild.emojis.iter().map(|emoji| emoji.get()).collect(),
+            emojis: guild.emojis.iter().map(GuildEmojiRow::from).collect(),
             age_restricted: guild.age_restricted,
         }
     }
@@ -254,7 +303,7 @@ impl GuildRow {
             large: self.large,
             default_message_notifications: level(self.default_level),
             community: self.community,
-            emojis: self.emojis.into_iter().map(Snowflake::new).collect(),
+            emojis: self.emojis.into_iter().map(GuildEmoji::from).collect(),
             age_restricted: self.age_restricted,
         }
     }
@@ -1529,6 +1578,47 @@ mod tests {
             let read: UserRow = serde_json::from_str(&json).unwrap();
 
             assert_eq!(User::from(read).discriminator, discriminator, "{json}");
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct ReactionUseRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    animated: bool,
+    count: u32,
+    // Unix milliseconds.
+    last: i64,
+}
+
+impl From<&ReactionUse> for ReactionUseRow {
+    fn from(used: &ReactionUse) -> Self {
+        Self {
+            id: used.emoji.id.map(Snowflake::get),
+            name: used.emoji.name.clone(),
+            animated: used.emoji.animated,
+            count: used.count,
+            last: used.last_used,
+        }
+    }
+}
+
+impl From<ReactionUseRow> for ReactionUse {
+    fn from(row: ReactionUseRow) -> Self {
+        let emoji = match row.id {
+            Some(id) => {
+                ReactionEmoji::custom(Snowflake::new(id), row.name.as_deref(), row.animated)
+            }
+            None => ReactionEmoji::unicode(row.name.as_deref().unwrap_or_default()),
+        };
+        Self {
+            emoji,
+            count: row.count,
+            last_used: row.last,
         }
     }
 }

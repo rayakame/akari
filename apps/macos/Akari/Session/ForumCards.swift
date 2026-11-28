@@ -498,11 +498,12 @@ struct ForumCardReaction: View {
     }
 
     static func label(of reaction: ForumModel.Card.Reaction) -> String {
+        let spoken = ReactionPill.spokenName(of: reaction.emoji)
         if reaction.count == 0 {
-            return "\(reaction.name), press to react"
+            return "\(spoken), press to react"
         }
         let reactions = reaction.count == 1 ? "1 reaction" : "\(reaction.count) reactions"
-        return "\(reaction.name), \(reactions)"
+        return "\(spoken), \(reactions)"
     }
 }
 

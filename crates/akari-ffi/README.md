@@ -397,7 +397,8 @@ the send is the host's ([messages.md](../../docs/protocol/messages.md#sending-a-
 `react(channel_id, message_id, emoji, location)` adds the user's reaction and `unreact(…)` takes
 it back. `emoji` is a `ReactionEmoji` as `Store.reactions` gives it, or one a host builds: the
 `id` for a custom emoji (with its `name`, which the request's path carries; for an emoji the
-message already has, the message's own name is used), else the `name`, which is the Unicode
+message already has, the message's own name is used, and without any, the name the user's
+server has it under, as for a forum's default reaction), else the `name`, which is the Unicode
 emoji itself, exactly as picked (`❤️` with its variation selector is another reaction than
 `❤`); `key` isn't read. `location` is where the user clicked, which the official client tells
 Discord (`ReactionLocation`: `InlineButton` for a pill or the row's add button, `HoverBar`,
@@ -443,6 +444,37 @@ tooltip. Nothing is cached in the core and no event keeps a page current: a host
 the tooltip's three names drops them on `MessageReactionsChanged` for that message. A member's
 nickname isn't in the answer; names are found as for a message's author
 ([reactions.md](../../docs/protocol/reactions.md)).
+
+## The emoji picker
+
+What the picker shows is the core's ([emoji-picker.md](../../docs/protocol/emoji-picker.md));
+a host lays it out and decides nothing about which emoji may be used. Every read that returns
+Unicode emoji takes `newest`, an `EmojiVersion`: the newest the host's emoji font draws, which the
+app decides for the system it runs on (`newest_emoji_version()` is the catalog's own, 18.0).
+
+- `unicode_emoji(newest)` is the catalog: `UnicodeEmojiGroup`s in CLDR's order, each with its
+  `UnicodeEmoji`s (`emoji`, the short `name` without colons, other `shortcodes`, `cldr_name`,
+  `group`, `skin_tones`, `version`). It never changes while the app runs, so a host reads it once.
+- `Store.custom_emoji_sections(channel_id)` are the user's servers' emoji for reacting in a
+  channel (`EmojiSection`: `guild_id` and its `CustomEmoji`s with `id`, `name`, `animated`, the
+  image `key` and `access`), the channel's own server first. `EmojiAccess` is `Usable`, or why
+  not: `Unavailable` and `NitroLocked` are listed (to dim), `RoleLocked` and `External` never are,
+  but `Store.emoji_access(channel_id, emoji_id)` names them for any of the user's servers' emoji.
+  `GuildEmojisChanged { guild_id }` says to read the sections again while the picker shows.
+- `Store.recent_reactions(channel_id, newest)` is Frequently Used, best first (Akari's own count
+  of the user's reactions, at most 42), and `Store.quick_reactions(channel_id, newest)` the hover
+  bar's three. Both are `PickerEmoji`s (`Unicode { emoji }` or `Custom { emoji }`) and have no
+  event: read them when the picker or the bar opens.
+- `Store.search_emoji(channel_id, query, newest, limit)` is async and runs on Akari's runtime, so
+  a call per keystroke from the main actor only waits; an older answer can arrive after a newer
+  one's call, so a host keeps the latest query's.
+- `picker_reaction(emoji)` is the `ReactionEmoji` that `Account.react` takes for a picked emoji
+  (location `Picker`); reacting through `react` is what counts an emoji as used. A catalog emoji is
+  picked as `PickerEmoji.Unicode { emoji }`.
+
+A reaction's Unicode emoji is named by `emoji_shortcode` (akari-markdown's rule, the same names
+the picker shows, skin tones included): the tooltip's `:thumbsup:`, the reactions window's tabs
+and VoiceOver.
 
 ## Jumps
 

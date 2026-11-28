@@ -13,6 +13,7 @@ use super::fake::{FakeGateway, GENERAL, MESSAGE, events_until, fixture, online};
 use super::gateway::send;
 use super::support::{USER, token};
 use crate::account::{Account, ReactionKind, ReactionLocation};
+use crate::emoji::{EmojiVersion, PickerEmoji};
 use crate::errors::{ReactionError, RequestError};
 use crate::images::ImageKey;
 use crate::records::ReactionEmoji;
@@ -168,6 +169,66 @@ async fn reacting_and_taking_it_back_cross_with_their_event() {
             ),
         ]
     );
+    reacting.account.close();
+}
+
+fn picker_names(emojis: &[PickerEmoji]) -> Vec<String> {
+    emojis
+        .iter()
+        .map(|emoji| match emoji {
+            PickerEmoji::Unicode { emoji } => emoji.name.clone(),
+            PickerEmoji::Custom { emoji } => emoji.name.clone(),
+        })
+        .collect()
+}
+
+// 🫩 came with Emoji 16.0: the picker's reads give it to a host whose font draws 16.0, not 15.1.
+#[tokio::test]
+async fn a_reaction_shows_in_the_pickers_reads_up_to_the_hosts_version() {
+    let reacting = reacting().await;
+    reacting.answer(ResponseTemplate::new(204)).await;
+    let bags = ReactionEmoji {
+        name: Some("🫩".to_owned()),
+        ..heart()
+    };
+    reacting
+        .account
+        .react(GENERAL, MESSAGE, bags, ReactionLocation::Picker)
+        .await
+        .unwrap();
+    let store = reacting.account.store();
+    let name = "face_with_bags_under_eyes";
+
+    let older = EmojiVersion {
+        major: 15,
+        minor: 1,
+    };
+    assert_eq!(
+        picker_names(&store.quick_reactions(GENERAL, older)),
+        ["100", "laughing", "sparkling_heart"]
+    );
+    assert!(store.recent_reactions(GENERAL, older).is_empty());
+    let found = store
+        .search_emoji(GENERAL, name.to_owned(), older, 10)
+        .await;
+    assert!(found.is_empty(), "{found:?}");
+
+    let drawn = EmojiVersion {
+        major: 16,
+        minor: 0,
+    };
+    assert_eq!(
+        picker_names(&store.quick_reactions(GENERAL, drawn))[0],
+        name
+    );
+    assert_eq!(
+        picker_names(&store.recent_reactions(GENERAL, drawn)),
+        [name]
+    );
+    let found = store
+        .search_emoji(GENERAL, name.to_owned(), drawn, 10)
+        .await;
+    assert_eq!(picker_names(&found), [name]);
     reacting.account.close();
 }
 

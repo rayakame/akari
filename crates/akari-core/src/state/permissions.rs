@@ -171,7 +171,7 @@ mod tests {
             large: false,
             default_message_notifications: crate::state::NotificationLevel::AllMessages,
             community: false,
-            emojis: Box::new([]),
+            emojis: Arc::new([]),
             age_restricted: false,
         }
     }

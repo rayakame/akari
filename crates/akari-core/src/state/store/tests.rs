@@ -2301,3 +2301,165 @@ fn message_actions_answers_by_id_and_for_a_held_message() {
         MessageActions::default()
     );
 }
+
+fn note_reaction(store: &Store, emoji: &str) {
+    let now = store.now_millis();
+    store.write("test", |inner, _| {
+        inner
+            .state
+            .note_reaction(&ReactionEmoji::unicode(emoji), now);
+    });
+}
+
+fn picker_names(emojis: &[PickerEmoji]) -> Vec<String> {
+    emojis
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect()
+}
+
+fn quick_names(store: &Store) -> Vec<String> {
+    picker_names(&store.quick_reactions(general(), crate::emoji::EmojiVersion::NEWEST))
+}
+
+// The emoji the user reacts with are Akari's, not READY's: the pump's READY keeps them, one noted
+// while it was being prepared too.
+#[test]
+fn reaction_uses_outlive_the_pumps_ready() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.replace(store.prepare_ready(ready_where(|_| {})));
+
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    note_reaction(&store, "🔥");
+    store.replace(prepared);
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|_| {}))));
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+}
+
+// A READY that beats the restore: uses noted since add to the cached ones, which the flusher
+// would otherwise erase.
+#[test]
+fn a_ready_before_the_restore_adds_the_cached_reaction_uses() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|_| {}))));
+    note_reaction(&store, "👍");
+    let mut cache = Entities::from_ready(ready_where(|_| {}));
+    let now = store.now_millis();
+    let uses = Arc::make_mut(&mut cache.settings.reaction_uses);
+    for emoji in ["🔥", "🔥", "🔥", "👍", "😂"] {
+        uses.note(&ReactionEmoji::unicode(emoji), now);
+    }
+
+    assert!(!store.restore(cache));
+
+    assert_eq!(quick_names(&store), ["fire", "thumbsup", "joy"]);
+}
+
+const OTHER: u64 = 100_000_000_000_000_009;
+
+// `user`'s cache: an agreement for G1 and 🔥 reacted with.
+fn cache_of(user: u64, now: i64) -> Entities {
+    let mut cache = Entities::from_ready(ready_where(|data| {
+        nsfw_general(data);
+        data["user"]["id"] = user.to_string().into();
+    }));
+    Arc::make_mut(&mut cache.settings.age_agreements).insert(Snowflake::new(G1));
+    Arc::make_mut(&mut cache.settings.reaction_uses).note(&ReactionEmoji::unicode("🔥"), now);
+    cache
+}
+
+fn lent_nothing(store: &Store) {
+    assert!(matches!(store.age_gate(general()), AgeGate::Ask { .. }));
+    assert_eq!(quick_names(store), ["100", "laughing", "sparkling_heart"]);
+}
+
+// The host may name another account than READY's (`DiscordClient::account`): that account's
+// agreements and reactions stay its own, whichever comes first.
+#[test]
+fn another_accounts_restored_cache_lends_readys_account_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    assert!(store.restore(cache_of(OTHER, store.now_millis())));
+
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+
+    lent_nothing(&store);
+}
+
+#[test]
+fn another_accounts_cache_after_ready_lends_it_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+
+    assert!(!store.restore(cache_of(OTHER, store.now_millis())));
+
+    lent_nothing(&store);
+}
+
+#[test]
+fn a_cache_read_while_ready_is_prepared_adds_only_to_its_own_account() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let prepared = store.prepare_ready(ready_where(nsfw_general));
+    assert!(!store.restore(cache_of(OTHER, store.now_millis())));
+    store.replace(prepared);
+    lent_nothing(&store);
+
+    let store = Store::new(DEFAULT_LIMITS);
+    let prepared = store.prepare_ready(ready_where(nsfw_general));
+    assert!(!store.restore(cache_of(ME, store.now_millis())));
+    store.replace(prepared);
+    assert_eq!(store.age_gate(general()), AgeGate::Open);
+    assert_eq!(quick_names(&store), ["fire", "100", "laughing"]);
+}
+
+#[test]
+fn search_finds_the_users_custom_emoji_and_unicodes() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(|data| {
+        data["guilds"][0]["emojis"] = json!([{"id": "700000000000000001", "name": "wave_blob"}]);
+    }))));
+
+    let found: Vec<String> = store
+        .search_emoji(general(), "wave", crate::emoji::EmojiVersion::NEWEST, 10)
+        .iter()
+        .map(|emoji| emoji.name().into_owned())
+        .collect();
+
+    assert_eq!(found[..2], ["wave".to_owned(), "wave_blob".to_owned()]);
+    assert!(
+        store
+            .search_emoji(general(), "::", crate::emoji::EmojiVersion::NEWEST, 10)
+            .is_empty()
+    );
+}
+
+// 🫩 came with Emoji 16.0: a host whose font stops at 15.1 never gets it, one at 16.0 does.
+#[test]
+fn the_hosts_version_reaches_every_read() {
+    let store = ready_store();
+    note_reaction(&store, "🫩");
+    let bags = "face_with_bags_under_eyes";
+
+    let older = crate::emoji::EmojiVersion::new(15, 1);
+    assert_eq!(
+        picker_names(&store.quick_reactions(general(), older)),
+        ["100", "laughing", "sparkling_heart"]
+    );
+    assert!(store.recent_reactions(general(), older).is_empty());
+    assert!(store.search_emoji(general(), bags, older, 10).is_empty());
+
+    let drawn = crate::emoji::EmojiVersion::new(16, 0);
+    assert_eq!(
+        picker_names(&store.quick_reactions(general(), drawn))[0],
+        bags
+    );
+    assert_eq!(
+        picker_names(&store.recent_reactions(general(), drawn)),
+        [bags]
+    );
+    assert_eq!(
+        picker_names(&store.search_emoji(general(), bags, drawn, 10)),
+        [bags]
+    );
+}

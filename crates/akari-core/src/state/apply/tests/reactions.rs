@@ -2349,3 +2349,61 @@ fn a_click_that_changes_nothing_after_the_requests_holds_nothing_back() {
         "taken back elsewhere"
     );
 }
+
+fn used(state: &State) -> Vec<(String, u32)> {
+    state
+        .entities
+        .settings
+        .reaction_uses
+        .uses()
+        .iter()
+        .map(|used| {
+            (
+                used.emoji.name.as_deref().unwrap_or_default().to_owned(),
+                used.count,
+            )
+        })
+        .collect()
+}
+
+// Adding the user's reaction is a use of its emoji (the quick reactions and the picker's
+// Frequently Used); taking it back, a click on what is the user's already, or a refused click,
+// isn't.
+#[test]
+fn adding_a_reaction_counts_its_emoji_as_used() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    want(&mut state, GENERAL, 10, FIRE, true);
+    assert_eq!(used(&state), [(FIRE.to_owned(), 1)]);
+    want(&mut state, GENERAL, 10, FIRE, true);
+    assert_eq!(used(&state), [(FIRE.to_owned(), 1)], "already the user's");
+    want(&mut state, GENERAL, 10, FIRE, false);
+    assert_eq!(used(&state), [(FIRE.to_owned(), 1)], "taken back");
+    want(&mut state, GENERAL, 10, FIRE, true);
+    assert_eq!(used(&state), [(FIRE.to_owned(), 2)]);
+
+    want(&mut state, GENERAL, 99, UP, true);
+    assert_eq!(
+        used(&state),
+        [(FIRE.to_owned(), 2)],
+        "a message the store doesn't have"
+    );
+}
+
+// Its late echoes count nothing; once the PUT's is held back, reacting again is a use.
+#[test]
+fn a_reaction_made_again_while_its_echoes_are_late_counts_once_more() {
+    let mut state = on_ten();
+    settled(&mut state, true);
+    assert_eq!(used(&state), [(UP.to_owned(), 1)]);
+
+    assert_eq!(
+        add(&mut state, GENERAL, 10, ME, UP),
+        NOTHING,
+        "the PUT's echo"
+    );
+    assert_eq!(used(&state), [(UP.to_owned(), 1)]);
+    assert!(click(&mut state, true).changed);
+    assert_eq!(used(&state), [(UP.to_owned(), 2)], "made again");
+}

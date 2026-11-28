@@ -16,12 +16,13 @@ use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings, ForumSort, ForumTag, Guild,
-    GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
+    GuildEmoji, GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
     PermissionOverwrite, Reaction, ReactionEmoji, Redaction, ReplyPreview, ReplyTarget, Role,
     RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching,
     ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
+use crate::state::{ReactionUse, ReactionUses};
 
 pub(crate) struct TempDir(PathBuf);
 
@@ -119,9 +120,27 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
         community: id == 100,
         emojis: if id == 100 {
-            [Snowflake::new(7001), Snowflake::new(7002)].into()
+            [
+                GuildEmoji {
+                    id: Snowflake::new(7001),
+                    name: "wave".into(),
+                    animated: false,
+                    available: true,
+                    managed: false,
+                    roles: Box::new([]),
+                },
+                GuildEmoji {
+                    id: Snowflake::new(7002),
+                    name: "dance".into(),
+                    animated: true,
+                    available: false,
+                    managed: true,
+                    roles: [Snowflake::new(id + 1)].into(),
+                },
+            ]
+            .into()
         } else {
-            Box::new([])
+            Arc::new([])
         },
         age_restricted: id == 100,
     }
@@ -485,6 +504,7 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             writer.put_notification_flags(entities.settings.notification_flags)?;
             writer.put_display_settings(&entities.settings.display)?;
             writer.put_age_agreements(&entities.settings.age_agreements)?;
+            writer.put_reaction_uses(&entities.settings.reaction_uses)?;
             Ok(())
         })
         .unwrap();
@@ -563,6 +583,23 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         notification_flags: 16,
         unreadable: false,
         age_agreements: Arc::new([Snowflake::new(100), Snowflake::new(200)].into()),
+        reaction_uses: Arc::new(ReactionUses::from_uses(vec![
+            ReactionUse {
+                emoji: ReactionEmoji::unicode("👍"),
+                count: 7,
+                last_used: 1_790_000_000_000,
+            },
+            ReactionUse {
+                emoji: ReactionEmoji::custom(Snowflake::new(7002), Some("dance"), true),
+                count: 1,
+                last_used: 1_790_000_100_000,
+            },
+            ReactionUse {
+                emoji: ReactionEmoji::custom(Snowflake::new(7003), None, false),
+                count: 2,
+                last_used: 1_780_000_000_000,
+            },
+        ])),
     };
     entities
 }
@@ -780,11 +817,11 @@ fn the_settings_tables_exist() {
     }
 }
 
-// Their attachments (before 6) and embeds (before 7) have no scan version, which would cover
-// their media as pending scans; before 8 a reply has no line and a message no reactions.
+// Before 6 attachments and before 7 embeds have no scan version (their media would wait as
+// pending scans), before 8 replies no line and messages no reactions, before 9 emoji no names.
 #[test]
 fn files_from_before_media_kept_their_scans_are_discarded() {
-    for version in [4, 5, 6, 7] {
+    for version in [4, 5, 6, 7, 8] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());
@@ -1867,4 +1904,40 @@ async fn ready_reports_only_badges_that_changed_since_the_cache() {
             format!("GuildBadgeChanged({FIXTURE_GUILD})")
         ]
     );
+}
+
+#[tokio::test]
+async fn a_reaction_used_writes_only_its_row() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_settings(entities());
+    thread
+        .flush(Snapshot {
+            entities: state.clone(),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+    let mut next = rebuilt(&state);
+    Arc::make_mut(&mut next.settings.reaction_uses)
+        .note(&ReactionEmoji::unicode("🔥"), 1_790_000_200_000);
+
+    let flushed = thread
+        .flush(Snapshot {
+            entities: next.clone(),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+    drop(thread);
+
+    assert_eq!(
+        flushed,
+        Flushed {
+            other: 1,
+            ..Flushed::default()
+        }
+    );
+    let read = open(&dir).read_entities().unwrap().value;
+    assert_eq!(read.settings.reaction_uses, next.settings.reaction_uses);
 }

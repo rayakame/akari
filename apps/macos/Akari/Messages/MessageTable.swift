@@ -403,6 +403,14 @@ final class MessageListBridge: MessageListActions {
         Task { [messageActions] in await messageActions?.react(quick, on: row, from: location) }
     }
 
+    func menuReactions(for row: MessageListModel.Row) -> [QuickReaction] {
+        messageActions?.menuReactions(for: row) ?? []
+    }
+
+    func emojiPicker(for row: MessageListModel.Row, from location: ReactionLocation) -> EmojiPickerModel? {
+        messages.reactions.openPicker(for: row, from: location)
+    }
+
     func toggleReaction(
         _ emoji: ReactionEmoji, of row: MessageListModel.Row, from location: ReactionLocation
     ) {
