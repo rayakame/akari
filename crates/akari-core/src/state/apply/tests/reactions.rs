@@ -416,6 +416,9 @@ fn copies() -> Vec<Copy> {
     let mut sent_along = viewing(THREAD);
     apply(&mut sent_along, "MESSAGE_CREATE", starter_row(true));
 
+    let mut pins = ready_state();
+    pinned_only(&mut pins, GENERAL, &[message(10, GENERAL)]);
+
     vec![
         Copy {
             name: "window",
@@ -468,6 +471,19 @@ fn copies() -> Vec<Copy> {
             channel: GENERAL,
             id: ORIGIN,
             read: starter_reactions,
+        },
+        Copy {
+            name: "pins list",
+            state: pins,
+            channel: GENERAL,
+            id: 10,
+            read: |state| {
+                shown(
+                    state.pins(Snowflake::new(GENERAL)).items[0]
+                        .message
+                        .reactions(),
+                )
+            },
         },
     ]
 }
@@ -579,6 +595,7 @@ fn each_copy_tells_what_shows_it() {
             ("post preview", vec![format!("PostPreviewChanged({POST})")]),
             ("fetched starter", vec![changed(THREAD, row)]),
             ("starter sent along", vec![changed(THREAD, row)]),
+            ("pins list", vec![format!("PinsChanged({GENERAL})")]),
         ]
     );
 }

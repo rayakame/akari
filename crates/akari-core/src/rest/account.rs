@@ -12,7 +12,9 @@ use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, GuildId, MessageId, UserId};
+use crate::model::{
+    self, ChannelId, ChannelType, DISCORD_EPOCH, GuildId, MessageId, Timestamp, UserId,
+};
 use crate::state::{AckBody, ReactionEmoji, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
@@ -32,6 +34,9 @@ const EMOJI_SOURCE: &str = "emojis/{}/source";
 const STICKER: &str = "stickers/{}";
 const STICKER_GUILD: &str = "stickers/{}/guild";
 const STICKER_PACK: &str = "sticker-packs/{}";
+const PINS: &str = "channels/{}/messages/pins";
+const PIN: &str = "channels/{}/messages/pins/{}";
+const PINS_ACK: &str = "channels/{}/pins/ack";
 const REACTIONS: &str = "channels/{}/messages/{}/reactions";
 const REACTIONS_EMOJI: &str = "channels/{}/messages/{}/reactions/{}";
 const REACTION_OWN: &str = "channels/{}/messages/{}/reactions/{}/@me";
@@ -822,6 +827,74 @@ impl AccountRest {
             .map_err(RequestError::from)?;
         let (users, received) = parse_list(&body).map_err(|_| RequestError::UnexpectedResponse)?;
         Ok(Reactors { users, received })
+    }
+
+    pub(crate) async fn list_pins(
+        &self,
+        channel: ChannelId,
+        before: Option<Timestamp>,
+        limit: u8,
+    ) -> Result<model::MessagePins, RequestError> {
+        let before = before.map_or_else(String::new, |time| {
+            format!("&before={}", uri_component(&time.iso_millis()))
+        });
+        let path = format!(
+            "channels/{}/messages/pins?limit={limit}{before}",
+            channel.get()
+        );
+        let route = RouteKey::new(Method::Get, PINS, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Idempotent, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    pub(crate) async fn pin_message(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        self.pin_request(Method::Put, HttpMethod::PUT, channel, message)
+            .await
+    }
+
+    pub(crate) async fn unpin_message(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        self.pin_request(Method::Delete, HttpMethod::DELETE, channel, message)
+            .await
+    }
+
+    async fn pin_request(
+        &self,
+        method: Method,
+        verb: HttpMethod,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        let path = format!("channels/{}/messages/pins/{}", channel.get(), message.get());
+        let route = RouteKey::new(method, PIN, channel.get());
+        self.send(route, Waiting::Idempotent, || {
+            self.request(verb.clone(), &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
+    }
+
+    pub(crate) async fn ack_pins(&self, channel: ChannelId) -> Result<(), Failure> {
+        let path = format!("channels/{}/pins/ack", channel.get());
+        let route = RouteKey::new(Method::Post, PINS_ACK, channel.get());
+        self.send(route, Waiting::Never, || {
+            self.request(HttpMethod::POST, &path)
+        })
+        .await?;
+        Ok(())
     }
 
     pub(crate) async fn ack(

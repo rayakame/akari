@@ -29,6 +29,7 @@ protocol MessageListActions: AnyObject {
     func openThread(_ id: ChannelId, from parent: ChannelId)
     // "threads" in a "started a thread" line: the channel's Threads modal.
     func openThreads(of channel: ChannelId)
+    func togglePins(of channel: ChannelId)
     // "a message" in a pin's line; the table scrolls once the model has jumped.
     func jump(to message: MessageId)
     // A click on a reply's line: to the message it answers.
@@ -97,6 +98,7 @@ protocol MessageListActions: AnyObject {
 }
 
 extension MessageListActions {
+    func togglePins(of channel: ChannelId) {}
     func jumpToTarget(of row: MessageListModel.Row) {}
     func jumpShown(_ number: Int) {}
     func lastShownJump() -> Int { .max }

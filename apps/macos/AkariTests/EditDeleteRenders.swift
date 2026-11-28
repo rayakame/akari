@@ -210,14 +210,14 @@ struct EditDeleteRenders {
         let message = row(1, by: me, at: berlinTime(2026, 10, 10, 12, 0), content: "One typo in the second paragraph though.")
         for (file, tip) in [("9-delete-question-from-the-menu", true), ("10-delete-question", false)] {
             let question = MessageActionsModel.DeleteQuestion(row: message, showsTip: tip) {}
-            let view = DeleteMessageView()
-            let height = view.height(for: question, width: DeleteLayout.width, maxHeight: 800)
+            let view = MessageQuestionView()
+            let height = view.height(for: question, width: MessageQuestionLayout.width, maxHeight: 800)
             let window = ScaledWindow.make(scale: 2)
             window.appearance = NSAppearance(named: name)
-            window.setContentSize(NSSize(width: DeleteLayout.width + 40, height: height + 40))
+            window.setContentSize(NSSize(width: MessageQuestionLayout.width + 40, height: height + 40))
             let backdrop = FlippedView()
             window.contentView = backdrop
-            view.frame = NSRect(x: 20, y: 20, width: DeleteLayout.width, height: height)
+            view.frame = NSRect(x: 20, y: 20, width: MessageQuestionLayout.width, height: height)
             backdrop.addSubview(view)
             view.show(question, images: nil, maxHeight: 800)
             window.layoutIfNeeded()
@@ -227,7 +227,7 @@ struct EditDeleteRenders {
                     "panel \(box(view, in: backdrop))", "title \(box(view.title, in: backdrop))",
                     "message \(box(view.message, in: backdrop))", "box \(box(view.box, in: backdrop))",
                     "row \(box(view.box.preview, in: backdrop))", "tip \(box(view.tip, in: backdrop))",
-                    "cancel \(box(view.cancel, in: backdrop))", "delete \(box(view.delete, in: backdrop))",
+                    "cancel \(box(view.cancel, in: backdrop))", "delete \(box(view.confirm, in: backdrop))",
                 ])
         }
     }

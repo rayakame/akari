@@ -57,7 +57,8 @@ their 429s are reported to the caller.
   429 is waited out like any other; longer, the send fails with `RateLimited`.
 - **502 and 504** are retried once after 1 s.
 - **Calls that may be repeated** (the reaction routes, [reactions.md](reactions.md#retries),
-  and a message's edit and delete, [messages.md](messages.md#editing-and-deleting)) retry a 429
+  a message's edit and delete, [messages.md](messages.md#editing-and-deleting), and a channel's
+  pins list, a pin and an unpin, [messages.md](messages.md#pins)) retry a 429
   once instead of 3 times, and once more after a 502, a 504 or a connection that broke before an
   answer; every other request fails on a broken connection at once.
 - **A published message edited too often** (429, code 20022) answers at once with its wait and
@@ -80,7 +81,10 @@ Acks go through `AccountRest` like every other request, with pacing of their own
 
 - **Route keys.** `POST channels/{}/messages/{}/ack` is keyed by its channel, like a send, so
   each channel's acks have their own lane and bucket. `POST read-states/ack-bulk` names no
-  channel or guild and has one key for the account (top-level ID `0`).
+  channel or guild and has one key for the account (top-level ID `0`). The pins ack,
+  `POST channels/{}/pins/ack`, is keyed by its channel too and stays out of the queue below: it
+  never waits inside the request either, and has three tries of its own
+  ([messages.md](messages.md#the-ack)).
 - **One request at a time.** All acks, single and bulk, go out one after another, the earliest
   due first; never two in flight. Loads and sends have their own keys and don't wait for them.
 - **Acks never wait inside the request.** None of the waits and retries above applies to them:

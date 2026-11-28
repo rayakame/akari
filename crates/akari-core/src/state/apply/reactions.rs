@@ -244,6 +244,7 @@ impl State {
                     .filter(|known| known.id == id)
                     .cloned()
             })
+            .or_else(|| self.windows.pinned(channel, id))
             .and_then(|message| message.reactions.clone())
             .unwrap_or_else(|| NONE.clone())
     }

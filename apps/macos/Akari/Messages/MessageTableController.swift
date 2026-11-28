@@ -576,6 +576,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.openThreads(of: row.message.channelId)
             return
         }
+        if url.host() == "pins" {
+            actions?.togglePins(of: row.message.channelId)
+            return
+        }
         if url.host() == "masked" {
             let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
                 .first { $0.name == "url" }?.value

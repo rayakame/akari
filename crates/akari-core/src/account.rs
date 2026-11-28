@@ -27,6 +27,7 @@ use crate::state::{
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 pub use acks::MarkOutcome;
 use acks::{AckSender, Echo, Pace, Refusal};
+pub use pins::{PIN_LIMIT, PinError};
 pub use reactions::{REACTORS_PAGE, ReactionError, ReactionKind, ReactionLocation, ReactorsPage};
 
 const REFRESH_LIMIT: u8 = 100;
@@ -2344,6 +2345,7 @@ mod acks;
 mod deadlines;
 mod edits;
 mod expressions;
+mod pins;
 mod previews;
 mod reactions;
 mod scans;

@@ -14,6 +14,7 @@ enum TestHost {
 
     static func start() {
         NSApp.setActivationPolicy(.accessory)
+        drainEachEvent()
         guard !showsWindows else {
             return
         }
@@ -23,6 +24,20 @@ enum TestHost {
         ) { _ in
             MainActor.assumeIsolated { NSApp.deactivate() }
         }
+    }
+
+    // XCTest dispatches events with no pool while it waits: each event's window would live until the run ends.
+    private static func drainEachEvent() {
+        let selector = #selector(NSApplication.sendEvent(_:))
+        guard let method = class_getInstanceMethod(NSApplication.self, selector) else {
+            return
+        }
+        typealias Send = @convention(c) (NSApplication, Selector, NSEvent) -> Void
+        let send = unsafeBitCast(method_getImplementation(method), to: Send.self)
+        let drained: @convention(block) (NSApplication, NSEvent) -> Void = { app, event in
+            autoreleasepool { send(app, selector, event) }
+        }
+        method_setImplementation(method, imp_implementationWithBlock(drained))
     }
 
     /// Beyond every screen's frame. Windows placed from here keep their arrangement.

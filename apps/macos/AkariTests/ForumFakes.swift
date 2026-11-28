@@ -179,6 +179,8 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
     }
+    override func pinsUnread(channelId: ChannelId) -> Bool { false }
+
     override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
         var actions = testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
         actions.react = fakes.reacts

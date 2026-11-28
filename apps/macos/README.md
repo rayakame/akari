@@ -25,7 +25,10 @@ the header's Threads button and its popout, the "See all threads" modal, and the
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), the
 composer (a locked thread's banner), editing a message in its row and deleting one after the
-official question (`docs/ui/edit-delete.md`), avatars and icons in every place (`docs/ui/images.md`), and a
+official question (`docs/ui/edit-delete.md`), pinned messages (`PinsPopout.swift`: the header's
+pins button with its dot, the popout from the button, ⌘P and a pin line's link, its cards with
+Jump and ✕; Pin and Unpin with their questions; `docs/ui/pins.md`), avatars and icons in every
+place (`docs/ui/images.md`), and a
 message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
 embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
 (`EmbedView.swift`, `docs/ui/embeds.md`), and the media viewer (`Viewer/`, `docs/ui/viewer.md`).
@@ -145,9 +148,26 @@ Voice, notifications and settings come later.
   the editor has it (`EditModel.editorFocused`). A saved edit is dimmed until Discord takes it, a
   delete until it answers. "(edited)" carries the edit's date as its tooltip after the text, under a
   code block and after the accessories. Delete in the Shift-held bar and the menu asks
-  `DeleteMessageView` (a key panel over the dimmed window, `DeleteMessage.swift`, which stays while
-  another app is active) unless Shift is held; its message is a `MessagePreviewBox`, the non-interactive `MessagePreviewView` in the
-  official box, which the thread form shows selectable.
+  `MessageQuestionView` (a key panel over the dimmed window, `MessageQuestion.swift`, which stays
+  while another app is active) unless Shift is held; its message is a `MessagePreviewBox`, the
+  non-interactive `MessagePreviewView` in the official box, which the thread form shows
+  selectable. The view asks any `MessageQuestion`: Delete's, Pin's and Unpin's, each with its
+  words, its tip and its confirm button's color (`PanelButton`: the brand's, gray or red).
+- **Pins** (`docs/ui/pins.md`): `PinsButton` in `ChannelHeader`, after Threads, is selected while
+  the popout is open, carries the dot (`SessionModel.pinsUnread`) and is disabled behind the age
+  gate; View > Show Pinned Messages (⌘P, in place of File > Print, `PinsCommands`; disabled while
+  a question about a message waits) and a pin line's "pinned messages" (`akari://pins`) toggle it
+  too. `SessionView` shows `PinsPanel` in a
+  key `ChildWindows` panel under the button over a clear shield, as the Threads popout, framed by
+  `PinsLayout` from Discord's numbers; `PinsPopoutView` is the header and the list, the spinner,
+  the empty state with `PinsFooter`'s protip, or Akari's failed state. A `PinnedCard` holds a
+  `PinnedPreview` (the list's row in a non-interactive `MessagePreviewView`) and, while the
+  pointer is over it, Jump and `UnpinButton` (busy while its unpin runs), also the card's
+  VoiceOver actions; Shift at the click is read through `clickModifiers`. `ScrollEnd` asks for
+  the next page near the list's end. Pin and Unpin come from the bar and the menu through the
+  list's `MessageActionsModel`; their question is a `MessageQuestionView` over the popout, and
+  `ChildWindows` gives the key back to the popout when it goes (`keyPanelAbove`). `PinsRenders`
+  draws the popout, the questions, the button and the bar at 2x with `TEST_RUNNER_AKARI_RENDERS=1`.
 - **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale
   changes.
 - **Formatting** (`docs/ui/markdown.md`): `MessageText` builds a message's attributed string

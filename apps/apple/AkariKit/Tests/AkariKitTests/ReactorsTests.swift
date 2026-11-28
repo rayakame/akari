@@ -1000,6 +1000,7 @@ final class SessionReactionsTests {
 
         model.perform(.removeAllReactions, on: try row())
         #expect(session.messageConfirmation?.title == "Remove All Reactions")
+        #expect(session.messageConfirmation?.destructive == true)
         session.answerMessageConfirmation(false)
         #expect(session.messageConfirmation == nil)
 

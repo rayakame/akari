@@ -133,6 +133,7 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::PinsUnreadChanged { channel_id } => {
             format!("PinsUnreadChanged({})", channel_id.get())
         }
+        StoreEvent::PinsChanged { channel_id } => format!("PinsChanged({})", channel_id.get()),
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -961,6 +962,26 @@ fn load_page(
     events.iter().map(describe).collect()
 }
 
+fn pinned_only(state: &mut State, channel: u64, messages: &[Value]) {
+    let items: Vec<Value> = messages
+        .iter()
+        .map(|message| {
+            let mut message = message.clone();
+            message["pinned"] = true.into();
+            json!({"pinned_at": "2026-10-02T09:30:00+00:00", "message": message})
+        })
+        .collect();
+    let page = json!({"items": items, "has_more": false}).to_string();
+    let ask = state
+        .begin_pins(
+            Snowflake::new(channel),
+            crate::state::PinsLoad::First,
+            &mut Vec::new(),
+        )
+        .unwrap();
+    state.finish_pins(ask, serde_json::from_str(&page).unwrap(), &mut Vec::new());
+}
+
 fn dm_message(id: u64, channel: u64) -> Value {
     let mut message = message(id, channel);
     let fields = message.as_object_mut().unwrap();
@@ -1158,6 +1179,7 @@ mod expressions;
 mod forum;
 mod media;
 mod picker;
+mod pin_list;
 mod pins;
 mod reactions;
 mod read_states;

@@ -256,6 +256,29 @@ final class ReadingTests {
         session.close()
     }
 
+    // The pins popout and Pin's question are the user's doing, as opening a channel is.
+    @Test
+    func thePinsPopoutAndPinsQuestionEngage() throws {
+        let session = readingSession()
+        session.setWindowKey(false)
+        session.setWindowKey(true)
+        session.togglePins()
+        session.setWindowKey(true)
+        #expect(session.reading == [general], "the popout")
+
+        session.togglePins()
+        session.setWindowKey(false)
+        session.setWindowKey(true)
+        let list = try #require(session.messages)
+        list.apply(EventBatch([.messagesLoaded(channelId: general, first: id(1), last: id(2))]))
+        store.update { $0.allow(allowed(pin: true), message: 1, in: 11) }
+        session.messageActions(for: list) { _ in }.perform(.pin, on: try #require(list.rows.first))
+        session.setWindowKey(true)
+
+        #expect(session.reading == [general], "the question")
+        session.close()
+    }
+
     @Test
     func openingAChannelEngages() {
         let session = readingSession()

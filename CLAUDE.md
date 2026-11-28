@@ -74,7 +74,10 @@ up to what the host's font draws, the user's servers' emoji and whether and why 
 used in a channel, the user's own count of recently used reactions in the cache, the three quick
 reactions and search); the messages replies answer in a store of their
 own (loaded, deleted or not loaded, bounded per channel, kept current by edits and deletes);
-whether a channel has pins the user hasn't seen (the pins dot); and says what the user may do
+whether a channel has pins the user hasn't seen (the pins dot), its pinned messages in a list of
+their own (page by page by pin time, kept current on every copy of a message, shown but asked
+again after a new session), pins and unpins (an archived thread opened first, Discord's refusals
+told apart) and acks the pins the user saw; and says what the user may do
 with a message (`MessageActions`: reply, edit, delete, pin, react, mark unread, copy its link,
 create or view its thread, by the official client's rules);
 `akari_core::media` gets images: keys by Discord's
@@ -97,8 +100,10 @@ channel waits behind the age gate, with the user's agreement per server in the c
 a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send (`send --reply`
 answers a message) and tail messages with their reactions and what a reply answers, edit and
-delete a message, react, take a reaction back and list who reacted, list what the emoji picker offers in a channel or search it, show where a channel's unread state,
-mentions and pins dot come from, and get an image as the app would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+delete a message, react, take a reaction back and list who reacted, list a channel's pins, pin
+and unpin a message, list what the emoji picker offers in a channel or search it, show where a
+channel's unread state, mentions and pins dot come from, and get an image as the app would for
+a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
@@ -108,7 +113,8 @@ row's post count, the posts' new-message counts, what the user may post and crea
 message's thumbnail), editing and deleting a message (its edit and its dimmed delete on the
 record, Up arrow's pick), a message's reactions, reacting, a moderator's removals and who reacted,
 the emoji picker's reads, what a reply answers (its preview on one line, formatted), sending a
-reply, the pins dot, what the user may do with a message and marking unread from one, through
+reply, the pins dot, a channel's pins list, pinning, unpinning and acking pins, what the user may
+do with a message and marking unread from one, through
 UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, the composer with its pending reply
@@ -122,8 +128,10 @@ official client's order for the plain and the Shift-held bar and the menu's grou
 later features' places included, with Mark Unread moving the new messages line; a message's
 reactions as pills (plain and super reactions counted together), a click that adds or takes back,
 the quick reactions, a pill's tooltip names, the reactions window's emoji and users, the removals'
-question, a forum card's and post bar's reactions, and the emoji picker's sections, search,
-selection and pick), the message
+question, a forum card's and post bar's reactions, the emoji picker's sections, search,
+selection and pick, a channel's pins for the popout (page by page, the empty state, a failed first
+load told apart, the ack, the header button's dot) and Pin and Unpin with the official questions
+and alerts), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -184,6 +192,10 @@ place (the composer's box, Return saves, Escape cancels, the counter, the hint l
 row following its height with the reader's place kept), a saved edit and a delete are dimmed
 until Discord answers, "(edited)" has the edit's date as its tooltip, and Delete (the Shift-held
 bar, the menu) asks the official question with the message in its box unless Shift is held;
+the header's pins button with its dot, ⌘P and a pin line's "pinned messages" open the pins popout
+(the channel's pinned messages in cards with Jump, which Shift keeps open, and ✕, page by page,
+the official empty state and protip), and Pin and Unpin in the Shift-held bar and the menu ask the
+official questions unless Shift is held, with Discord's alerts;
 the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and

@@ -103,7 +103,7 @@ struct DeleteMessageTests {
     @Test
     func aTallMessageScrollsInsideTheBox() throws {
         let long = row(1, at: noon, content: String(repeating: "a long message that wraps ", count: 120))
-        let view = DeleteMessageView()
+        let view = MessageQuestionView()
         let question = question(long, tip: false)
         let height = view.height(for: question, width: 440, maxHeight: 400)
         view.show(question, images: nil, maxHeight: 400)
@@ -111,7 +111,7 @@ struct DeleteMessageTests {
 
         #expect(height <= 400)
         #expect(view.box.frame.height < MessagePreviewBox.height(of: long, width: 392))
-        #expect(view.box.frame.height >= DeleteLayout.minimumBox)
+        #expect(view.box.frame.height >= MessageQuestionLayout.minimumBox)
         let scroll = try #require(view.box.subviews.first as? NSScrollView)
         #expect(try #require(scroll.documentView).frame.height > scroll.contentSize.height)
         #expect(
@@ -122,7 +122,7 @@ struct DeleteMessageTests {
     @Test
     func theQuestionHasTheOfficialWordsAndTheTipOnlyFromTheMenu() throws {
         let message = row(1, at: noon, content: "goodbye")
-        let view = DeleteMessageView()
+        let view = MessageQuestionView()
         let withTip = view.height(for: question(message, tip: true), width: 440, maxHeight: 800)
         let without = view.height(for: question(message, tip: false), width: 440, maxHeight: 800)
         view.show(question(message, tip: true), images: nil, maxHeight: 800)
@@ -142,7 +142,7 @@ struct DeleteMessageTests {
         }
         #expect(weight(bold.location) > weight(0), "\"delete message\" in bold")
         #expect(without < withTip)
-        #expect([view.cancel.title, view.delete.title] == ["Cancel", "Delete"])
+        #expect([view.cancel.title, view.confirm.title] == ["Cancel", "Delete"])
         #expect(view.box.frame.minY == view.message.frame.maxY + 20)
         #expect(view.tip.frame.minY == view.box.frame.maxY + 20)
 
@@ -153,7 +153,7 @@ struct DeleteMessageTests {
     @Test
     func theButtonsAreTheOfficialModalsAndTheQuestionHasItsVoiceOverLabel() throws {
         let message = row(1, at: noon, content: "goodbye")
-        let view = DeleteMessageView()
+        let view = MessageQuestionView()
         let height = view.height(for: question(message, tip: false), width: 440, maxHeight: 800)
         view.show(question(message, tip: false), images: nil, maxHeight: 800)
         _ = shown(view, height: height)
@@ -167,48 +167,49 @@ struct DeleteMessageTests {
             return cg
         }
 
-        #expect(fill(view.delete) == resolved(Palette.danger, in: view.delete))
+        #expect(fill(view.confirm) == resolved(Palette.danger, in: view.confirm))
         #expect(fill(view.cancel) == resolved(Palette.backgroundModNormal, in: view.cancel))
-        let title = view.delete.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+        let title = view.confirm.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil)
         #expect(title as? NSColor == .white)
-        #expect(view.cancel.frame.width >= 100 && view.delete.frame.width >= 100)
-        #expect(view.cancel.frame.maxX == view.delete.frame.minX - 12)
+        #expect(view.cancel.frame.width >= 100 && view.confirm.frame.width >= 100)
+        #expect(view.cancel.frame.maxX == view.confirm.frame.minX - 12)
         #expect(view.accessibilityLabel() == "Delete Message")
 
         let event = try #require(NSEvent.mouseEvent(
             with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
             context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
-        view.delete.mouseEntered(with: event)
-        #expect(fill(view.delete) == resolved(Palette.dangerHover, in: view.delete))
-        view.delete.mouseExited(with: event)
-        #expect(fill(view.delete) == resolved(Palette.danger, in: view.delete))
+        view.confirm.mouseEntered(with: event)
+        #expect(fill(view.confirm) == resolved(Palette.dangerHover, in: view.confirm))
+        view.confirm.mouseExited(with: event)
+        #expect(fill(view.confirm) == resolved(Palette.danger, in: view.confirm))
     }
 
     @Test
     func aTallMessagesQuestionKeepsToTheWindowWithTheTipAndShowsAtLeast80OfIt() throws {
         let long = row(1, at: noon, content: String(repeating: "a long message that wraps ", count: 120))
-        let view = DeleteMessageView()
+        let view = MessageQuestionView()
 
         #expect(view.height(for: question(long, tip: true), width: 440, maxHeight: 400) <= 400)
-        #expect(DeleteLayout.frame(for: question(long, tip: true), in: CGSize(width: 1200, height: 600)).height <= 520)
+        #expect(MessageQuestionLayout.frame(for: question(long, tip: true), in: CGSize(width: 1200, height: 600)).height <= 520)
         view.show(question(long, tip: false), images: nil, maxHeight: 200)
         _ = shown(view, height: view.height(for: question(long, tip: false), width: 440, maxHeight: 200))
-        #expect(view.box.frame.height == DeleteLayout.minimumBox)
+        #expect(view.box.frame.height == MessageQuestionLayout.minimumBox)
     }
 
     @Test
     func deleteAnswersYesReturnDeletesAndCancelAndEscapeDont() throws {
-        let view = DeleteMessageView()
+        let view = MessageQuestionView()
+        view.show(question(row(1, at: noon, content: "goodbye"), tip: false), images: nil, maxHeight: 800)
         var answers: [Bool] = []
         view.answer = { answers.append($0) }
 
-        view.delete.performClick(nil)
+        view.confirm.performClick(nil)
         view.cancel.performClick(nil)
 
         #expect(answers == [true, false])
-        #expect(view.delete.keyEquivalent == "\r")
+        #expect(view.confirm.keyEquivalent == "\r")
         #expect(view.cancel.keyEquivalent == "\u{1b}")
-        #expect(view.delete.hasDestructiveAction)
+        #expect(view.confirm.hasDestructiveAction)
     }
 
     // Hosted as the session hosts it: SwiftUI in a key panel over the dimmed window.
@@ -221,11 +222,11 @@ struct DeleteMessageTests {
         var answers: [Bool] = []
         windows.onClose = { answers.append(false) }
         let question = question(row(1, at: noon, content: "goodbye"), tip: true)
-        let frame = DeleteLayout.frame(for: question, in: window.frame.size)
+        let frame = MessageQuestionLayout.frame(for: question, in: window.frame.size)
             .offsetBy(dx: window.frame.minX, dy: window.frame.minY)
         windows.show(
             AnyView(
-                DeleteMessagePanel(question: question, size: frame.size, maxHeight: 520) {
+                MessageQuestionPanel(question: question, size: frame.size, maxHeight: 520) {
                     answers.append($0)
                 }), at: frame, in: window, dimmed: true)
         let panel = try #require(windows.panel)
@@ -254,13 +255,13 @@ struct DeleteMessageTests {
     func thePanelIsCenteredAndAsTallAsItsContent() {
         let question = question(row(1, at: noon, content: "goodbye"), tip: true)
 
-        let frame = DeleteLayout.frame(for: question, in: CGSize(width: 1200, height: 800))
+        let frame = MessageQuestionLayout.frame(for: question, in: CGSize(width: 1200, height: 800))
 
         #expect(frame.width == 440)
         #expect(frame.midX == 600)
         #expect(abs(frame.midY - 400) <= 0.5)
-        #expect(frame.height == DeleteMessageView.sizing.height(for: question, width: 440, maxHeight: 720))
-        #expect(DeleteLayout.frame(for: question, in: CGSize(width: 400, height: 800)).width == 320)
+        #expect(frame.height == MessageQuestionView.sizing.height(for: question, width: 440, maxHeight: 720))
+        #expect(MessageQuestionLayout.frame(for: question, in: CGSize(width: 400, height: 800)).width == 320)
     }
 
     @Test

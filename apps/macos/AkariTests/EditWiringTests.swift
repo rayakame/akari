@@ -195,7 +195,7 @@ struct DeleteQuestionWindowTests {
         let (row, other) = try rows()
         let panel = try await ask(row)
         let content = try #require(panel.contentView)
-        let question = try #require(MessageMenuAreaTests.views(DeleteMessageView.self, in: content).first)
+        let question = try #require(MessageMenuAreaTests.views(MessageQuestionView.self, in: content).first)
 
         question.cancel.performClick(nil)
 

@@ -12,9 +12,9 @@ use crate::names::Names;
 use crate::records::{
     AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
     ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageActions,
-    MessageReactions, MessageWindow, Nitro, PostCreation, PostNewCount, PostPreview, Reaction,
-    ReadState, RepliedTo, ReplyTarget, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
-    ThreadCreation, User,
+    MessageReactions, MessageWindow, Nitro, PinnedMessage, PinsPage, PostCreation, PostNewCount,
+    PostPreview, Reaction, ReadState, RepliedTo, ReplyTarget, ServerListItem, Slowmode,
+    StarterMessage, ThreadBrowser, ThreadCreation, User, system_time,
 };
 use crate::runtime::run;
 use crate::subscription::StoreSubscription;
@@ -446,8 +446,9 @@ impl Store {
 
     /// What the user may do with the message, by the official client's rules: its type, flags
     /// and delivery, the user's permissions and timeout, a thread's archived and locked state.
-    /// Nothing for a message the store doesn't have. Read it again when the message, its channel
-    /// or the user's permissions change.
+    /// Nothing for a message the store doesn't have; a message only `pins` has answers there, and
+    /// one it has is pinned whatever an older copy says. Read it again when the message, its
+    /// channel or the user's permissions change.
     /// A viewed thread's starter row (the thread's ID and the row's) answers for the message it
     /// shows, in the parent channel: requests take the IDs of `starter_message`'s message.
     /// Its `mark_unread` alone is the thread's, and `Account.mark_unread` takes the row's IDs.
@@ -568,6 +569,26 @@ impl Store {
     /// `GuildSettingsChanged` or `ChannelUpdated`.
     pub fn pins_unread(&self, channel_id: ChannelId) -> bool {
         self.core.pins_unread(channel_id)
+    }
+
+    /// The channel's pinned messages, the newest pin first; read again on `PinsChanged`. A
+    /// message's actions and reactions are read by its own IDs, as a list's are.
+    pub fn pins(&self, channel_id: ChannelId) -> PinsPage {
+        let page = self.core.pins(channel_id);
+        let names = Names::new(&self.core, channel_id);
+        let mut misses = 0;
+        PinsPage {
+            items: page
+                .items
+                .iter()
+                .map(|item| PinnedMessage {
+                    message: self.message(&item.message, &names, &mut misses),
+                    pinned_at: system_time(item.pinned_at),
+                })
+                .collect(),
+            has_more: page.has_more,
+            state: page.state.into(),
+        }
     }
 
     /// Whether `Account.fetch_thread` or `check_thread` found this session that the user can't

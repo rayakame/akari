@@ -212,8 +212,10 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
             switch part {
             case .text(let text):
                 line.append(CellText.body(text, color: gray))
-            case .actor(let name), .strong(let name), .pins(let name):
+            case .actor(let name), .strong(let name):
                 line.append(Self.name(name, link: nil))
+            case .pins(let name):
+                line.append(Self.name(name, link: "akari://pins"))
             case .threads(let name):
                 line.append(Self.name(name, link: "akari://threads"))
             case .thread(let name, let id):
